@@ -1,5 +1,16 @@
 if(CONFIG_SMART_HOME_DEMO)
 
+  if(CONFIG_SMART_HOME_DEMO_STATIC_LVGL_HOME)
+    nuttx_add_application(
+      NAME smart_home
+      SRCS
+        src/app/smart_home_static_main.c
+        src/ui/lvgl/smart_home_lvgl_static.c
+      STACKSIZE ${CONFIG_SMART_HOME_DEMO_STACKSIZE}
+      PRIORITY ${CONFIG_SMART_HOME_DEMO_PRIORITY}
+    )
+  else()
+
   set(SMART_HOME_SRCS
     src/app/smart_home_main.c
     src/smart_home_cpu_debug.c
@@ -77,5 +88,7 @@ if(CONFIG_SMART_HOME_DEMO)
   # This is handled by the platform's ROMFS/data-partition build step.
   # See res/icons/ for the source PNG files (25 icons, ~140 KB total).
   # Runtime path: CONFIG_SMART_HOME_DEMO_UI_LVGL_ICONS
+
+  endif()
 
 endif()

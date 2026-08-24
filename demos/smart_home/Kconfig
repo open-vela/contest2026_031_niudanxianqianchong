@@ -1,10 +1,10 @@
 config SMART_HOME_DEMO
     bool "Smart home demo"
-    select CAGENT
-    select CAGENT_PROFILE_REACT_DEFAULTS
-    select CAGENT_MODEL_OPENAI
-    select CAGENT_RUNTIME_OPENVELA_DEFAULTS
-    select CAGENT_RUNTIME_OPENVELA_TLS
+    select CAGENT if !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    select CAGENT_PROFILE_REACT_DEFAULTS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    select CAGENT_MODEL_OPENAI if !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    select CAGENT_RUNTIME_OPENVELA_DEFAULTS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    select CAGENT_RUNTIME_OPENVELA_TLS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
     default n
     help
       Smart home cAGENT demo skeleton with separated agent, tool, skill,
@@ -264,15 +264,36 @@ config SMART_HOME_DEMO_UI_CONSOLE
 config SMART_HOME_DEMO_UI_LVGL
     bool "LVGL UI"
     depends on GRAPHICS_LVGL
-    depends on LV_USE_LIBPNG || LV_USE_LODEPNG
     help
-      Build the LVGL UI for panel/chat/settings screens. Chat requests are
-      sent to cAGENT from a worker thread and results are posted back to the
-      LVGL thread with lv_async_call().
+      Build the LVGL UI for panel/chat/settings screens. PNG decoders are
+      optional: the UI uses compiled icon fonts when external icon resources
+      are unavailable. Chat requests are sent to cAGENT from a worker thread
+      and results are posted back to the LVGL thread with lv_async_call().
 
 endchoice
 
 if SMART_HOME_DEMO_UI_LVGL
+
+config SMART_HOME_DEMO_STATIC_LVGL_HOME
+    bool "P4X static LVGL home screen"
+    depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+    default n
+    help
+      Build only the local, static Smart Home home screen for the
+      ESP32-P4X-Function-EV-Board. This P2 bring-up profile uses /dev/fb0
+      and LVGL but intentionally does not initialize cAGENT, networking,
+      model credentials, MCP, Node gateway, mobile App bridge, or touch
+      input. It keeps the first visual integration test isolated from all
+      cloud and peripheral dependencies.
+
+config SMART_HOME_DEMO_LVGL_FB_PATH
+    string "LVGL framebuffer device path"
+    default "/dev/lcd0" if LV_USE_NUTTX_LCD
+    default "/dev/fb0"
+    help
+      Framebuffer or LCD device opened by the LVGL NuttX port. The P4X
+      framebuffer profile uses /dev/fb0; existing LCD-based targets retain
+      /dev/lcd0 when LV_USE_NUTTX_LCD is enabled.
 
 config SMART_HOME_DEMO_UI_LVGL_ICONS
     string "LVGL UI icons directory"

@@ -3,6 +3,10 @@ include $(APPDIR)/Make.defs
 MODULE = y
 
 ifneq ($(CONFIG_SMART_HOME_DEMO),)
+  ifneq ($(CONFIG_SMART_HOME_DEMO_STATIC_LVGL_HOME),)
+  MAINSRC   += src/app/smart_home_static_main.c
+  CSRCS     += src/ui/lvgl/smart_home_lvgl_static.c
+  else
   MAINSRC   += src/app/smart_home_main.c
   CSRCS     += src/smart_home_cpu_debug.c
   CSRCS     += src/smart_home_memory.c
@@ -49,6 +53,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/icons/sun_20.c
     CSRCS   += src/ui/lvgl/icons/temperature_20.c
     CSRCS   += src/ui/lvgl/icons/tool_20.c
+  endif
   endif
   PROGNAME  += smart_home
   PRIORITY  += $(CONFIG_SMART_HOME_DEMO_PRIORITY)

@@ -179,9 +179,7 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
     smart_home_lvgl_style_init();
     lv_nuttx_dsc_init(&info);
 
-#ifdef CONFIG_LV_USE_NUTTX_LCD
-    info.fb_path = "/dev/lcd0";
-#endif
+    info.fb_path = CONFIG_SMART_HOME_DEMO_LVGL_FB_PATH;
 
 #ifdef CONFIG_INPUT_TOUCHSCREEN
     info.input_path = SMART_HOME_TOUCH_PATH;
