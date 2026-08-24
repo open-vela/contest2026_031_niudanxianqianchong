@@ -19,7 +19,7 @@
 | EK79007 DBI 命令通路 | 已通过 | 已对齐 ESP-IDF 的 Command ACK 与 LP 传输配置。 |
 | Host 内建色条 | 已通过 | `dsi_probe pattern 10` 真机可见。 |
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
-| NuttX framebuffer 设备 | 未实现 | 当前没有 `/dev/fb0` 或 `/dev/lcd0`。 |
+| NuttX framebuffer 设备 | 已实现，待真机验收 | `fb_probe` 配置会在 board late-init 注册 RGB565 `/dev/fb0`。 |
 | LVGL Smart Home 页面 | 未上 P4X | `smart_home_lvgl.c` 目前仅在 `LV_USE_NUTTX_LCD` 时指定 `/dev/lcd0`。 |
 | GT911 触摸 | 未上 P4X | 不作为首屏显示的前置条件。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
@@ -108,7 +108,7 @@ nsh> dsi_probe video 10
 
 **失败处置**：停止 Smart Home 集成，先按 DSI 排障闭环文档恢复显示基线。
 
-### P1：注册 P4X `/dev/fb0`
+### P1：注册 P4X `/dev/fb0`（已实现，待真机验收）
 
 **目的**：将已验证的 DPI Panel 扫描缓冲区以标准 NuttX framebuffer 接口暴露，使
 LVGL 无需了解 DSI、Bridge 或 GDMA。
@@ -117,11 +117,12 @@ LVGL 无需了解 DSI、Bridge 或 GDMA。
 
 | 文件 | 改动 |
 | --- | --- |
-| `board/.../src/esp32p4_fb.c`（新增） | 实现单平面 `fb_vtable_s`：`getvideoinfo`、`getplaneinfo`、`updatearea`、可选 `waitforvsync`；将 updatearea 映射为 PSRAM cache clean。 |
-| `board/.../src/esp32p4_lcd.c` | 复用已验证的 Host、reset、EK79007 DPI Panel 和持续 scanout；提供 framebuffer 创建、启动、关闭接口，不重复创建第二个 GDMA 管线。 |
-| `board/.../include/board.h` | 导出 `board_lcd_fb_initialize()` / `board_lcd_fb_uninitialize()` 等板级接口。 |
+| `board/.../src/esp32p4_fb.c`（新增） | 实现单平面 `fb_vtable_s`：`getvideoinfo`、`getplaneinfo`、`updatearea`；将 `FBIO_UPDATE` 映射为 PSRAM 全帧 cache clean。 |
+| `board/.../src/esp32p4_lcd.c` | 不改动已验收的 Host、reset、DPI timing 和持续 scanout实现；新 framebuffer 复用其公开板级接口，不创建第二个 GDMA 管线。 |
+| `board/.../include/board.h` | 导出 `board_mipi_dsi_fb_initialize()` 板级装配接口。 |
 | `board/.../src/Make.defs`、`CMakeLists.txt` | 条件编译 framebuffer 装配文件。 |
-| P4X 芯片 Kconfig / board Kconfig | 增加明确的 framebuffer 开关及对 `ESPRESSIF_MIPI_DSI_VIDEO`、`DRIVERS_VIDEO` 的依赖。 |
+| `board/.../Kconfig` | 新增 `CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER`，选择 DSI video/DMA/DPI 和 NuttX framebuffer；与 `dsi_probe` 互斥。 |
+| `board/.../configs/fb_probe/defconfig`（新增） | 独立 P1 固件：启用 `BOARD_LATE_INITIALIZE` 与标准 `CONFIG_EXAMPLES_FB`，不编入 `dsi_probe`。 |
 
 **实现约束**：
 
@@ -132,17 +133,19 @@ LVGL 无需了解 DSI、Bridge 或 GDMA。
 - 只注册一个 display、一个 RGB565 plane、一个持续扫描缓冲区；
 - `dsi_probe` 与 `/dev/fb0` 不能同时占用同一 Host，测试固件中只选择其一。
 
-**新增最小验证程序**：`app/fb_probe/` 或 `dsi_probe fb` 子命令，依次填充红、绿、蓝、
-白、黑全屏并调用 `FBIO_UPDATE`。
+**最小验证程序**：直接复用 NuttX 标准 `apps/examples/fb`；它会查询
+`FBIOGET_VIDEOINFO` / `FBIOGET_PLANEINFO`、绘制彩色矩形，并在每一步调用
+`FBIO_UPDATE`。
 
 **通过条件**：
 
 ```text
 nsh> ls /dev/fb0
-nsh> fb_probe
+nsh> fb
 ```
 
-屏幕按预期切换颜色；反复启动、退出 10 次无黑屏、重启、DMA fault 或内存泄漏。
+串口应显示 `1024x600`、`RGB565`、`stride=2048`、`fblen=1228800`；屏幕随 `fb`
+测试逐步绘制彩色矩形。反复执行 10 次，无黑屏、重启、DMA fault 或内存泄漏。
 
 ### P2：LVGL 静态 Smart Home 首页
 

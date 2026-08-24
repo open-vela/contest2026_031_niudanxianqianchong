@@ -169,6 +169,21 @@ int board_mipi_dsi_backlight_set(bool enable);
 
 #endif /* CONFIG_ESPRESSIF_MIPI_DSI_VIDEO */
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER
+
+/****************************************************************************
+ * Name: board_mipi_dsi_fb_initialize
+ *
+ * Description:
+ *   Initialize the EK79007 RGB565 scanout path and register its persistent
+ *   P4 DMA-capable PSRAM buffer as /dev/fb0.
+ *
+ ****************************************************************************/
+
+int board_mipi_dsi_fb_initialize(int display);
+
+#endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER */
+
 /****************************************************************************
  * Name: board_mipi_dsi_shutdown
  *

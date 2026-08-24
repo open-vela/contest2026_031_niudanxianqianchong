@@ -9,4 +9,24 @@ config ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
 	bool
 	default y
 
+config ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER
+	bool "Register the P4X MIPI-DSI framebuffer"
+	depends on ESPRESSIF_SPIRAM_USER_HEAP
+	depends on !LVX_USE_DEMO_CONTEST2026_031_DSI_PROBE
+	select ESPRESSIF_MIPI_DSI
+	select ESPRESSIF_MIPI_DSI_VIDEO
+	select ESPRESSIF_MIPI_DSI_VIDEO_DMA
+	select ESPRESSIF_MIPI_DSI_DPI_PANEL
+	select VIDEO_FB
+	select FB_UPDATE
+	default n
+	help
+		Initialize the EK79007 1024x600 MIPI-DSI panel during board
+		bring-up and expose its single RGB565 PSRAM scanout buffer as
+		/dev/fb0.  FBIO_UPDATE performs the cache clean required before
+		GDMA reads CPU-rendered pixels.
+
+		This is mutually exclusive with the staged dsi_probe demo because
+		both own the one P4 DSI Host and EK79007 panel lifecycle.
+
 endif # ARCH_BOARD_CUSTOM

@@ -36,6 +36,8 @@
 
 #include <nuttx/fs/fs.h>
 
+#include <arch/board/board.h>
+
 #include "esp_board_ledc.h"
 #include "esp_board_spiflash.h"
 #include "esp_board_i2c.h"
@@ -511,6 +513,15 @@ int esp_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: board_emac_init failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER
+  ret = board_mipi_dsi_fb_initialize(0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: P4X MIPI-DSI framebuffer init failed: %d\n",
+             ret);
     }
 #endif
 

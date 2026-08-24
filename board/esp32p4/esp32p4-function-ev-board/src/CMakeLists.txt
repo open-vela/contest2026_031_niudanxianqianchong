@@ -44,6 +44,11 @@ if(CONFIG_ESPRESSIF_MIPI_DSI)
   list(APPEND SRCS esp32p4_lcd.c)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER)
+  list(APPEND SRCS esp32p4_fb.c ${CMAKE_SOURCE_DIR}/drivers/lcd/ek79007.c)
+  target_include_directories(board PRIVATE ${CMAKE_SOURCE_DIR}/drivers/lcd)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################
