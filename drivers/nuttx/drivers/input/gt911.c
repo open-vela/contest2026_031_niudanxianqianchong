@@ -19,6 +19,12 @@
 #include <errno.h>
 #include <string.h>
 
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+#  include <stdio.h>
+#endif
+
+#include <debug.h>
+
 #include <nuttx/clock.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/input/touchscreen.h>
@@ -37,7 +43,11 @@
 
 #define GT911_REG_PRODUCT_ID          0x8140
 #define GT911_REG_COORD_STATUS         0x814e
-#define GT911_REG_POINT1               0x8150
+/* 0x814e is the coordinate status byte.  The first contact record starts
+ * immediately after it at 0x814f: track ID, X, Y, size, and reserved byte.
+ */
+
+#define GT911_REG_POINT1               0x814f
 
 #define GT911_STATUS_READY             (1 << 7)
 #define GT911_STATUS_TOUCH_MASK        0x0f
@@ -46,6 +56,10 @@
 
 #define GT911_POINT_BYTES              8
 #define GT911_MAX_DATA_BYTES           (GT911_MAX_POINTS * GT911_POINT_BYTES)
+
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+#  define GT911_DIAGNOSTIC_INTERVAL_SCANS  50
+#endif
 
 /****************************************************************************
  * Private Types
@@ -75,6 +89,23 @@ struct gt911_dev_s
   uint8_t max_points;
   bool polling;
   struct gt911_contact_s contacts[GT911_TRACK_ID_COUNT];
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  uint32_t diagnostic_scans;
+  uint32_t diagnostic_queued;
+  uint32_t diagnostic_queue_errors;
+  uint32_t diagnostic_ready;
+  uint32_t diagnostic_frames;
+  uint32_t diagnostic_i2c_errors;
+  uint32_t diagnostic_last_report_scan;
+  int diagnostic_last_error;
+  uint8_t diagnostic_last_status;
+  uint8_t diagnostic_last_points;
+  uint8_t diagnostic_last_frame_status;
+  uint8_t diagnostic_last_frame_len;
+  uint8_t diagnostic_last_frame[GT911_MAX_DATA_BYTES];
+  uint32_t diagnostic_last_ack_report_scan;
+  bool diagnostic_last_frame_valid;
+#endif
   struct touch_sample_s sample[0];
 };
 
@@ -84,6 +115,17 @@ struct gt911_dev_s
 
 static void gt911_worker(FAR void *arg);
 static void gt911_poll_timeout(wdparm_t arg);
+
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+static void gt911_diagnostic_report(FAR struct gt911_dev_s *priv);
+static void gt911_diagnostic_frame(FAR struct gt911_dev_s *priv,
+                                   uint8_t status,
+                                   FAR const uint8_t *data,
+                                   uint8_t data_len,
+                                   int clear_ret,
+                                   int readback_ret,
+                                   uint8_t status_after_clear);
+#endif
 
 /****************************************************************************
  * Private Functions
@@ -161,6 +203,100 @@ static int gt911_clear_status(FAR struct gt911_dev_s *priv)
                          sizeof(status));
 }
 
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+/****************************************************************************
+ * Name: gt911_diagnostic_report
+ *
+ * Description:
+ *   Emit a rate-limited polling summary directly to the serial console.
+ *   This deliberately uses printf rather than syslog so board bring-up does
+ *   not depend on a RAM log device being configured.
+ ****************************************************************************/
+
+static void gt911_diagnostic_report(FAR struct gt911_dev_s *priv)
+{
+  if (priv->diagnostic_scans - priv->diagnostic_last_report_scan <
+      GT911_DIAGNOSTIC_INTERVAL_SCANS)
+    {
+      return;
+    }
+
+  printf("gt911: scans=%lu queued=%lu queue_err=%lu ready=%lu "
+         "frames=%lu i2c_err=%lu status=0x%02x points=%u last_err=%d\n",
+         (unsigned long)priv->diagnostic_scans,
+         (unsigned long)priv->diagnostic_queued,
+         (unsigned long)priv->diagnostic_queue_errors,
+         (unsigned long)priv->diagnostic_ready,
+         (unsigned long)priv->diagnostic_frames,
+         (unsigned long)priv->diagnostic_i2c_errors,
+         priv->diagnostic_last_status,
+         priv->diagnostic_last_points,
+         priv->diagnostic_last_error);
+  priv->diagnostic_last_report_scan = priv->diagnostic_scans;
+}
+
+/****************************************************************************
+ * Name: gt911_diagnostic_frame
+ *
+ * Description:
+ *   Report changed controller frames and rate-limit acknowledgement
+ *   failures.
+ *   A successful acknowledgement must clear bit 7 in register 0x814e.
+ ****************************************************************************/
+
+static void gt911_diagnostic_frame(FAR struct gt911_dev_s *priv,
+                                   uint8_t status,
+                                   FAR const uint8_t *data,
+                                   uint8_t data_len,
+                                   int clear_ret,
+                                   int readback_ret,
+                                   uint8_t status_after_clear)
+{
+  bool ack_failed;
+  bool changed;
+  bool report_ack;
+  uint8_t i;
+
+  changed = !priv->diagnostic_last_frame_valid ||
+            priv->diagnostic_last_frame_status != status ||
+            priv->diagnostic_last_frame_len != data_len ||
+            (data_len > 0 &&
+             memcmp(priv->diagnostic_last_frame, data, data_len) != 0);
+  ack_failed = clear_ret < 0 || readback_ret < 0 ||
+               (status_after_clear & GT911_STATUS_READY) != 0;
+  report_ack = ack_failed &&
+               priv->diagnostic_scans -
+               priv->diagnostic_last_ack_report_scan >=
+               GT911_DIAGNOSTIC_INTERVAL_SCANS;
+
+  if (changed || report_ack)
+    {
+      printf("gt911: frame before=0x%02x raw=", status);
+      for (i = 0; i < data_len; i++)
+        {
+          printf("%s%02x", i == 0 ? "" : " ", data[i]);
+        }
+
+      printf(" clear_ret=%d readback_ret=%d after=0x%02x\n",
+             clear_ret, readback_ret, status_after_clear);
+    }
+
+  if (report_ack)
+    {
+      priv->diagnostic_last_ack_report_scan = priv->diagnostic_scans;
+    }
+
+  priv->diagnostic_last_frame_status = status;
+  priv->diagnostic_last_frame_len = data_len;
+  if (data_len > 0)
+    {
+      memcpy(priv->diagnostic_last_frame, data, data_len);
+    }
+
+  priv->diagnostic_last_frame_valid = true;
+}
+#endif
+
 /****************************************************************************
  * Name: gt911_emit_releases
  ****************************************************************************/
@@ -210,11 +346,12 @@ static int gt911_decode_points(FAR struct gt911_dev_s *priv,
                                FAR const uint8_t *data, uint8_t touch_count)
 {
   FAR struct touch_sample_s *sample = priv->sample;
-  bool seen[GT911_TRACK_ID_COUNT] = {false};
+  bool seen[GT911_TRACK_ID_COUNT];
   uint8_t point_count = 0;
   uint8_t i;
 
   memset(sample, 0, SIZEOF_TOUCH_SAMPLE_S(priv->max_points));
+  memset(seen, 0, sizeof(seen));
 
   for (i = 0; i < touch_count; i++)
     {
@@ -270,14 +407,32 @@ static int gt911_process(FAR struct gt911_dev_s *priv)
   uint8_t data[GT911_MAX_DATA_BYTES];
   uint8_t status;
   uint8_t touch_count;
+  uint8_t data_len = 0;
+  int clear_ret;
   int ret;
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  uint8_t status_after_clear = 0xff;
+  int readback_ret = -ENODATA;
+#endif
+
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  priv->diagnostic_scans++;
+#endif
 
   ret = gt911_i2c_read(priv, GT911_REG_COORD_STATUS, &status,
                        sizeof(status));
   if (ret < 0)
     {
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+      priv->diagnostic_i2c_errors++;
+      priv->diagnostic_last_error = ret;
+#endif
       return ret;
     }
+
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  priv->diagnostic_last_status = status;
+#endif
 
   if ((status & GT911_STATUS_READY) == 0)
     {
@@ -285,33 +440,90 @@ static int gt911_process(FAR struct gt911_dev_s *priv)
     }
 
   touch_count = status & GT911_STATUS_TOUCH_MASK;
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  priv->diagnostic_ready++;
+  priv->diagnostic_last_points = touch_count;
+#endif
+
   if (touch_count > priv->max_points)
     {
       ret = -EPROTO;
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+      priv->diagnostic_last_error = ret;
+#endif
       goto clear_status;
     }
+
+  data_len = touch_count * GT911_POINT_BYTES;
 
   if (touch_count > 0)
     {
       ret = gt911_i2c_read(priv, GT911_REG_POINT1, data,
-                           touch_count * GT911_POINT_BYTES);
+                           data_len);
       if (ret < 0)
         {
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+          priv->diagnostic_i2c_errors++;
+          priv->diagnostic_last_error = ret;
+#endif
           return ret;
         }
     }
 
-  ret = gt911_decode_points(priv, data, touch_count);
+  ret = OK;
 
 clear_status:
-  {
-    int clear_ret = gt911_clear_status(priv);
+  clear_ret = gt911_clear_status(priv);
 
-    if (ret >= 0 && clear_ret < 0)
-      {
-        ret = clear_ret;
-      }
-  }
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  if (clear_ret < 0)
+    {
+      priv->diagnostic_i2c_errors++;
+      priv->diagnostic_last_error = clear_ret;
+    }
+  else
+    {
+      readback_ret = gt911_i2c_read(priv, GT911_REG_COORD_STATUS,
+                                    &status_after_clear,
+                                    sizeof(status_after_clear));
+      if (readback_ret < 0)
+        {
+          priv->diagnostic_i2c_errors++;
+          priv->diagnostic_last_error = readback_ret;
+        }
+    }
+
+  gt911_diagnostic_frame(priv, status, data, data_len, clear_ret,
+                         readback_ret, status_after_clear);
+#endif
+
+  if (ret >= 0 && clear_ret < 0)
+    {
+      ret = clear_ret;
+    }
+
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  /* Acknowledge the controller before publishing the frame.  This follows
+   * the BOX-3 and Espressif GT911 transaction order and prevents upper-half
+   * event handling from delaying the 0x814e status clear.
+   */
+
+  ret = gt911_decode_points(priv, data, touch_count);
+
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  if (ret >= 0 && touch_count > 0)
+    {
+      priv->diagnostic_frames++;
+    }
+  else if (ret < 0)
+    {
+      priv->diagnostic_last_error = ret;
+    }
+#endif
 
   return ret;
 }
@@ -343,8 +555,18 @@ static void gt911_poll_timeout(wdparm_t arg)
   ret = work_queue(LPWORK, &priv->work, gt911_worker, priv, 0);
   if (ret < 0)
     {
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+      priv->diagnostic_queue_errors++;
+      priv->diagnostic_last_error = ret;
+#endif
       gt911_schedule_poll(priv);
     }
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+  else
+    {
+      priv->diagnostic_queued++;
+    }
+#endif
 }
 
 /****************************************************************************
@@ -385,8 +607,20 @@ static void gt911_worker(FAR void *arg)
   ret = nxmutex_lock(&priv->lock);
   if (ret >= 0)
     {
-      gt911_process(priv);
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+      ret = gt911_process(priv);
       nxmutex_unlock(&priv->lock);
+
+      if (ret < 0)
+        {
+          priv->diagnostic_last_error = ret;
+        }
+
+      gt911_diagnostic_report(priv);
+#else
+      (void)gt911_process(priv);
+      nxmutex_unlock(&priv->lock);
+#endif
     }
 
   if (priv->polling)
@@ -406,9 +640,18 @@ static void gt911_worker(FAR void *arg)
 static int gt911_probe(FAR struct gt911_dev_s *priv)
 {
   uint8_t product_id[4];
+  int ret;
 
-  return gt911_i2c_read(priv, GT911_REG_PRODUCT_ID, product_id,
-                        sizeof(product_id));
+  ret = gt911_i2c_read(priv, GT911_REG_PRODUCT_ID, product_id,
+                       sizeof(product_id));
+  if (ret >= 0)
+    {
+      sninfo("GT911 product id: %02x %02x %02x %02x (%.*s)\n",
+             product_id[0], product_id[1], product_id[2], product_id[3],
+             (int)sizeof(product_id), (FAR const char *)product_id);
+    }
+
+  return ret;
 }
 
 /****************************************************************************
@@ -497,6 +740,10 @@ int gt911_register(FAR const char *devpath,
           goto err_unregister_touch;
         }
 
+#ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
+      printf("gt911: diagnostics enabled poll_ms=%u address=0x%02x\n",
+             priv->poll_interval_ms, priv->address);
+#endif
       return OK;
     }
 

@@ -1,0 +1,16 @@
+#
+# ESP32-P4X GT911 touchscreen probe.
+#
+
+config LVX_USE_DEMO_CONTEST2026_031_GT911_PROBE
+	bool "ESP32-P4X GT911 touchscreen probe"
+	depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+	select ESPRESSIF_I2C0
+	select ESP32P4_FUNCTION_EV_BOARD_GT911
+	default n
+	---help---
+		Build gt911_probe, a raw-event validation program for the P4X LCD
+		adapter's Goodix GT911 capacitive touch controller.  The board
+		registers /dev/input0 using I2C0 polling; this command reads and
+		prints TOUCH_DOWN, TOUCH_MOVE and TOUCH_UP events before LVGL is
+		connected to the device.

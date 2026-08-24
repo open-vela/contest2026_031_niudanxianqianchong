@@ -49,6 +49,13 @@ if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER)
   target_include_directories(board PRIVATE ${CMAKE_SOURCE_DIR}/drivers/lcd)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911)
+  list(APPEND SRCS esp32p4_touch.c)
+  target_include_directories(board PRIVATE
+    ${CMAKE_SOURCE_DIR}/arch/risc-v/src/chip/common)
+  target_include_directories(board PRIVATE ${CMAKE_SOURCE_DIR}/drivers/input)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

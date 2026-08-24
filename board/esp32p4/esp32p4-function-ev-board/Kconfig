@@ -29,4 +29,17 @@ config ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER
 		This is mutually exclusive with the staged dsi_probe demo because
 		both own the one P4 DSI Host and EK79007 panel lifecycle.
 
+config ESP32P4_FUNCTION_EV_BOARD_GT911
+	bool "Initialize GT911 touchscreen"
+	depends on ESPRESSIF_I2C0 && ESPRESSIF_I2C0_MASTER_MODE
+	select INPUT
+	select INPUT_GT911
+	default n
+	help
+		Register the P4X LCD adapter's Goodix GT911 capacitive touch
+		controller as /dev/input0.  The reference board routes the shared
+		I2C bus to GPIO8 (SCL) and GPIO7 (SDA), but does not route the
+		controller reset or interrupt signals to the ESP32-P4.  The first
+		board integration therefore uses a 20 ms polling worker.
+
 endif # ARCH_BOARD_CUSTOM

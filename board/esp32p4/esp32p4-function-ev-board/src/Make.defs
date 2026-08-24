@@ -55,6 +55,14 @@ ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER),y)
   DEPPATH += --dep-path $(TOPDIR)$(DELIM)drivers$(DELIM)lcd
 endif
 
+ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911),y)
+  CSRCS += esp32p4_touch.c
+  CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)risc-v$(DELIM)src$(DELIM)chip$(DELIM)common
+  VPATH += :$(TOPDIR)/drivers/input
+  CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)drivers$(DELIM)input
+  DEPPATH += --dep-path $(TOPDIR)$(DELIM)drivers$(DELIM)input
+endif
+
 DEPPATH += --dep-path board
 VPATH += :board
 CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board

@@ -1,0 +1,7 @@
+############################################################################
+# Contest 2026 team 031 GT911 touchscreen probe - Make.defs
+############################################################################
+
+ifneq ($(CONFIG_LVX_USE_DEMO_CONTEST2026_031_GT911_PROBE),)
+CONFIGURED_APPS += $(APPDIR)/packages/demos/contest2026_031_gt911_probe
+endif

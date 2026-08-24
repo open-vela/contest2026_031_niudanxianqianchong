@@ -55,6 +55,17 @@
 #define BOARD_MIPI_DSI_PANEL_RESET_GPIO  27
 #define BOARD_MIPI_DSI_BACKLIGHT_GPIO     26
 
+/* GT911 shares I2C0 with the P4X LCD adapter.  The official adapter does
+ * not route the GT911 reset or interrupt pins to the SoC, so board bring-up
+ * deliberately uses the driver's polling mode rather than inventing GPIO
+ * ownership for those signals.
+ */
+
+#define BOARD_GT911_I2C_BUS               0
+#define BOARD_GT911_I2C_ADDRESS            0x5d
+#define BOARD_GT911_I2C_FREQUENCY          400000
+#define BOARD_GT911_POLL_INTERVAL_MS       20
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -195,5 +206,20 @@ int board_mipi_dsi_fb_initialize(int display);
 int board_mipi_dsi_shutdown(FAR struct mipi_dsi_host *host);
 
 #endif /* CONFIG_ESPRESSIF_MIPI_DSI */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911
+
+/****************************************************************************
+ * Name: board_gt911_initialize
+ *
+ * Description:
+ *   Initialize the P4X Goodix GT911 touch controller on I2C0 and register
+ *   the touchscreen upper-half endpoint at /dev/input0.
+ *
+ ****************************************************************************/
+
+int board_gt911_initialize(void);
+
+#endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911 */
 
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_INCLUDE_BOARD_H */
