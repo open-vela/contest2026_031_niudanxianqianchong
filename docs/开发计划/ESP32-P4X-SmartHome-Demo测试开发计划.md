@@ -184,10 +184,26 @@ flush。
 nsh> smart_home
 ```
 
-- 画面在 3 秒内显示，不依赖网络成功；
-- 串口出现 `[lvgl] show done, entering run loop`；
-- 连续运行 10 分钟无 assert、看门狗复位或 framebuffer 花屏；
-- 使用 `ps`、`free`（需 procfs）记录任务数和内存基线。
+**通过条件**：
+
+- 画面在 3 秒内显示 1024×600 静态首页：标题为 `Smart Home`，含三个环境指标、四张
+  模拟设备卡片和底部 `Home / Chat / Settings` 导航；
+- 串口依次出现 `[lvgl-static] lv_init`、
+  `[lvgl-static] framebuffer=/dev/fb0 resolution=1024x600`、
+  `[lvgl-static] dashboard shown; entering timer loop`；
+- 不出现 DNS、TLS、cAGENT、MCP、Node 或密钥读取日志；
+- 连续运行 10 分钟无 assert、看门狗复位、framebuffer 花屏或背光熄灭；
+- 在启动前后分别记录 `ps`、`free`（本配置已启用 procfs；若提示未挂载，先执行
+  `mount -t procfs /proc`），并保存完整串口日志与屏幕照片。
+
+**P2 退出与下一阶段切换**：P2 首屏已通过，应保留本配置作为显示回归固件；不要直接在这
+个二进制中追加网络或触摸。P3/P4 另起增量配置时应取消：
+
+```text
+# CONFIG_SMART_HOME_DEMO_STATIC_LVGL_HOME is not set
+```
+
+随后才恢复完整 `smart_home_main.c`、cAGENT 和设备状态机，并且每次只增加一个能力。
 
 ### P3：GT911 触摸和本地工具
 
