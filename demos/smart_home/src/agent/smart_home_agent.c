@@ -381,29 +381,40 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     ret = smart_home_skills_register(app->agent, &app->skill_store);
     app->system_status.skills_status = ret;
     app->system_status.skills_loaded = app->skill_store.count;
-    if (ret != AGENT_OK) {
+    if (ret == AGENT_ERROR_NOTFOUND) {
+        /* Runtime skill files are optional for the local UI bring-up path.
+         * A board without /data/res/skills can still show device panels,
+         * settings and model diagnostics.  Do not hide malformed skill
+         * files: parse, limit and registration failures remain fatal below.
+         */
+        syslog(LOG_WARNING,
+               "smart_home: runtime skills unavailable; "
+               "starting without skills and scene catalog\n");
+    } else if (ret != AGENT_OK) {
         smart_home_status_error(app, "Skills", ret);
         smart_home_agent_app_deinit(app);
         return ret;
     }
 
-    scene_skill = smart_home_skill_store_find(&app->skill_store,
-                                              "smart_home_scenes");
-    ret = smart_home_scene_catalog_load(
-        scene_skill ? scene_skill->context_text : NULL, &scene_catalog);
-    if (ret != AGENT_OK) {
-        app->system_status.skills_status = ret;
-        smart_home_status_error(app, "Scene catalog", ret);
-        smart_home_agent_app_deinit(app);
-        return ret;
-    }
-    ret = smart_home_device_service_set_scene_catalog(&app->device_service,
-                                                       &scene_catalog);
-    if (ret != AGENT_OK) {
-        app->system_status.tools_status = ret;
-        smart_home_status_error(app, "Scene service", ret);
-        smart_home_agent_app_deinit(app);
-        return ret;
+    if (ret == AGENT_OK) {
+        scene_skill = smart_home_skill_store_find(&app->skill_store,
+                                                  "smart_home_scenes");
+        ret = smart_home_scene_catalog_load(
+            scene_skill ? scene_skill->context_text : NULL, &scene_catalog);
+        if (ret != AGENT_OK) {
+            app->system_status.skills_status = ret;
+            smart_home_status_error(app, "Scene catalog", ret);
+            smart_home_agent_app_deinit(app);
+            return ret;
+        }
+        ret = smart_home_device_service_set_scene_catalog(&app->device_service,
+                                                           &scene_catalog);
+        if (ret != AGENT_OK) {
+            app->system_status.tools_status = ret;
+            smart_home_status_error(app, "Scene service", ret);
+            smart_home_agent_app_deinit(app);
+            return ret;
+        }
     }
 
     ret = smart_home_tools_register(app->agent, &app->device_service);
