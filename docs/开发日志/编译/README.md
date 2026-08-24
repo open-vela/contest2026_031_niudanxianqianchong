@@ -141,7 +141,7 @@ grep -E '^CONFIG_(UP|PERCPU_ARRAY|NCPUS|SMP_NCPUS|STREAM_OUT_BUFFER_SIZE|STREAM_
 | examples 过期 `audio_record` 索引 | 已再生并移除 |
 | `make -C nuttx olddefconfig` | 已通过；关键默认配置已生成 |
 | ESP32-P4 最小 `nsh` 完整构建 | 已通过 `usbconsole` 配置 |
-| 烧录与串口 `nsh>` | 已在实板验证；DSI Probe M1 命令写已通过，DPI video 待验收 |
+| 烧录与串口 `nsh>` | 已在实板验证；DSI 命令、DPI 视频色条及标准 `/dev/fb0` framebuffer 均已通过 |
 
 相关文档：[P4 最小 NSH 操作与测试](../../硬件适配/esp32p4-nsh-operation-and-test.md)、
 [历史 P4 移植开发记录](../dev.md)。

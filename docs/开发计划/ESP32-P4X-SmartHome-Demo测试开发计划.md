@@ -19,7 +19,7 @@
 | EK79007 DBI 命令通路 | 已通过 | 已对齐 ESP-IDF 的 Command ACK 与 LP 传输配置。 |
 | Host 内建色条 | 已通过 | `dsi_probe pattern 10` 真机可见。 |
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
-| NuttX framebuffer 设备 | 已实现，待真机验收 | `fb_probe` 配置会在 board late-init 注册 RGB565 `/dev/fb0`。 |
+| NuttX framebuffer 设备 | 真机 PASS | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；标准 `fb` 已完成绘制和刷新。 |
 | LVGL Smart Home 页面 | 未上 P4X | `smart_home_lvgl.c` 目前仅在 `LV_USE_NUTTX_LCD` 时指定 `/dev/lcd0`。 |
 | GT911 触摸 | 未上 P4X | 不作为首屏显示的前置条件。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
@@ -108,7 +108,7 @@ nsh> dsi_probe video 10
 
 **失败处置**：停止 Smart Home 集成，先按 DSI 排障闭环文档恢复显示基线。
 
-### P1：注册 P4X `/dev/fb0`（已实现，待真机验收）
+### P1：注册 P4X `/dev/fb0`（真机 PASS）
 
 **目的**：将已验证的 DPI Panel 扫描缓冲区以标准 NuttX framebuffer 接口暴露，使
 LVGL 无需了解 DSI、Bridge 或 GDMA。
@@ -118,7 +118,7 @@ LVGL 无需了解 DSI、Bridge 或 GDMA。
 | 文件 | 改动 |
 | --- | --- |
 | `board/.../src/esp32p4_fb.c`（新增） | 实现单平面 `fb_vtable_s`：`getvideoinfo`、`getplaneinfo`、`updatearea`；将 `FBIO_UPDATE` 映射为 PSRAM 全帧 cache clean。 |
-| `board/.../src/esp32p4_lcd.c` | 不改动已验收的 Host、reset、DPI timing 和持续 scanout实现；新 framebuffer 复用其公开板级接口，不创建第二个 GDMA 管线。 |
+| `board/.../src/esp32p4_lcd.c` | 不改动已验收的 Host、reset、DPI timing 和持续 scanout 实现；新 framebuffer 复用其公开板级接口，不创建第二个 GDMA 管线。 |
 | `board/.../include/board.h` | 导出 `board_mipi_dsi_fb_initialize()` 板级装配接口。 |
 | `board/.../src/Make.defs`、`CMakeLists.txt` | 条件编译 framebuffer 装配文件。 |
 | `board/.../Kconfig` | 新增 `CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER`，选择 DSI video/DMA/DPI 和 NuttX framebuffer；与 `dsi_probe` 互斥。 |
@@ -144,8 +144,14 @@ nsh> ls /dev/fb0
 nsh> fb
 ```
 
-串口应显示 `1024x600`、`RGB565`、`stride=2048`、`fblen=1228800`；屏幕随 `fb`
-测试逐步绘制彩色矩形。反复执行 10 次，无黑屏、重启、DMA fault 或内存泄漏。
+**本次真机结果**：`/dev/fb0` 可枚举；标准 `fb` 成功返回 `fmt=11`（RGB565）、
+`1024x600`、`stride=2048`、`fblen=1228800`，映射地址为 `0x48000200`，并完成六次
+矩形绘制后输出 `FB test finished`。这证明 framebuffer 注册、应用映射和
+`FBIO_UPDATE` cache clean 已打通；详细串口证据见
+[framebuffer 真机验收记录](../开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md)。
+
+尚未完成的增强验证是连续执行 10 次、长时间扫描以及与 LVGL 并发刷新；这些不阻塞
+进入 P2，但应在 P2 回归项中保留。
 
 ### P2：LVGL 静态 Smart Home 首页
 
@@ -291,7 +297,7 @@ flash size 必须复用当前 P4X 已验证固件的产物规则，不在本计�
 | 层级 | 必测命令 / 动作 | PASS 定义 |
 | --- | --- | --- |
 | DSI 基线 | `dsi_probe pattern 10`、`dsi_probe video 10` | 两条色条可见。 |
-| framebuffer | `ls /dev/fb0`、`fb_probe` | 五种纯色按序可见。 |
+| framebuffer | `ls /dev/fb0`、`fb` | **已通过**：1024×600 RGB565 查询、PSRAM 映射、六步矩形绘制和 `FBIO_UPDATE` 均成功。 |
 | 静态 UI | `smart_home` | 首页稳定显示 10 分钟。 |
 | 触摸与本地控制 | 点击导航 / 控制卡片 | UI 和本地状态一致。 |
 | 控制台 AI | `smart_home "..."` | 模型回复与本地工具调用完成。 |

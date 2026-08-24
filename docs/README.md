@@ -2,9 +2,9 @@
 
 本目录的当前主题是 **ESP32-P4 Function EV Board 的 openvela Route A 移植**。
 最小 `usbconsole` 配置已在实板进入 `nsh>`；MIPI-DSI Host Probe 已完成
-M1 命令写、Host 内建 pattern 与 RGB565 DMA 色条的实板视觉验收。下一阶段是将
-已验证的固定扫描通路收敛为 NuttX framebuffer，再接入 LVGL 与 GT911 触摸；当前
-尚不包含 LVGL 或触摸功能验收。
+M1 命令写、Host 内建 pattern 与 RGB565 DMA 色条的实板视觉验收。NuttX 标准
+`/dev/fb0` 及 `fb` 示例也已完成真机验收；下一阶段是以该 framebuffer 接入
+静态 LVGL 页面，再接入 GT911 触摸。当前尚不包含 LVGL 或触摸功能验收。
 
 ## 目录骨架
 
@@ -27,6 +27,7 @@ docs/
 | [P4 构建与 Kconfig 排障](开发日志/编译/README.md) | 本次构建链路、Kconfig 阻塞与复测顺序 | 配置生成或编译失败时 |
 | [P4X DSI Host Probe 排障](开发日志/编译/2026-08-21-DSI-Host-Probe排障记录.md) | DSI Host、Probe 注册与 USB Console 专项排障 | 验证 DSI 命令链路时 |
 | [P4X DSI 黑屏 DBI 配置排障闭环](开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md) | DBI 命令 LP 传输配置导致黑屏的根因、修复和实板双路径验收 | 排查或复测 P4X 显示时 |
+| [P4X framebuffer 真机验收](开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md) | `/dev/fb0` 注册、标准 `fb` 示例和 `FBIO_UPDATE` 的真机结果 | 接入 LVGL 前确认显示设备时 |
 | [P4 移植开发记录](开发日志/dev.md) | 已发生问题的历史记录 | 复现相同错误时；不代表当前构建结论 |
 | [当前开发计划](开发计划/README.md) | P4 最小 bring-up 的阶段与验收条件 | 安排或切换工作项时 |
 | [上游成熟适配吸收计划](开发计划/ESP32-P4上游成熟适配吸收计划.md) | 上游 P4 基线的选择性同步边界、步骤和回归矩阵 | 计划同步 Apache NuttX / OpenVela P4 改动时 |
