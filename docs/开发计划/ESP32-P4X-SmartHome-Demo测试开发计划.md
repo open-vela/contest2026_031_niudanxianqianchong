@@ -21,7 +21,7 @@
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
 | NuttX framebuffer 设备 | 单缓冲真机 PASS；双缓冲待验收 | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；双页 PSRAM、`FBIOPAN_DISPLAY` 与 DMA 帧边界换页已实现，待实板确认无撕裂。 |
 | LVGL Smart Home 页面 | 未上 P4X | `smart_home_lvgl.c` 目前仅在 `LV_USE_NUTTX_LCD` 时指定 `/dev/lcd0`。 |
-| GT911 触摸 | 未上 P4X | 不作为首屏显示的前置条件。 |
+| GT911 触摸 | P3.1 单指真机通过 | `/dev/input0` 与 `gt911_probe` 已验证 `DOWN/MOVE/UP`、坐标和触摸面积；多点和 LVGL 接入待验证。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
 | MCP / Node / App Bridge | 未上 P4X | 在本地 UI、网络和模型链路稳定后再启用。 |
 

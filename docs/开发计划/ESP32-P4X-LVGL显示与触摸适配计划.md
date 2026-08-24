@@ -35,6 +35,8 @@ I2C master
 | P4 DSI 能力 | 1 个 Host，最多 2 条 data lane；P4X command probe 固定 2 lane、1000 Mbps |
 | D-PHY 供电 | P4X 参考配置使用内部 LDO channel 3、2.5 V；视频上电顺序仍以实板复核为准 |
 | 触摸控制器 | GT911，I2C 接口 |
+| GT911 总线 | I2C0，SCL=GPIO8、SDA=GPIO7，400 kHz，默认地址 0x5d |
+| GT911 RST / INT | 官方 P4X adapter 标为 `GPIO_NUM_NC`；首版使用 20 ms 轮询，不控制这两根线 |
 | 面板复位 | 主板 GPIO27 -> LCD Adapter `RST_LCD` |
 | 背光 PWM | 主板 GPIO26 -> LCD Adapter `PWM` |
 
@@ -57,9 +59,9 @@ reset 与 DCS 写命令；**不**表示完成 P4X video、画面、触摸或 LVG
 | P4 DSI/LDO 构建与封装 | Make 构建及实板验证通过 | 已形成 NuttX errno 风格 LDO 封装，并在 Make/CMake 中条件纳入 DSI vendor HAL；CMake 回归仍待执行。 |
 | ESP32-P4 MIPI-DSI video pipeline | M2b/M2c 已实板运行但未显示 | M2b RGB888、M2c RGB565 DPI Panel + `draw_bitmap()` 的 DMA 帧计数均可递增，屏幕仍黑。当前状态是 Host/DMA 软件路径通过、视觉显示未通过；与同硬件 ESP-IDF 可显示工程的逐项差异及收敛顺序见 [ESP-IDF LCD 参考实现对比与收敛计划](ESP32-P4X-ESP-IDF-LCD参考实现对比与收敛计划.md)。 |
 | EK79007 通用面板驱动 | 已接入 M2c 验证链路，待视觉验收 | 驱动已在 DCS/sleep-out 后创建并启动可选 DPI panel；尚未注册 `/dev/fb0` 或连接 LVGL。 |
-| GT911 通用触摸驱动 | 未完成接入 | 尚未完成 P4X I2C、复位、INT 与输入注册验证。 |
+| GT911 通用触摸驱动 | P3.1 单指真机验收通过 | 已接入 touchscreen upper-half，`gt911_probe` 可读取稳定的 `DOWN/MOVE/UP`、坐标和 size；多点待验收。 |
 | P4X 板级 DSI command 装配 | 命令写已实板验证；M2c 待验收 | `esp32p4_lcd.c` 已实测 LDO3/2.5V、2 lane/1000 Mbps 与 GPIO27 reset；M2c 固化官方 EK79007 RGB565 timing profile 与 GPIO26 静态背光。 |
-| P4X 板级触摸装配 | 未实现 | 尚未初始化指定 I2C 总线、地址、复位与输入注册。 |
+| P4X 板级触摸装配 | P3.1 真机验收通过 | `esp32p4_touch.c` 以 I2C0、0x5d、400 kHz、20 ms 轮询注册 `/dev/input0`。 |
 | `lvgl` defconfig | 未实现 | 没有可复现的显示、触摸与 LVGL 配置组合。 |
 
 ### 3.1 本次已落地的 M1 芯片层
@@ -130,7 +132,7 @@ P4X 板级装配层
 | NuttX 工作树映射 | `nuttx/drivers/{lcd,input}/` | 由 `scripts/link_nuttx_display_drivers.sh` 创建相对软链接，供 NuttX 正常构建 |
 | NuttX 构建项 | 对应 `drivers/*/{Kconfig,Make.defs,CMakeLists.txt}` | 注册通用面板和输入驱动 |
 | P4X 板级层 | `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_lcd.c` | M1：LDO、reset、DSI Host；M2c：官方 RGB565 DPI timing、GPIO26 静态背光；M3 再注册显示设备 |
-| P4X 板级层 | `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_touch.c` | I2C 获取、GT911 复位与注册 |
+| P4X 板级层 | `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_touch.c` | I2C0 获取与 GT911 轮询注册；RST/INT 未接 SoC，不在板级伪造回调 |
 | P4X 板级层 | `src/esp32p4-function-ev-board.h` | 板级初始化接口、GPIO 常量 |
 | P4X 板级层 | `src/esp32p4_bringup.c` | 按 Kconfig 调用显示和触摸初始化 |
 | P4X 板级层 | `src/{Make.defs,CMakeLists.txt}`、`Kconfig` | 加入板级源文件和开关 |
@@ -148,8 +150,8 @@ P4X 板级装配层
 
 1. 确认屏幕模组标签为 AML070JGI50-07403L，拍照存档。
 2. 核对 LCD adapter 与 P4X 的反向 FPC、GPIO27、GPIO26、5V、GND 接线。
-3. 从 P4X 参考设计确认 GT911 的 I2C 控制器、SCL/SDA 引脚、I2C 地址、reset
-   和 interrupt 引脚连接；不得凭 ESP-IDF 示例猜测这些参数。
+3. 已从 P4X 参考设计确认 GT911 使用 I2C0、GPIO8/7、默认地址 0x5d；`RST/INT`
+   为 `GPIO_NUM_NC`。首版仅使用轮询，后续只有确认外接可控线路时才增加中断。
 4. 核对 D-PHY 2.5 V 所使用的实际 LDO 通道、所需电压和上电顺序。
 5. 核对面板支持的 lane 数（只能选 1/2 lane）、lane bit rate、像素格式和完整
    video timing；不得按 FPC 引脚数推断 P4 可用 lane 数。
@@ -213,11 +215,11 @@ generic packet accepted、DCS power mode 和最终 `PASS`；若面板未接或�
 
 ### P4：GT911 触摸最小验证
 
-1. 先评估 NuttX 现有 `gt9xx` 通用驱动；确有能力缺口时，再完善当前 GT911 I2C
-   驱动，读取设备 ID、状态和触点坐标。
-2. `esp32p4_touch.c` 仅提供 P4X 的 I2C bus、地址、复位和可选中断配置。
-3. 初版可采用轮询；确认 INT 引脚可用后再增加中断路径。
-4. 在 NSH 或独立测试程序持续输出单点与多点坐标，完成边界与坐标方向校验。
+1. 已接入独立 `CONFIG_INPUT_GT911`，而非复用旧 VFS 型 `gt9xx` 驱动；当前实现通过
+   NuttX touchscreen upper-half 上报多点事件。
+2. `esp32p4_touch.c` 固定提供 P4X I2C0、0x5d、400 kHz 和 20 ms 轮询配置。
+3. 新增 `gt911_probe`，先验证产品 ID、`/dev/input0`、单指/多指及抬起事件。
+4. 仅在原始坐标与方向验收后，才为 LVGL 指定 `/dev/input0` 并做点击验证。
 
 通过标准：`/dev/inputX` 注册成功；单指、多指、抬起事件可重复读取；坐标范围
 与 1024 x 600 面板一致。
