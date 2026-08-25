@@ -339,6 +339,53 @@ static void gt911_emit_releases(FAR struct gt911_dev_s *priv,
 }
 
 /****************************************************************************
+ * Name: gt911_map_coordinates
+ ****************************************************************************/
+
+static void gt911_map_coordinates(FAR const struct gt911_config_s *config,
+                                  uint16_t raw_x, uint16_t raw_y,
+                                  FAR struct touch_point_s *point)
+{
+  uint16_t x = raw_x;
+  uint16_t y = raw_y;
+
+  if (config->swap_xy)
+    {
+      x = raw_y;
+      y = raw_x;
+    }
+
+  if (config->x_resolution > 0)
+    {
+      if (x >= config->x_resolution)
+        {
+          x = config->x_resolution - 1;
+        }
+
+      if (config->invert_x)
+        {
+          x = config->x_resolution - 1 - x;
+        }
+    }
+
+  if (config->y_resolution > 0)
+    {
+      if (y >= config->y_resolution)
+        {
+          y = config->y_resolution - 1;
+        }
+
+      if (config->invert_y)
+        {
+          y = config->y_resolution - 1 - y;
+        }
+    }
+
+  point->x = x;
+  point->y = y;
+}
+
+/****************************************************************************
  * Name: gt911_decode_points
  ****************************************************************************/
 
@@ -359,6 +406,8 @@ static int gt911_decode_points(FAR struct gt911_dev_s *priv,
       FAR struct gt911_contact_s *contact;
       FAR struct touch_point_s *point;
       uint16_t size;
+      uint16_t x;
+      uint16_t y;
       uint8_t id;
 
       id = raw[0] & GT911_TRACK_ID_MASK;
@@ -375,8 +424,9 @@ static int gt911_decode_points(FAR struct gt911_dev_s *priv,
       point->id = id;
       point->flags = (contact->active ? TOUCH_MOVE : TOUCH_DOWN) |
                      TOUCH_ID_VALID | TOUCH_POS_VALID | TOUCH_SIZE_VALID;
-      point->x = raw[1] | ((int16_t)raw[2] << 8);
-      point->y = raw[3] | ((int16_t)raw[4] << 8);
+      x = raw[1] | ((uint16_t)raw[2] << 8);
+      y = raw[3] | ((uint16_t)raw[4] << 8);
+      gt911_map_coordinates(priv->config, x, y, point);
       point->h = size;
       point->w = size;
       point->timestamp = touch_get_time();

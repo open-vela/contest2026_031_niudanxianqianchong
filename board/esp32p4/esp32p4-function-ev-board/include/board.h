@@ -65,6 +65,20 @@
 #define BOARD_GT911_I2C_ADDRESS            0x5d
 #define BOARD_GT911_I2C_FREQUENCY          400000
 #define BOARD_GT911_POLL_INTERVAL_MS       20
+#define BOARD_GT911_X_RESOLUTION            1024
+#define BOARD_GT911_Y_RESOLUTION             600
+
+/* Keep the board endpoint compatible with the stock LVGL NuttX input
+ * adapter when an older external-board Kconfig refresh does not materialize
+ * the optional max-points symbol in nuttx/config.h.
+ */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_MAX_POINTS
+#  define BOARD_GT911_MAX_POINTS \
+    CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_MAX_POINTS
+#else
+#  define BOARD_GT911_MAX_POINTS 1
+#endif
 
 /****************************************************************************
  * Public Types

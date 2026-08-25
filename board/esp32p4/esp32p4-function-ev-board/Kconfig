@@ -5,6 +5,12 @@
 
 if ARCH_BOARD_CUSTOM
 
+# configure.sh copies this board Kconfig to boards/dummy for an external
+# board, while arch/risc-v/src/board points at the selected board common
+# directory.  Import the common storage choices through that stable build
+# path so ESPRESSIF_SPIFLASH_LITTLEFS survives olddefconfig/savedefconfig.
+source "$BINDIR/arch/risc-v/src/board/Kconfig"
+
 config ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
 	bool
 	default y
@@ -41,5 +47,21 @@ config ESP32P4_FUNCTION_EV_BOARD_GT911
 		I2C bus to GPIO8 (SCL) and GPIO7 (SDA), but does not route the
 		controller reset or interrupt signals to the ESP32-P4.  The first
 		board integration therefore uses a 20 ms polling worker.
+
+if ESP32P4_FUNCTION_EV_BOARD_GT911
+
+config ESP32P4_FUNCTION_EV_BOARD_GT911_MAX_POINTS
+	int "GT911 touch points exposed to applications"
+	range 1 5
+	default 1
+	---help---
+		Number of simultaneous GT911 contacts exported through /dev/input0.
+		Keep the P4X default at one point while using the upstream LVGL NuttX
+		adapter: it reads fixed-size samples based on TSIOC_GETMAXPOINTS,
+		whereas GT911 produces variable-size frames.  The Smart Home UI uses
+		single-touch interactions only.  Raising this value requires a
+		variable-length LVGL touchscreen adapter.
+
+endif # ESP32P4_FUNCTION_EV_BOARD_GT911
 
 endif # ARCH_BOARD_CUSTOM

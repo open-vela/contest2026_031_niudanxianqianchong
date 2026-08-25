@@ -53,8 +53,10 @@ struct gt911_board_s
 
 /* The configuration object must remain valid for the registered driver's
  * lifetime.  address, frequency, max_points and event_buffer_count accept
- * zero to select the GT911 defaults above.  poll_interval_ms selects polling
- * mode when non-zero; zero selects interrupt mode.
+ * zero to select the GT911 defaults above.  x_resolution and y_resolution
+ * select the exported coordinate range when non-zero.  The axis flags are
+ * then applied to that range.  poll_interval_ms selects polling mode when
+ * non-zero; zero selects interrupt mode.
  */
 
 struct gt911_config_s
@@ -63,8 +65,13 @@ struct gt911_config_s
   uint32_t frequency;
   uint16_t address;
   uint16_t poll_interval_ms;
+  uint16_t x_resolution;
+  uint16_t y_resolution;
   uint8_t max_points;
   uint8_t event_buffer_count;
+  bool swap_xy;
+  bool invert_x;
+  bool invert_y;
 };
 
 /****************************************************************************

@@ -38,8 +38,13 @@ static const struct gt911_config_s g_gt911_config =
   .frequency          = BOARD_GT911_I2C_FREQUENCY,
   .address            = BOARD_GT911_I2C_ADDRESS,
   .poll_interval_ms   = BOARD_GT911_POLL_INTERVAL_MS,
-  .max_points         = GT911_MAX_POINTS,
+  .x_resolution       = BOARD_GT911_X_RESOLUTION,
+  .y_resolution       = BOARD_GT911_Y_RESOLUTION,
+  .max_points         = BOARD_GT911_MAX_POINTS,
   .event_buffer_count = GT911_EVENT_BUFFER_COUNT,
+  .swap_xy            = false,
+  .invert_x           = true,
+  .invert_y           = true,
 };
 
 /****************************************************************************
