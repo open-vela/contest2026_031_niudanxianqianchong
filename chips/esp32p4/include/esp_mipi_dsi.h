@@ -102,6 +102,13 @@ struct esp_mipi_dsi_video_dma_config_s
   size_t         frame_buffer_bytes;
 };
 
+/* A frame-done callback runs in the DW-GDMA interrupt context after a full
+ * frame has completed and the next descriptor has been armed.  It must not
+ * block, allocate memory or issue DSI commands.
+ */
+
+typedef void (*esp_mipi_dsi_video_dma_frame_done_t)(FAR void *arg);
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -153,6 +160,36 @@ int esp_mipi_dsi_video_pattern_set(
 int esp_mipi_dsi_video_dma_start(
   FAR struct mipi_dsi_host *host,
   FAR const struct esp_mipi_dsi_video_dma_config_s *config);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_video_dma_queue_frame_buffer
+ *
+ * Description:
+ *   Queue a same-sized, DMA-aligned framebuffer as the source for the next
+ *   completed DW-GDMA frame.  The current frame remains untouched.  A newer
+ *   request replaces an older request that has not reached a frame boundary.
+ *   The caller must clean CPU-written pixels before queuing the buffer and
+ *   retain it until a later frame-done callback.
+ *
+ ****************************************************************************/
+
+int esp_mipi_dsi_video_dma_queue_frame_buffer(
+  FAR struct mipi_dsi_host *host, FAR const void *frame_buffer,
+  size_t frame_buffer_bytes);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_video_dma_set_frame_done_callback
+ *
+ * Description:
+ *   Register or clear the non-blocking frame-done callback for a running DPI
+ *   DMA scanout.  This permits a board framebuffer driver to release one
+ *   queued FBIOPAN_DISPLAY request and notify VSync at each frame boundary.
+ *
+ ****************************************************************************/
+
+int esp_mipi_dsi_video_dma_set_frame_done_callback(
+  FAR struct mipi_dsi_host *host,
+  esp_mipi_dsi_video_dma_frame_done_t callback, FAR void *arg);
 
 /****************************************************************************
  * Name: esp_mipi_dsi_video_dma_dump_status

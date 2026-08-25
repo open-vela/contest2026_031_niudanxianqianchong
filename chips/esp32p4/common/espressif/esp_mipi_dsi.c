@@ -158,9 +158,15 @@ struct esp_mipi_dsi_s
 #ifdef CONFIG_ESPRESSIF_MIPI_DSI_VIDEO_DMA
   FAR dw_gdma_dev_t          *dma_dev;
   dw_gdma_link_list_item_t   dma_lli;
+  FAR const void             *dma_active_frame_buffer;
+  FAR const void             *dma_pending_frame_buffer;
+  size_t                     dma_frame_buffer_bytes;
   volatile uint32_t          dma_frame_count;
   volatile uint32_t          dma_error_events;
   int                        dma_cpuint;
+  spinlock_t                 dma_irq_lock;
+  esp_mipi_dsi_video_dma_frame_done_t dma_frame_done;
+  FAR void                   *dma_frame_done_arg;
   int                        bridge_cpuint;
   spinlock_t                 bridge_irq_lock;
   struct work_s              bridge_underrun_work;
@@ -209,6 +215,7 @@ static struct esp_mipi_dsi_s g_esp_mipi_dsi =
 #ifdef CONFIG_ESPRESSIF_MIPI_DSI_VIDEO_DMA
   .dma_cpuint = -1,
   .bridge_cpuint = -1,
+  .dma_irq_lock = SP_UNLOCKED,
   .bridge_irq_lock = SP_UNLOCKED,
 #endif
 };
@@ -995,6 +1002,10 @@ static int esp_mipi_dsi_dma_interrupt(int irq, FAR void *context,
 {
   FAR struct esp_mipi_dsi_s *priv = arg;
   FAR dw_gdma_dev_t *dma_dev;
+  esp_mipi_dsi_video_dma_frame_done_t frame_done;
+  FAR const void *pending_frame_buffer;
+  FAR void *frame_done_arg;
+  irqstate_t flags;
   uint32_t status;
 
   (void)irq;
@@ -1025,8 +1036,29 @@ static int esp_mipi_dsi_dma_interrupt(int irq, FAR void *context,
     {
       /* The vendor DPI path uses one terminal descriptor per framebuffer.
        * Hardware clears its valid state after the frame completes, therefore
-       * every refresh must make it valid again before re-enabling the channel.
+       * every refresh must make it valid again before re-enabling the
+       * channel.
        */
+
+      flags = spin_lock_irqsave(&priv->dma_irq_lock);
+      pending_frame_buffer = priv->dma_pending_frame_buffer;
+      if (pending_frame_buffer != NULL)
+        {
+          priv->dma_active_frame_buffer = pending_frame_buffer;
+          priv->dma_pending_frame_buffer = NULL;
+        }
+
+      frame_done = priv->dma_frame_done;
+      frame_done_arg = priv->dma_frame_done_arg;
+      spin_unlock_irqrestore(&priv->dma_irq_lock, flags);
+
+      if (pending_frame_buffer != NULL)
+        {
+          dw_gdma_ll_lli_set_src_addr(
+            &priv->dma_lli, (uint32_t)(uintptr_t)pending_frame_buffer);
+          dw_gdma_ll_lli_set_src_master_port(
+            &priv->dma_lli, (intptr_t)pending_frame_buffer);
+        }
 
       dw_gdma_ll_lli_set_block_markers(&priv->dma_lli, false, true, true);
       esp_cache_msync(&priv->dma_lli, sizeof(priv->dma_lli),
@@ -1037,6 +1069,11 @@ static int esp_mipi_dsi_dma_interrupt(int irq, FAR void *context,
         (uint32_t)(uintptr_t)&priv->dma_lli);
       dw_gdma_ll_channel_enable(dma_dev, ESP_MIPI_DSI_DMA_CHANNEL, true);
       priv->dma_frame_count++;
+
+      if (frame_done != NULL)
+        {
+          frame_done(frame_done_arg);
+        }
     }
 
   return OK;
@@ -1078,6 +1115,12 @@ static void esp_mipi_dsi_video_dma_release(
     }
 
   memset(&priv->dma_lli, 0, sizeof(priv->dma_lli));
+
+  priv->dma_active_frame_buffer = NULL;
+  priv->dma_pending_frame_buffer = NULL;
+  priv->dma_frame_buffer_bytes = 0;
+  priv->dma_frame_done = NULL;
+  priv->dma_frame_done_arg = NULL;
 
   priv->dma_frame_count = 0;
   priv->dma_error_events = 0;
@@ -1128,6 +1171,11 @@ static int esp_mipi_dsi_video_dma_prepare(
   priv->dma_dev = dma_dev;
   priv->dma_frame_count = 0;
   priv->dma_error_events = 0;
+  priv->dma_active_frame_buffer = frame_buffer;
+  priv->dma_pending_frame_buffer = NULL;
+  priv->dma_frame_buffer_bytes = frame_buffer_bytes;
+  priv->dma_frame_done = NULL;
+  priv->dma_frame_done_arg = NULL;
   lli = &priv->dma_lli;
   memset(lli, 0, sizeof(*lli));
 
@@ -2122,6 +2170,118 @@ errout_unlock:
 }
 
 /****************************************************************************
+ * Name: esp_mipi_dsi_video_dma_queue_frame_buffer
+ ****************************************************************************/
+
+int esp_mipi_dsi_video_dma_queue_frame_buffer(
+  FAR struct mipi_dsi_host *host, FAR const void *frame_buffer,
+  size_t frame_buffer_bytes)
+{
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI_VIDEO_DMA
+  FAR struct esp_mipi_dsi_s *priv = &g_esp_mipi_dsi;
+  irqstate_t flags;
+  int ret;
+
+  if (host != &priv->host || frame_buffer == NULL ||
+      ((uintptr_t)frame_buffer &
+       (ESP_MIPI_DSI_DMA_TRANSFER_WIDTH_BYTES - 1)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (!priv->ready)
+    {
+      ret = -ESHUTDOWN;
+    }
+  else if (!priv->video_running || priv->dma_dev == NULL)
+    {
+      ret = -EPIPE;
+    }
+  else if (frame_buffer_bytes != priv->dma_frame_buffer_bytes)
+    {
+      ret = -EINVAL;
+    }
+  else
+    {
+      /* Only the DMA interrupt consumes this field.  Replacing an older
+       * pending page is intentional: for a video scanout, displaying the
+       * newest fully rendered framebuffer minimizes UI latency.
+       */
+
+      flags = spin_lock_irqsave(&priv->dma_irq_lock);
+      priv->dma_pending_frame_buffer = frame_buffer;
+      spin_unlock_irqrestore(&priv->dma_irq_lock, flags);
+      ret = OK;
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+#else
+  (void)host;
+  (void)frame_buffer;
+  (void)frame_buffer_bytes;
+  return -ENOTSUP;
+#endif
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_video_dma_set_frame_done_callback
+ ****************************************************************************/
+
+int esp_mipi_dsi_video_dma_set_frame_done_callback(
+  FAR struct mipi_dsi_host *host,
+  esp_mipi_dsi_video_dma_frame_done_t callback, FAR void *arg)
+{
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI_VIDEO_DMA
+  FAR struct esp_mipi_dsi_s *priv = &g_esp_mipi_dsi;
+  irqstate_t flags;
+  int ret;
+
+  if (host != &priv->host)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (!priv->ready)
+    {
+      ret = -ESHUTDOWN;
+    }
+  else if (!priv->video_running || priv->dma_dev == NULL)
+    {
+      ret = -EPIPE;
+    }
+  else
+    {
+      flags = spin_lock_irqsave(&priv->dma_irq_lock);
+      priv->dma_frame_done = callback;
+      priv->dma_frame_done_arg = arg;
+      spin_unlock_irqrestore(&priv->dma_irq_lock, flags);
+      ret = OK;
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+#else
+  (void)host;
+  (void)callback;
+  (void)arg;
+  return -ENOTSUP;
+#endif
+}
+
+/****************************************************************************
  * Name: esp_mipi_dsi_dma_buffer_allocate
  ****************************************************************************/
 
@@ -2153,7 +2313,8 @@ int esp_mipi_dsi_dma_buffer_allocate(size_t bytes, FAR void **buffer)
 
   memset(*buffer, 0, bytes);
   syslog(LOG_INFO,
-         "INFO: MIPI-DSI DMA PSRAM buffer allocated bytes=%zu alignment=%u\n",
+         "INFO: MIPI-DSI DMA PSRAM buffer allocated bytes=%zu "
+         "alignment=%u\n",
          bytes, ESP_MIPI_DSI_DMA_BUFFER_ALIGNMENT);
   return OK;
 #else
