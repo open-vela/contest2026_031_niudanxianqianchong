@@ -41,6 +41,11 @@ static lv_font_t *load_font(int size)
                                    LV_FREETYPE_FONT_RENDER_MODE_BITMAP,
                                    size,
                                    LV_FREETYPE_FONT_STYLE_NORMAL);
+#elif defined(CONFIG_LV_USE_TINY_TTF) && \
+      defined(CONFIG_LV_TINY_TTF_FILE_SUPPORT)
+    /* TinyTTF streams the subset font from LittleFS and avoids an external
+     * FreeType package dependency in the P4X Route-A build. */
+    return lv_tiny_ttf_create_file(SMART_HOME_FONT_NORMAL, size);
 #else
     (void)size;
     return NULL;
@@ -77,6 +82,19 @@ void smart_home_lvgl_style_deinit(void)
     if (g_style.font_20) {
         lv_freetype_font_delete(g_style.font_20);
     }
+#elif defined(CONFIG_LV_USE_TINY_TTF)
+    if (g_style.font_12) {
+        lv_tiny_ttf_destroy(g_style.font_12);
+    }
+    if (g_style.font_14) {
+        lv_tiny_ttf_destroy(g_style.font_14);
+    }
+    if (g_style.font_16) {
+        lv_tiny_ttf_destroy(g_style.font_16);
+    }
+    if (g_style.font_20) {
+        lv_tiny_ttf_destroy(g_style.font_20);
+    }
 #endif
     g_style.font_12 = NULL;
     g_style.font_14 = NULL;
@@ -99,7 +117,7 @@ const lv_font_t *smart_home_lvgl_font(int size)
         return g_style.font_20;
     }
 
-    /* Fallback to built-in Montserrat when FreeType is disabled */
+    /* Fallback to built-in Montserrat when the external font is unavailable. */
 
     if (size <= 12) {
         return &lv_font_montserrat_12;

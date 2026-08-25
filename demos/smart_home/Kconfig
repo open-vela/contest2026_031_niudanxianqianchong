@@ -4,7 +4,7 @@ config SMART_HOME_DEMO
     select CAGENT_PROFILE_REACT_DEFAULTS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
     select CAGENT_MODEL_OPENAI if !SMART_HOME_DEMO_STATIC_LVGL_HOME
     select CAGENT_RUNTIME_OPENVELA_DEFAULTS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
-    select CAGENT_RUNTIME_OPENVELA_TLS if !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    select CAGENT_RUNTIME_OPENVELA_TLS if !SMART_HOME_DEMO_STATIC_LVGL_HOME && !SMART_HOME_DEMO_OFFLINE_UI
     default n
     help
       Smart home cAGENT demo skeleton with separated agent, tool, skill,
@@ -27,6 +27,18 @@ config SMART_HOME_DEMO_STACKSIZE
 config SMART_HOME_DEMO_PRIORITY
     int "Smart home demo task priority"
     default 100
+
+config SMART_HOME_DEMO_OFFLINE_UI
+    bool "Offline regular LVGL UI bring-up"
+    depends on SMART_HOME_DEMO_UI_LVGL
+    depends on !SMART_HOME_DEMO_STATIC_LVGL_HOME
+    default n
+    help
+      Start the regular Smart Home agent and LVGL UI without initializing a
+      network transport or compiling the default mbedTLS HTTP callback. This
+      profile is intended for board display and touchscreen bring-up. Local
+      device panels and settings remain available; cloud chat reports the
+      model as unavailable until a network-capable profile is selected.
 
 config SMART_HOME_AHT30_TOOL
     bool "Enable Box3 AHT30 indoor environment tool"

@@ -9,7 +9,9 @@
 #include "../../smart_home_memory.h"
 #include <cagent/runtime_openvela.h>
 
+#ifndef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
 #include <arpa/inet.h>
+#endif
 #include <nuttx/irq.h>
 #include <nuttx/sched.h>
 #include <sched.h>
@@ -20,7 +22,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
 #include "netutils/netlib.h"
+#endif
 
 /* Temporary BOX-3 memory-pressure A/B test: match the successful console
  * smart_home task stack instead of reserving 64 KiB for each chat worker. */
@@ -68,8 +72,12 @@ static void agent_worker_log_context(const char *stage,
     struct sched_param sched_param;
     struct stackinfo_s stack_info;
     smart_home_network_status_t network;
+#ifndef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
     struct in_addr address;
     char address_text[INET_ADDRSTRLEN] = "none";
+#else
+    char address_text[] = "offline";
+#endif
     int policy = -1;
     int priority = -1;
     int stack_ret;
@@ -98,6 +106,7 @@ static void agent_worker_log_context(const char *stage,
     }
 
     network = app->system_status.network_status;
+#ifndef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
     memset(&address, 0, sizeof(address));
     if (network.ifname) {
         netlib_get_ipv4addr(network.ifname, &address);
@@ -107,6 +116,9 @@ static void agent_worker_log_context(const char *stage,
 
         probe_ret = smart_home_network_probe(&network);
     }
+#else
+    probe_ret = smart_home_network_probe(&network);
+#endif
 
     printf("[agent_worker] %s network if=%s ip=%s probe=%d "
            "init=%d ip_status=%d dns_status=%d online=%d\n",

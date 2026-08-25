@@ -437,7 +437,7 @@ int smart_home_device_set_ac(smart_home_state_t *state,
                              int fan_speed,
                              int temperature)
 {
-    smart_home_device_t *device;    不在核心 Guard 中做关键词判断
+    smart_home_device_t *device; /* 不在核心 Guard 中做关键词判断 */
 
     if (!state || !room) {
         return AGENT_ERROR_INVALID;

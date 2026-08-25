@@ -21,8 +21,6 @@ if(CONFIG_SMART_HOME_DEMO)
     src/config/smart_home_secrets.c
     src/device/smart_home_device.c
     src/device/smart_home_device_service.c
-    src/net/smart_home_network.c
-    src/net/smart_home_wifi.c
     src/skills/smart_home_skill_loader.c
     src/skills/smart_home_scene_catalog.c
     src/skills/smart_home_skills.c
@@ -30,6 +28,15 @@ if(CONFIG_SMART_HOME_DEMO)
     src/ui/smart_home_ui.c
   )
   set(SMART_HOME_DEPS cagent)
+
+  if(CONFIG_SMART_HOME_DEMO_OFFLINE_UI)
+    list(APPEND SMART_HOME_SRCS src/net/smart_home_network_offline.c)
+  else()
+    list(APPEND SMART_HOME_SRCS
+      src/net/smart_home_network.c
+      src/net/smart_home_wifi.c
+    )
+  endif()
 
   if(CONFIG_SMART_HOME_NODE_GATEWAY OR CONFIG_SMART_HOME_MCP_BRIDGE OR CONFIG_SMART_HOME_APP_BRIDGE)
     list(APPEND SMART_HOME_DEPS cagent_addons)

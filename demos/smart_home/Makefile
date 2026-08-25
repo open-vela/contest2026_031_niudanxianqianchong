@@ -27,8 +27,12 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/config/smart_home_secrets.c
   CSRCS     += src/device/smart_home_device.c
   CSRCS     += src/device/smart_home_device_service.c
-  CSRCS     += src/net/smart_home_network.c
-  CSRCS     += src/net/smart_home_wifi.c
+  ifneq ($(CONFIG_SMART_HOME_DEMO_OFFLINE_UI),)
+    CSRCS   += src/net/smart_home_network_offline.c
+  else
+    CSRCS   += src/net/smart_home_network.c
+    CSRCS   += src/net/smart_home_wifi.c
+  endif
   CSRCS     += src/skills/smart_home_skill_loader.c
   CSRCS     += src/skills/smart_home_scene_catalog.c
   CSRCS     += src/skills/smart_home_skills.c

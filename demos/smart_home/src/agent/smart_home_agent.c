@@ -42,6 +42,26 @@ static const char g_system_prompt[] =
 #define SMART_HOME_HAS_REMOTE_TOOLS 1
 #endif
 
+/* Keep the P4X early-boot trace deliberately sparse: USB console writes are
+ * synchronous on this profile, so verbose diagnostics can delay start-up. */
+static void smart_home_init_trace(const char *stage, int ret)
+{
+#ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
+    if (!stage ||
+        (strcmp(stage, "begin") != 0 &&
+         strcmp(stage, "agent-create-begin") != 0 &&
+         strcmp(stage, "agent-create-done") != 0)) {
+        return;
+    }
+
+    printf("[smart_home_init] stage=%s ret=%d\n",
+           stage, ret);
+#else
+    (void)stage;
+    (void)ret;
+#endif
+}
+
 static uint32_t max_u32(uint32_t a, uint32_t b)
 {
     return a > b ? a : b;
@@ -339,30 +359,50 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return AGENT_ERROR_INVALID;
     }
 
+    smart_home_init_trace("begin", AGENT_OK);
     memset(app, 0, sizeof(*app));
     smart_home_status_init(&app->system_status);
+    smart_home_init_trace("status-ready", AGENT_OK);
+
     smart_home_device_init(&app->device_state);
+    smart_home_init_trace("device-state-ready", AGENT_OK);
+
+    smart_home_init_trace("device-service-begin", AGENT_OK);
     ret = smart_home_device_service_init(&app->device_service,
                                          &app->device_state);
+    smart_home_init_trace("device-service-done", ret);
     if (ret != AGENT_OK) {
         app->system_status.agent_status = ret;
         smart_home_status_error(app, "Device service", ret);
         return ret;
     }
+
     smart_home_skill_store_init(&app->skill_store);
+    smart_home_init_trace("skill-store-ready", AGENT_OK);
+
     smart_home_model_config_default(&app->model_config);
+    smart_home_init_trace("model-default-ready", AGENT_OK);
+
+    smart_home_init_trace("settings-load-begin", AGENT_OK);
     smart_home_model_config_load_active_backend(&app->model_config);
+    smart_home_init_trace("settings-load-done", AGENT_OK);
 
 #ifdef SMART_HOME_HAS_REMOTE_TOOLS
+    smart_home_init_trace("agent-mutex-begin", AGENT_OK);
     if (pthread_mutex_init(&app->agent_mutex, NULL) != 0) {
+        smart_home_init_trace("agent-mutex-done", AGENT_ERROR);
         app->system_status.agent_status = AGENT_ERROR;
         smart_home_status_error(app, "Agent mutex", AGENT_ERROR);
         return AGENT_ERROR;
     }
     app->agent_mutex_initialized = 1;
+    smart_home_init_trace("agent-mutex-done", AGENT_OK);
 #endif
 
+    smart_home_init_trace("agent-create-begin", AGENT_OK);
     app->agent = agent_create_simple("smart_home_agent", g_system_prompt);
+    smart_home_init_trace("agent-create-done",
+                          app->agent ? AGENT_OK : AGENT_ERROR_NOMEM);
     if (!app->agent) {
         app->system_status.agent_status = AGENT_ERROR_NOMEM;
         smart_home_status_error(app, "Agent create", AGENT_ERROR_NOMEM);
@@ -370,7 +410,9 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return AGENT_ERROR_NOMEM;
     }
 
+    smart_home_init_trace("device-context-begin", AGENT_OK);
     ret = smart_home_device_register_context(app->agent, &app->device_state);
+    smart_home_init_trace("device-context-done", ret);
     if (ret != AGENT_OK) {
         app->system_status.agent_status = ret;
         smart_home_status_error(app, "Device context", ret);
@@ -378,9 +420,11 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return ret;
     }
 
+    smart_home_init_trace("skills-load-begin", AGENT_OK);
     ret = smart_home_skills_register(app->agent, &app->skill_store);
     app->system_status.skills_status = ret;
     app->system_status.skills_loaded = app->skill_store.count;
+    smart_home_init_trace("skills-load-done", ret);
     if (ret == AGENT_ERROR_NOTFOUND) {
         /* Runtime skill files are optional for the local UI bring-up path.
          * A board without /data/res/skills can still show device panels,
@@ -397,18 +441,23 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     }
 
     if (ret == AGENT_OK) {
+        smart_home_init_trace("scene-catalog-begin", AGENT_OK);
         scene_skill = smart_home_skill_store_find(&app->skill_store,
                                                   "smart_home_scenes");
         ret = smart_home_scene_catalog_load(
             scene_skill ? scene_skill->context_text : NULL, &scene_catalog);
+        smart_home_init_trace("scene-catalog-load-done", ret);
         if (ret != AGENT_OK) {
             app->system_status.skills_status = ret;
             smart_home_status_error(app, "Scene catalog", ret);
             smart_home_agent_app_deinit(app);
             return ret;
         }
+
+        smart_home_init_trace("scene-service-begin", AGENT_OK);
         ret = smart_home_device_service_set_scene_catalog(&app->device_service,
                                                            &scene_catalog);
+        smart_home_init_trace("scene-service-done", ret);
         if (ret != AGENT_OK) {
             app->system_status.tools_status = ret;
             smart_home_status_error(app, "Scene service", ret);
@@ -417,15 +466,19 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         }
     }
 
+    smart_home_init_trace("tools-register-begin", AGENT_OK);
     ret = smart_home_tools_register(app->agent, &app->device_service);
     app->system_status.tools_status = ret;
+    smart_home_init_trace("tools-register-done", ret);
     if (ret != AGENT_OK) {
         smart_home_status_error(app, "Tools", ret);
     }
 
+    smart_home_init_trace("policy-bind-begin", AGENT_OK);
     ret = agent_set_policy_callback(app->agent,
                                     smart_home_local_tool_policy,
                                     app);
+    smart_home_init_trace("policy-bind-done", ret);
     if (ret != AGENT_OK) {
         app->system_status.tools_status = ret;
         smart_home_status_error(app, "Tool policy", ret);
@@ -433,9 +486,11 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return ret;
     }
 
+    smart_home_init_trace("event-bind-begin", AGENT_OK);
     agent_set_event_callback(app->agent,
                              smart_home_ui_event_cb,
                              &app->run_start_ms);
+    smart_home_init_trace("event-bind-done", AGENT_OK);
 
     model_config = agent_model_openai_config_default();
     model_config.host = app->model_config.host;
@@ -447,7 +502,10 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     model_config.request_buffer_size = app->model_config.request_buffer_size;
     model_config.response_buffer_size = app->model_config.response_buffer_size;
 
+    smart_home_init_trace("model-create-begin", AGENT_OK);
     model = agent_model_openai_create(&model_config);
+    smart_home_init_trace("model-create-done",
+                          model ? AGENT_OK : AGENT_ERROR_NOMEM);
     if (!model) {
         app->system_status.model_status = AGENT_ERROR_NOMEM;
         smart_home_status_error(app, "Model create", AGENT_ERROR_NOMEM);
@@ -455,7 +513,9 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return AGENT_ERROR_NOMEM;
     }
 
+    smart_home_init_trace("model-bind-begin", AGENT_OK);
     ret = agent_set_model_owned(app->agent, model);
+    smart_home_init_trace("model-bind-done", ret);
     if (ret != AGENT_OK) {
         app->system_status.model_status = ret;
         smart_home_status_error(app, "Model bind", ret);
@@ -464,7 +524,9 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         return ret;
     }
 
+    smart_home_init_trace("model-config-apply-begin", AGENT_OK);
     ret = smart_home_agent_app_apply_model_config(app, &app->model_config);
+    smart_home_init_trace("model-config-apply-done", ret);
     if (ret != AGENT_OK) {
         /* 密钥缺失只禁用当前云 provider；设备控制与设置页仍可启动，供用户
          * 将 secrets.json 写入 data 分区后切换/重试。 */
@@ -473,7 +535,9 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     }
 
 #ifdef CONFIG_SMART_HOME_APP_BRIDGE_CHAT
+    smart_home_init_trace("app-run-service-begin", AGENT_OK);
     ret = smart_home_agent_run_service_start(&app->run_service, app);
+    smart_home_init_trace("app-run-service-done", ret);
     if (ret != AGENT_OK) {
         smart_home_status_error(app, "Agent run service", ret);
         smart_home_agent_app_deinit(app);
@@ -482,9 +546,11 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
 #endif
 
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    smart_home_init_trace("node-gateway-begin", AGENT_OK);
     ret = smart_home_node_gateway_start(&app->node_gateway, app->agent,
                                         &app->agent_mutex);
     app->system_status.node_gateway_status = ret;
+    smart_home_init_trace("node-gateway-done", ret);
     if (ret != AGENT_OK) {
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY_REQUIRED
         smart_home_status_error(app, "Node gateway", ret);
@@ -497,9 +563,11 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
 #endif
 
 #ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+    smart_home_init_trace("mcp-bridge-begin", AGENT_OK);
     ret = smart_home_mcp_bridge_start(&app->mcp_bridge, app->agent,
                                       &app->agent_mutex);
     app->system_status.mcp_bridge_status = ret;
+    smart_home_init_trace("mcp-bridge-done", ret);
     if (ret != AGENT_OK) {
         /* 手动发现模式下，配置错误只禁用 MCP，不影响本地和 Node 功能。 */
         smart_home_status_mcp_bridge_disabled(app, ret);
@@ -507,6 +575,7 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
 #endif
 
     app->system_status.agent_status = AGENT_OK;
+    smart_home_init_trace("done", AGENT_OK);
     return AGENT_OK;
 }
 
@@ -550,6 +619,11 @@ void smart_home_agent_app_set_network_status(
         app->system_status.network_status = *status;
     } else {
         smart_home_network_status_init(&app->system_status.network_status);
+    }
+
+    if (app->system_status.network_status.init_status ==
+        SMART_HOME_NETWORK_STATUS_NA) {
+        return;
     }
 
     if (!app->system_status.network_status.online) {

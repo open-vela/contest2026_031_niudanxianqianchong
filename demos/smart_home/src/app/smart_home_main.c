@@ -19,7 +19,9 @@ int main(int argc, char *argv[])
     char stack_marker;
     smart_home_agent_app_t app;
     smart_home_network_status_t network_status;
+#ifndef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
     int network_ret;
+#endif
     int ret;
 
     printf("=== Smart Home Agent Demo ===\n");
@@ -38,6 +40,13 @@ int main(int argc, char *argv[])
      * Continue on failure so the UI can still show diagnostics.
      */
 
+#ifdef CONFIG_SMART_HOME_DEMO_OFFLINE_UI
+    smart_home_network_status_init(&network_status);
+    network_status.init_status = SMART_HOME_NETWORK_STATUS_NA;
+    network_status.ip_status = SMART_HOME_NETWORK_STATUS_NA;
+    network_status.dns_status = SMART_HOME_NETWORK_STATUS_NA;
+    printf("[smart_home_net] offline UI profile: network initialization skipped\n");
+#else
     network_ret = smart_home_network_init(&network_status);
     if (network_ret < 0) {
         syslog(LOG_WARNING, "Network init failed: %d. "
@@ -46,6 +55,7 @@ int main(int argc, char *argv[])
                 "Network init failed: %d (continuing)\n",
                 network_ret);
     }
+#endif
     smart_home_cpu_debug_log("main-network-ready");
     ov_mem_region_log("main-stack", &stack_marker);
     ov_mem_region_log("smart-home-app", &app);
