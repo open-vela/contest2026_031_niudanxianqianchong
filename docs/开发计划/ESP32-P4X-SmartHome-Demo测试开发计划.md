@@ -20,8 +20,8 @@
 | Host 内建色条 | 已通过 | `dsi_probe pattern 10` 真机可见。 |
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
 | NuttX framebuffer 设备 | 单缓冲真机 PASS；双缓冲待验收 | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；双页 PSRAM、`FBIOPAN_DISPLAY` 与 DMA 帧边界换页已实现，待实板确认无撕裂。 |
-| LVGL Smart Home 页面 | P2 已实现，真机待测 | 新增静态首页分支，使用 `/dev/fb0`；完整 UI 路径已改为 Kconfig 指定显示设备。 |
-| GT911 触摸 | P3.1 单指真机通过 | `/dev/input0` 与 `gt911_probe` 已验证 `DOWN/MOVE/UP`、坐标和触摸面积；多点和 LVGL 接入待验证。 |
+| LVGL Smart Home 页面 | P2 首屏真机 PASS；P3.2 待测 | 静态首页已通过 `/dev/fb0` 显示；正式 Agent + LVGL 离线启动配置已就绪，待真机验证页面与输入设备创建。 |
+| GT911 触摸 | P3.1 单指真机通过；P3.2 待测 | `/dev/input0` 与 `gt911_probe` 已验证 `DOWN/MOVE/UP`、坐标和 size；待交给正式 LVGL 的 `indev`。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
 | MCP / Node / App Bridge | 未上 P4X | 在本地 UI、网络和模型链路稳定后再启用。 |
 
