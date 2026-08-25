@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Create the development-time relative links from the NuttX worktree to the
-# contest driver's canonical sources.  This script deliberately does not edit
-# any NuttX build or Kconfig files.
+# Create the development-time relative links required by the P4X build.  This
+# script deliberately does not edit any NuttX build or Kconfig files.
 
 set -eu
 
@@ -96,6 +95,27 @@ remove_legacy_link()
 
 if [ ! -d "$nuttx_dir/drivers" ] || [ ! -d "$nuttx_dir/include/nuttx" ]; then
   echo "error: NuttX worktree not found: $nuttx_dir" >&2
+  exit 1
+fi
+
+# An earlier development revision created nuttx/external -> ../external for
+# FreeType.  In the OpenVela layout that makes the kernel invoke the root
+# external Makefile without APPDIR and breaks pass2dep at /Directory.mk.
+# Runtime P4X fonts use LVGL TinyTTF instead, so this link must stay absent.
+if [ -L "$nuttx_dir/external" ]; then
+  if [ "$(readlink "$nuttx_dir/external")" != "../external" ]; then
+    echo "error: refusing to remove unexpected link $nuttx_dir/external -> $(readlink "$nuttx_dir/external")" >&2
+    exit 1
+  fi
+  if [ "$mode" = "check" ]; then
+    echo "STALE: $nuttx_dir/external -> ../external (remove it)" >&2
+    exit 1
+  fi
+
+  rm "$nuttx_dir/external"
+  echo "REMOVED stale link: $nuttx_dir/external -> ../external"
+elif [ -e "$nuttx_dir/external" ]; then
+  echo "error: unexpected path exists: $nuttx_dir/external" >&2
   exit 1
 fi
 

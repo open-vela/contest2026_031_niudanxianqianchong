@@ -1,4 +1,32 @@
-# ESP32-S3-BOX-3 构建补丁脚本
+# ESP32-S3-BOX-3 与 ESP32-P4X 构建补丁脚本
+
+## ESP32-P4X：HAL 与 NuttX 延时接口兼容
+
+P4X 的 LittleFS 启用 `CONFIG_ESPRESSIF_SPIFLASH` 后，会链接 ESP HAL 的
+`spi_flash_os_func_app.c`。该组件通过 `platform/os.h` 的 `OS_TASK_DELAY()`
+调用 NuttX 延时接口；固定版本的 HAL 使用了不存在的 `nxsched_usleep()`，会造成
+链接错误。P4X 使用 `nxsig_usleep()`，并显式包含 `<nuttx/signal.h>`。
+
+补丁存放在：
+
+```text
+chips/esp32p4/common/espressif/patches/
+  0001-nuttx-platform-openvela-nxtask-init.patch
+  0002-nuttx-platform-use-nxsig-usleep.patch
+```
+
+常规 Make/CMake 构建会在 HAL checkout/reset 后按文件名顺序自动应用这些补丁。Make
+会在同一 checkout 配方中写入补丁戳，并删除 P4X HAL 生成的对象、依赖文件和
+`libarch.a`/`libkarch.a`，确保含有旧 HAL 内联函数的对象不会被复用。
+若已存在 HAL 工作树（例如本次链接失败后），先执行：
+
+```bash
+cd ~/openvela
+contest2026_031_niudanxianqianchong/scripts/apply_p4x_hal_patches.sh
+```
+
+该脚本遵循 BOX-3 补丁的原则：修改的是可丢弃 HAL 副本，但修改内容只保存在竞赛仓的
+补丁文件中；后续 `distclean` 或 HAL 重新拉取仍可复现。
 
 ## 为什么需要这些脚本
 
