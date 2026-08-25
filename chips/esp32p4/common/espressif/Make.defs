@@ -250,7 +250,34 @@ ESP_HAL_3RDPARTY_REPO   = esp-hal-3rdparty
 # This path is passed to "git -C chip/esp-hal-3rdparty apply" below.  It
 # must therefore be absolute: Git resolves relative patch paths from the HAL
 # worktree after -C changes its working directory.
-ESP32P4_HAL_PATCH       = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)$(ESP32P4_COMMON_DIR)$(DELIM)patches$(DELIM)0001-nuttx-platform-openvela-nxtask-init.patch
+# Keep HAL compatibility fixes in the contest source tree.  The HAL worktree
+# is cleaned/reset by the build system, therefore direct edits there are not
+# reproducible.  The lexical order is intentional: later patches may depend
+# on the earlier compatibility changes.
+ESP32P4_HAL_PATCH_DIR   = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)$(ESP32P4_COMMON_DIR)$(DELIM)patches
+ESP32P4_HAL_PATCHES     = $(sort $(wildcard $(ESP32P4_HAL_PATCH_DIR)$(DELIM)*.patch))
+ESP32P4_HAL_PATCH_STAMP = chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM).p4x_hal_patches.applied
+ESP32P4_ARCHIVE_DIR     = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src
+ESP32P4_ARCHIVES        = $(ESP32P4_ARCHIVE_DIR)$(DELIM)libarch$(LIBEXT) \
+			   $(ESP32P4_ARCHIVE_DIR)$(DELIM)libkarch$(LIBEXT) \
+			   $(TOPDIR)$(DELIM)staging$(DELIM)libarch$(LIBEXT) \
+			   $(TOPDIR)$(DELIM)staging$(DELIM)libkarch$(LIBEXT)
+# Header-level HAL compatibility fixes are not reliably tracked by every
+# generated object dependency.  Limit invalidation to generated objects
+# below the disposable HAL checkout; never delete source files there.
+ESP32P4_HAL_OBJECT_DIR  = $(ESP32P4_ARCHIVE_DIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)
+
+define APPLY_ESP32P4_HAL_PATCHES
+for patch in $(ESP32P4_HAL_PATCHES); do \
+	if git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply --check $$patch >/dev/null 2>&1; then \
+		git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply $$patch || exit $$?; \
+	elif git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply --reverse --check $$patch >/dev/null 2>&1; then \
+		:; \
+	else \
+		echo "P4X HAL patch does not match the pinned HAL: $$patch" >&2; exit 1; \
+	fi; \
+done
+endef
 ifndef ESP_HAL_3RDPARTY_VERSION
 	ESP_HAL_3RDPARTY_VERSION = b90b1837cb5ad24747deb4c895246037cc206ce5
 endif
@@ -299,8 +326,21 @@ ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) submodule --quiet update --init $(GIT_DEPTH_PARAMETER) components/mbedtls/mbedtls
 endif
-	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply --check $(ESP32P4_HAL_PATCH)
-	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply $(ESP32P4_HAL_PATCH)
+	$(Q) $(APPLY_ESP32P4_HAL_PATCHES)
+	$(Q) touch $(ESP32P4_HAL_PATCH_STAMP)
+	$(Q) find $(ESP32P4_HAL_OBJECT_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true
+	$(Q) rm -f $(ESP32P4_ARCHIVES)
+
+# HAL patches can alter inline code in headers.  libarch.a must therefore
+# depend on a stamp written after the patches are applied; otherwise a
+# pre-existing archive can keep stale objects after a HAL update.
+$(ESP32P4_HAL_PATCH_STAMP): $(ESP32P4_HAL_PATCHES) | chip/$(ESP_HAL_3RDPARTY_REPO)
+	$(Q) $(APPLY_ESP32P4_HAL_PATCHES)
+	$(Q) touch $@
+	$(Q) find $(ESP32P4_HAL_OBJECT_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true
+	$(Q) rm -f $(ESP32P4_ARCHIVES)
+
+libarch$(LIBEXT): $(ESP32P4_HAL_PATCH_STAMP)
 ifeq ($(CONFIG_ESPRESSIF_WIRELESS),y)
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: initializing submodules..."

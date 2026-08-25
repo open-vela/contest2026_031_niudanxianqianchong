@@ -62,9 +62,12 @@
 #define USJ_RCC_ATOMIC()
 #endif
 
-/* The hardware buffer has a fixed size of 64 bytes */
+/* The USB Serial-JTAG hardware FIFO is 64 bytes.  Keep a larger software
+ * ring so normal console writes can be drained by the TX-empty interrupt
+ * instead of blocking the writer after one hardware packet.
+ */
 
-#define ESP_USBCDC_BUFFERSIZE 64
+#define ESP_USBSERIAL_BUFSIZE 256
 
 /****************************************************************************
  * Private Types
@@ -93,6 +96,7 @@ static void esp_txint(struct uart_dev_s *dev, bool enable);
 static void esp_rxint(struct uart_dev_s *dev, bool enable);
 static bool esp_rxavailable(struct uart_dev_s *dev);
 static bool esp_txready(struct uart_dev_s *dev);
+static bool esp_txempty(struct uart_dev_s *dev);
 static void esp_send(struct uart_dev_s *dev, int ch);
 static int  esp_receive(struct uart_dev_s *dev, unsigned int *status);
 static int  esp_ioctl(struct file *filep, int cmd, unsigned long arg);
@@ -101,8 +105,8 @@ static int  esp_ioctl(struct file *filep, int cmd, unsigned long arg);
  * Private Data
  ****************************************************************************/
 
-static char g_rxbuffer[ESP_USBCDC_BUFFERSIZE];
-static char g_txbuffer[ESP_USBCDC_BUFFERSIZE];
+static char g_rxbuffer[ESP_USBSERIAL_BUFSIZE];
+static char g_txbuffer[ESP_USBSERIAL_BUFSIZE];
 
 static struct esp_priv_s g_usbserial_priv =
 {
@@ -121,7 +125,7 @@ static struct uart_ops_s g_uart_ops =
   .rxint       = esp_rxint,
   .rxavailable = esp_rxavailable,
   .txready     = esp_txready,
-  .txempty     = NULL,
+  .txempty     = esp_txempty,
   .send        = esp_send,
   .receive     = esp_receive,
   .ioctl       = esp_ioctl,
@@ -136,12 +140,12 @@ uart_dev_t g_uart_usbserial =
   .isconsole = true,
   .recv =
     {
-      .size = ESP_USBCDC_BUFFERSIZE,
+      .size = ESP_USBSERIAL_BUFSIZE,
       .buffer = g_rxbuffer,
     },
   .xmit =
     {
-      .size = ESP_USBCDC_BUFFERSIZE,
+      .size = ESP_USBSERIAL_BUFSIZE,
       .buffer = g_txbuffer,
     },
   .ops = &g_uart_ops,
@@ -225,8 +229,6 @@ static void esp_shutdown(struct uart_dev_s *dev)
 
 static void esp_txint(struct uart_dev_s *dev, bool enable)
 {
-  usb_serial_jtag_ll_txfifo_flush();
-
   if (enable)
     {
       usb_serial_jtag_ll_ena_intr_mask(
@@ -365,6 +367,21 @@ static bool esp_rxavailable(struct uart_dev_s *dev)
 static bool esp_txready(struct uart_dev_s *dev)
 {
   return (bool)usb_serial_jtag_ll_txfifo_writable();
+}
+
+/****************************************************************************
+ * Name: esp_txempty
+ *
+ * Description:
+ *   Return true only after the USB Serial-JTAG endpoint has drained its
+ *   transmit FIFO.  This is distinct from txready(), which only reports
+ *   that there is space for another byte.
+ *
+ ****************************************************************************/
+
+static bool esp_txempty(struct uart_dev_s *dev)
+{
+  return USB_SERIAL_JTAG.jfifo_st.serial_jtag_out_fifo_empty != 0;
 }
 
 /****************************************************************************

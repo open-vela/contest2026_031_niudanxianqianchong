@@ -1,0 +1,20 @@
+diff --git a/nuttx/include/platform/os.h b/nuttx/include/platform/os.h
+index 2e7fcd2d7cb..a2f6c3e8f1b 100644
+--- a/nuttx/include/platform/os.h
++++ b/nuttx/include/platform/os.h
+@@ -17,6 +17,7 @@
+ #include <stdbool.h>
+ #include <semaphore.h>
+ #include <nuttx/clock.h>
++#include <nuttx/signal.h>
+ #include <nuttx/sched.h>
+ #include <nuttx/init.h>
+ #include <sched/sched.h>
+@@ -354,6 +355,6 @@ static inline void esp_os_task_delay_adapter(uint32_t ticks)
+   if (OSINIT_OS_READY())
+     {
+       useconds_t us = TICK2USEC(ticks);
+-      nxsched_usleep(us);
++      nxsig_usleep(us);
+     }
+ }

@@ -314,6 +314,35 @@ if(NOT IS_DIRECTORY "${ESP_HAL_3RDPARTY_REPO}")
   execute_process(COMMAND git apply --directory components/mbedtls/mbedtls nuttx/patches/components/mbedtls/mbedtls/0002-mbedtls_add_prefix_to_macro.patch
                   WORKING_DIRECTORY ${ESP_HAL_3RDPARTY_FETCH_SOURCE_DIR})
 
+  # The HAL worktree is a disposable third-party checkout.  Apply the P4X
+  # NuttX compatibility patches from the contest tree after checkout rather
+  # than carrying untracked edits in esp-hal-3rdparty.
+  file(GLOB ESP32P4_HAL_PATCHES "${CMAKE_CURRENT_LIST_DIR}/patches/*.patch")
+  list(SORT ESP32P4_HAL_PATCHES)
+  foreach(ESP32P4_HAL_PATCH IN LISTS ESP32P4_HAL_PATCHES)
+    execute_process(
+      COMMAND git apply --check "${ESP32P4_HAL_PATCH}"
+      WORKING_DIRECTORY ${ESP_HAL_3RDPARTY_FETCH_SOURCE_DIR}
+      RESULT_VARIABLE ESP32P4_HAL_PATCH_CHECK)
+    if(ESP32P4_HAL_PATCH_CHECK EQUAL 0)
+      execute_process(
+        COMMAND git apply "${ESP32P4_HAL_PATCH}"
+        WORKING_DIRECTORY ${ESP_HAL_3RDPARTY_FETCH_SOURCE_DIR}
+        RESULT_VARIABLE ESP32P4_HAL_PATCH_APPLY)
+      if(NOT ESP32P4_HAL_PATCH_APPLY EQUAL 0)
+        message(FATAL_ERROR "Failed to apply P4X HAL patch: ${ESP32P4_HAL_PATCH}")
+      endif()
+    else()
+      execute_process(
+        COMMAND git apply --reverse --check "${ESP32P4_HAL_PATCH}"
+        WORKING_DIRECTORY ${ESP_HAL_3RDPARTY_FETCH_SOURCE_DIR}
+        RESULT_VARIABLE ESP32P4_HAL_PATCH_REVERSE_CHECK)
+      if(NOT ESP32P4_HAL_PATCH_REVERSE_CHECK EQUAL 0)
+        message(FATAL_ERROR "P4X HAL patch does not match the pinned HAL: ${ESP32P4_HAL_PATCH}")
+      endif()
+    endif()
+  endforeach()
+
   if(NXTMPDIR AND NOT EXISTS "${ESP_HAL_3RDPARTY_CHIP_DIR}")
     message(STATUS
       "Copying from ${ESP_HAL_NXTMPDIR_CACHE} to ${ESP_HAL_3RDPARTY_CHIP_DIR}")
