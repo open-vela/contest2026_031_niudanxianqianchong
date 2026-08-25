@@ -38,6 +38,7 @@
 #define ESP32P4_DSI_FB_HEIGHT       600
 #define ESP32P4_DSI_FB_BPP            16
 #define ESP32P4_DSI_FB_STRIDE      (ESP32P4_DSI_FB_WIDTH * 2)
+#define ESP32P4_DSI_FB_BUFFER_COUNT     2
 #define ESP32P4_DSI_FB_HS_RATE_HZ  1000000000
 #define ESP32P4_DSI_FB_LP_RATE_HZ    10000000
 
@@ -53,8 +54,11 @@ struct esp32p4_dsi_fb_s
   struct mipi_dsi_device device;
   struct ek79007_panel_s panel;
   struct ek79007_panel_config_s panel_config;
+  struct esp_mipi_dsi_dpi_panel_config_s dpi_config;
   struct esp_mipi_dsi_dpi_panel_s dpi_panel;
   FAR struct mipi_dsi_host *host;
+  size_t frame_buffer_bytes;
+  uint8_t frame_buffer_count;
   bool attached;
   bool registered;
 };
@@ -68,6 +72,9 @@ static int esp32p4_dsi_fb_getvideoinfo(FAR struct fb_vtable_s *vtable,
 static int esp32p4_dsi_fb_getplaneinfo(FAR struct fb_vtable_s *vtable,
                                        int planeno,
                                        FAR struct fb_planeinfo_s *pinfo);
+static int esp32p4_dsi_fb_pandisplay(FAR struct fb_vtable_s *vtable,
+                                     FAR struct fb_planeinfo_s *pinfo);
+static void esp32p4_dsi_fb_frame_done(FAR void *arg);
 
 #ifdef CONFIG_FB_UPDATE
 static int esp32p4_dsi_fb_updatearea(FAR struct fb_vtable_s *vtable,
@@ -122,27 +129,129 @@ static int esp32p4_dsi_fb_updatearea(FAR struct fb_vtable_s *vtable,
   FAR struct esp32p4_dsi_fb_s *fb =
     (FAR struct esp32p4_dsi_fb_s *)vtable;
 
+  uint8_t first_page;
+  uint8_t last_page;
+  uint8_t page;
+  FAR uint8_t *page_buffer;
+  int ret;
+
   if (fb == NULL || area == NULL || fb->planeinfo.fbmem == NULL ||
-      area->x > fb->videoinfo.xres || area->y > fb->videoinfo.yres ||
+      area->x > fb->videoinfo.xres ||
+      area->y > fb->planeinfo.yres_virtual ||
       area->w > fb->videoinfo.xres - area->x ||
-      area->h > fb->videoinfo.yres - area->y)
+      area->h > fb->planeinfo.yres_virtual - area->y)
     {
       return -EINVAL;
     }
 
-  /* The P4 DSI Bridge reads the entire persistent PSRAM buffer in a cyclic
-   * scanout.  Clean the complete buffer instead of a partial cache range:
-   * this keeps the first framebuffer implementation correct for all caller
-   * alignments.  A later LVGL phase may optimize this to aligned rectangles.
+  if (area->w == 0 || area->h == 0)
+    {
+      return OK;
+    }
+
+  first_page = area->y / fb->videoinfo.yres;
+  last_page = (area->y + area->h - 1) / fb->videoinfo.yres;
+  if (last_page >= fb->frame_buffer_count)
+    {
+      return -EINVAL;
+    }
+
+  /* A direct-rendering LVGL update belongs to exactly one virtual page in
+   * normal operation.  Clean complete pages so cache maintenance remains
+   * correct for all source and destination alignment combinations.
    */
 
-  return esp_mipi_dsi_dma_buffer_sync_for_device(fb->planeinfo.fbmem,
-                                                  fb->planeinfo.fblen);
+  for (page = first_page; page <= last_page; page++)
+    {
+      page_buffer = (FAR uint8_t *)fb->planeinfo.fbmem +
+                    page * fb->frame_buffer_bytes;
+      ret = esp_mipi_dsi_dma_buffer_sync_for_device(
+        page_buffer, fb->frame_buffer_bytes);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
+  return OK;
 }
 #endif
 
+/****************************************************************************
+ * Name: esp32p4_dsi_fb_pandisplay
+ ****************************************************************************/
+
+static int esp32p4_dsi_fb_pandisplay(FAR struct fb_vtable_s *vtable,
+                                     FAR struct fb_planeinfo_s *pinfo)
+{
+  FAR struct esp32p4_dsi_fb_s *fb =
+    (FAR struct esp32p4_dsi_fb_s *)vtable;
+  FAR uint8_t *page_buffer;
+  uint8_t page;
+  int ret;
+
+  if (fb == NULL || pinfo == NULL || fb->planeinfo.fbmem == NULL ||
+      pinfo->xoffset != 0 ||
+      pinfo->yoffset % fb->videoinfo.yres != 0 ||
+      pinfo->yoffset >= fb->planeinfo.yres_virtual ||
+      pinfo->yoffset + fb->videoinfo.yres > fb->planeinfo.yres_virtual)
+    {
+      return -EINVAL;
+    }
+
+  page = pinfo->yoffset / fb->videoinfo.yres;
+  if (page >= fb->frame_buffer_count)
+    {
+      return -EINVAL;
+    }
+
+  page_buffer = (FAR uint8_t *)fb->planeinfo.fbmem +
+                page * fb->frame_buffer_bytes;
+  ret = esp_mipi_dsi_dma_buffer_sync_for_device(page_buffer,
+                                                 fb->frame_buffer_bytes);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  return esp_mipi_dsi_video_dma_queue_frame_buffer(
+    fb->host, page_buffer, fb->frame_buffer_bytes);
+}
+
+/****************************************************************************
+ * Name: esp32p4_dsi_fb_frame_done
+ *
+ * Description:
+ *   Release one submitted page and notify framebuffer waiters.  This is
+ *   invoked by the DSI DMA frame-boundary interrupt after the next scanout
+ *   descriptor is armed, so it must remain non-blocking.
+ ****************************************************************************/
+
+static void esp32p4_dsi_fb_frame_done(FAR void *arg)
+{
+  FAR struct esp32p4_dsi_fb_s *fb = arg;
+
+  if (fb == NULL || !fb->registered)
+    {
+      return;
+    }
+
+  if (fb_paninfo_count(&fb->vtable, FB_NO_OVERLAY) > 0)
+    {
+      (void)fb_remove_paninfo(&fb->vtable, FB_NO_OVERLAY);
+    }
+
+  fb_notify_vsync(&fb->vtable);
+}
+
 static void esp32p4_dsi_fb_cleanup(FAR struct esp32p4_dsi_fb_s *fb)
 {
+  if (fb->host != NULL)
+    {
+      (void)esp_mipi_dsi_video_dma_set_frame_done_callback(
+        fb->host, NULL, NULL);
+    }
+
   if (fb->panel.dsi != NULL)
     {
       (void)ek79007_panel_shutdown(&fb->panel);
@@ -172,7 +281,6 @@ static void esp32p4_dsi_fb_cleanup(FAR struct esp32p4_dsi_fb_s *fb)
 int board_mipi_dsi_fb_initialize(int display)
 {
   FAR struct esp32p4_dsi_fb_s *fb = &g_esp32p4_dsi_fb;
-  size_t frame_buffer_bytes;
   int ret;
 
   if (display != 0)
@@ -203,7 +311,9 @@ int board_mipi_dsi_fb_initialize(int display)
   fb->panel_config.lanes = 2;
   fb->panel_config.format = MIPI_DSI_FMT_RGB565;
   fb->panel_config.dpi_panel = &fb->dpi_panel;
-  fb->panel_config.dpi_config = board_mipi_dsi_dpi_panel_config_get();
+  fb->dpi_config = *board_mipi_dsi_dpi_panel_config_get();
+  fb->dpi_config.frame_buffer_count = ESP32P4_DSI_FB_BUFFER_COUNT;
+  fb->panel_config.dpi_config = &fb->dpi_config;
 
   ret = ek79007_panel_setup(&fb->panel, &fb->device, &fb->panel_config);
   if (ret < 0)
@@ -230,9 +340,9 @@ int board_mipi_dsi_fb_initialize(int display)
       goto errout;
     }
 
-  ret = esp_mipi_dsi_dpi_panel_get_frame_buffer(&fb->dpi_panel,
-                                                 &fb->planeinfo.fbmem,
-                                                 &frame_buffer_bytes);
+  ret = esp_mipi_dsi_dpi_panel_get_frame_buffers(
+    &fb->dpi_panel, &fb->planeinfo.fbmem, &fb->frame_buffer_bytes,
+    &fb->frame_buffer_count);
   if (ret < 0)
     {
       goto errout;
@@ -243,15 +353,17 @@ int board_mipi_dsi_fb_initialize(int display)
   fb->videoinfo.yres = ESP32P4_DSI_FB_HEIGHT;
   fb->videoinfo.nplanes = 1;
 
-  fb->planeinfo.fblen = frame_buffer_bytes;
+  fb->planeinfo.fblen = fb->frame_buffer_bytes * fb->frame_buffer_count;
   fb->planeinfo.stride = ESP32P4_DSI_FB_STRIDE;
   fb->planeinfo.display = display;
   fb->planeinfo.bpp = ESP32P4_DSI_FB_BPP;
   fb->planeinfo.xres_virtual = ESP32P4_DSI_FB_WIDTH;
-  fb->planeinfo.yres_virtual = ESP32P4_DSI_FB_HEIGHT;
+  fb->planeinfo.yres_virtual = ESP32P4_DSI_FB_HEIGHT *
+                                fb->frame_buffer_count;
 
-  if (frame_buffer_bytes != (size_t)ESP32P4_DSI_FB_STRIDE *
-                            ESP32P4_DSI_FB_HEIGHT)
+  if (fb->frame_buffer_count != ESP32P4_DSI_FB_BUFFER_COUNT ||
+      fb->frame_buffer_bytes != (size_t)ESP32P4_DSI_FB_STRIDE *
+                                ESP32P4_DSI_FB_HEIGHT)
     {
       ret = -EINVAL;
       goto errout;
@@ -267,9 +379,17 @@ int board_mipi_dsi_fb_initialize(int display)
 
   fb->vtable.getvideoinfo = esp32p4_dsi_fb_getvideoinfo;
   fb->vtable.getplaneinfo = esp32p4_dsi_fb_getplaneinfo;
+  fb->vtable.pandisplay = esp32p4_dsi_fb_pandisplay;
 #ifdef CONFIG_FB_UPDATE
   fb->vtable.updatearea = esp32p4_dsi_fb_updatearea;
 #endif
+
+  ret = esp_mipi_dsi_video_dma_set_frame_done_callback(
+    fb->host, esp32p4_dsi_fb_frame_done, fb);
+  if (ret < 0)
+    {
+      goto errout;
+    }
 
   ret = fb_register_device(display, 0, &fb->vtable);
   if (ret < 0)
@@ -286,9 +406,9 @@ int board_mipi_dsi_fb_initialize(int display)
     }
 
   syslog(LOG_INFO, "INFO: P4X MIPI-DSI framebuffer registered: "
-         "/dev/fb%d %ux%u RGB565 buffer=%p bytes=%zu\n", display,
+         "/dev/fb%d %ux%u RGB565 buffers=%u base=%p bytes=%zu\n", display,
          fb->videoinfo.xres, fb->videoinfo.yres, fb->planeinfo.fbmem,
-         fb->planeinfo.fblen);
+         fb->frame_buffer_count, fb->planeinfo.fblen);
   return OK;
 
 errout:

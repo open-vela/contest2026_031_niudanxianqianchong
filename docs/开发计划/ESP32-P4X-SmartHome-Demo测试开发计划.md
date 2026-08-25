@@ -19,7 +19,7 @@
 | EK79007 DBI 命令通路 | 已通过 | 已对齐 ESP-IDF 的 Command ACK 与 LP 传输配置。 |
 | Host 内建色条 | 已通过 | `dsi_probe pattern 10` 真机可见。 |
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
-| NuttX framebuffer 设备 | 真机 PASS | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；标准 `fb` 已完成绘制和刷新。 |
+| NuttX framebuffer 设备 | 单缓冲真机 PASS；双缓冲待验收 | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；双页 PSRAM、`FBIOPAN_DISPLAY` 与 DMA 帧边界换页已实现，待实板确认无撕裂。 |
 | LVGL Smart Home 页面 | 未上 P4X | `smart_home_lvgl.c` 目前仅在 `LV_USE_NUTTX_LCD` 时指定 `/dev/lcd0`。 |
 | GT911 触摸 | 未上 P4X | 不作为首屏显示的前置条件。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
@@ -68,14 +68,15 @@ P6：MCP、Node、App Bridge（分别启用）
 
    它以 `dsi_probe/defconfig` 为显示基线，并选择 `SMART_HOME_DEMO`。
 
-2. 首版固定为单 RGB565 framebuffer：
+2. framebuffer 支持双 RGB565 扫描页：
 
    ```text
-   1024 × 600 × 2 B = 1,228,800 B
+   1024 × 600 × 2 B × 2 = 2,457,600 B
    ```
 
-   该缓冲区放入 PSRAM；不在首版启用双缓冲或全屏软件复制。P4X 已验证此大小的
-   PSRAM DMA 扫描。
+   两页连续放入 PSRAM。NuttX framebuffer 通过 `yres_virtual=1200` 暴露双页，
+   调用方使用 `FBIOPAN_DISPLAY` 提交后台页；板级仅在 DW-GDMA 完成当前整帧后
+   切换下一轮扫描源地址，不引入全屏软件复制。
 
 3. 首版 LVGL 使用内置 Montserrat 字体和已编译的图标字形；不把 FreeType、外置
    MiSans 字体、PNG 文件部署或 `/data` 挂载作为首屏验收条件。文件资源在后续视觉
