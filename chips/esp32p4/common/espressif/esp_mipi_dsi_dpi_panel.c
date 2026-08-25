@@ -102,6 +102,7 @@ int esp_mipi_dsi_dpi_panel_create(
   FAR const struct esp_mipi_dsi_dpi_panel_config_s *config)
 {
   size_t frame_buffer_bytes;
+  uint8_t frame_buffer_count;
   int ret;
 
   if (panel == NULL || host == NULL || config == NULL)
@@ -115,10 +116,28 @@ int esp_mipi_dsi_dpi_panel_create(
       return ret;
     }
 
+  frame_buffer_count = config->frame_buffer_count;
+  if (frame_buffer_count == 0)
+    {
+      frame_buffer_count = 1;
+    }
+
+  if (frame_buffer_count > ESP_MIPI_DSI_DPI_PANEL_MAX_FRAME_BUFFERS)
+    {
+      return -EINVAL;
+    }
+
+  if (frame_buffer_bytes > SIZE_MAX / frame_buffer_count)
+    {
+      return -EOVERFLOW;
+    }
+
   memset(panel, 0, sizeof(*panel));
   panel->host = host;
   panel->config = *config;
+  panel->config.frame_buffer_count = frame_buffer_count;
   panel->frame_buffer_bytes = frame_buffer_bytes;
+  panel->frame_buffer_count = frame_buffer_count;
   panel->created = true;
   return OK;
 }
@@ -132,6 +151,7 @@ int esp_mipi_dsi_dpi_panel_initialize(
 {
   struct esp_mipi_dsi_video_dma_config_s config;
   FAR void *frame_buffer;
+  size_t allocation_bytes;
   int ret;
 
   if (panel == NULL || !panel->created || panel->host == NULL)
@@ -144,7 +164,8 @@ int esp_mipi_dsi_dpi_panel_initialize(
       return OK;
     }
 
-  ret = esp_mipi_dsi_dma_buffer_allocate(panel->frame_buffer_bytes,
+  allocation_bytes = panel->frame_buffer_bytes * panel->frame_buffer_count;
+  ret = esp_mipi_dsi_dma_buffer_allocate(allocation_bytes,
                                          &frame_buffer);
   if (ret < 0)
     {
@@ -170,7 +191,7 @@ int esp_mipi_dsi_dpi_panel_initialize(
   config.frame_buffer_bytes = panel->frame_buffer_bytes;
 
   ret = esp_mipi_dsi_dma_buffer_sync_for_device(
-    frame_buffer, panel->frame_buffer_bytes);
+    frame_buffer, allocation_bytes);
   if (ret < 0)
     {
       esp_mipi_dsi_dma_buffer_free(frame_buffer);
@@ -205,6 +226,28 @@ int esp_mipi_dsi_dpi_panel_get_frame_buffer(
 
   *frame_buffer = panel->frame_buffer;
   *frame_buffer_bytes = panel->frame_buffer_bytes;
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_dpi_panel_get_frame_buffers
+ ****************************************************************************/
+
+int esp_mipi_dsi_dpi_panel_get_frame_buffers(
+  FAR struct esp_mipi_dsi_dpi_panel_s *panel,
+  FAR void **frame_buffer, FAR size_t *frame_buffer_bytes,
+  FAR uint8_t *frame_buffer_count)
+{
+  if (panel == NULL || frame_buffer == NULL || frame_buffer_bytes == NULL ||
+      frame_buffer_count == NULL || !panel->initialized ||
+      panel->frame_buffer == NULL)
+    {
+      return -EINVAL;
+    }
+
+  *frame_buffer = panel->frame_buffer;
+  *frame_buffer_bytes = panel->frame_buffer_bytes;
+  *frame_buffer_count = panel->frame_buffer_count;
   return OK;
 }
 

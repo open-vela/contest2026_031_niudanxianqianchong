@@ -21,6 +21,12 @@
 #include <stdint.h>
 
 /****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define ESP_MIPI_DSI_DPI_PANEL_MAX_FRAME_BUFFERS 2
+
+/****************************************************************************
  * Public Types
  ****************************************************************************/
 
@@ -52,12 +58,14 @@ struct esp_mipi_dsi_dpi_panel_config_s
   bool     vsync_active_low;
   enum esp_mipi_dsi_dpi_color_format_e input_format;
   enum esp_mipi_dsi_dpi_color_format_e output_format;
+  uint8_t  frame_buffer_count;
 };
 
 /* A caller owns this object.  It models the subset of ESP-IDF's DPI panel
- * needed by the P4X bring-up path: one persistent frame buffer, continuous
- * scanout and full-frame draw_bitmap submission.  It intentionally does not
- * expose a /dev/fb device yet.
+ * needed by the P4X bring-up path: one or more contiguous persistent frame
+ * buffers, continuous scanout and full-frame draw_bitmap submission.  A
+ * zero frame_buffer_count selects one buffer for compatibility with existing
+ * callers.  It intentionally does not expose a /dev/fb device itself.
  */
 
 struct esp_mipi_dsi_dpi_panel_s
@@ -66,6 +74,7 @@ struct esp_mipi_dsi_dpi_panel_s
   struct esp_mipi_dsi_dpi_panel_config_s config;
   FAR void *frame_buffer;
   size_t frame_buffer_bytes;
+  uint8_t frame_buffer_count;
   bool created;
   bool initialized;
 };
@@ -85,6 +94,22 @@ int esp_mipi_dsi_dpi_panel_initialize(
 int esp_mipi_dsi_dpi_panel_get_frame_buffer(
   FAR struct esp_mipi_dsi_dpi_panel_s *panel,
   FAR void **frame_buffer, FAR size_t *frame_buffer_bytes);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_dpi_panel_get_frame_buffers
+ *
+ * Description:
+ *   Return the base address, one-frame size and count of the panel-owned
+ *   contiguous framebuffer allocation.  The first frame is the initial
+ *   scanout source.  Additional frames are for a board framebuffer driver's
+ *   page-flip policy and must not be released by the caller.
+ *
+ ****************************************************************************/
+
+int esp_mipi_dsi_dpi_panel_get_frame_buffers(
+  FAR struct esp_mipi_dsi_dpi_panel_s *panel,
+  FAR void **frame_buffer, FAR size_t *frame_buffer_bytes,
+  FAR uint8_t *frame_buffer_count);
 
 int esp_mipi_dsi_dpi_panel_draw_bitmap(
   FAR struct esp_mipi_dsi_dpi_panel_s *panel,
