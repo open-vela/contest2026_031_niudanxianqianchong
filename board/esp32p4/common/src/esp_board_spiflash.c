@@ -163,6 +163,10 @@ static int setup_littlefs(const char *path, struct mtd_dev_s *mtd,
 {
   int ret = OK;
 
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  syslog(LOG_INFO, "P4X LittleFS register: source=%s mount=%s\n",
+         path, mnt_pt ? mnt_pt : "(none)");
+#endif
   ret = register_mtddriver(path, mtd, priv, NULL);
   if (ret < 0)
     {
@@ -175,6 +179,11 @@ static int setup_littlefs(const char *path, struct mtd_dev_s *mtd,
       ret = nx_mount(path, mnt_pt, "littlefs", 0, NULL);
       if (ret < 0)
         {
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+          syslog(LOG_WARNING,
+                 "P4X LittleFS initial mount failed: ret=%d; "
+                 "retrying with destructive forceformat\n", ret);
+#endif
           ret = nx_mount(path, mnt_pt, "littlefs", 0, "forceformat");
           if (ret < 0)
             {
@@ -184,6 +193,11 @@ static int setup_littlefs(const char *path, struct mtd_dev_s *mtd,
             }
         }
     }
+
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  syslog(LOG_INFO, "P4X LittleFS mounted: source=%s mount=%s\n",
+         path, mnt_pt ? mnt_pt : "(none)");
+#endif
 
   return OK;
 }
@@ -292,6 +306,22 @@ static int init_storage_partition(void)
 {
   int ret = OK;
   struct mtd_dev_s *mtd;
+
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  syslog(LOG_INFO,
+         "P4X storage bring-up: offset=0x%08x size=0x%08x\n",
+         CONFIG_ESPRESSIF_STORAGE_MTD_OFFSET,
+         CONFIG_ESPRESSIF_STORAGE_MTD_SIZE);
+#endif
+
+  ret = esp_spiflash_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: Failed to initialize the default SPI Flash chip: %d\n",
+             ret);
+      return ret;
+    }
 
   mtd = esp_spiflash_alloc_mtdpart(CONFIG_ESPRESSIF_STORAGE_MTD_OFFSET,
                                    CONFIG_ESPRESSIF_STORAGE_MTD_SIZE);

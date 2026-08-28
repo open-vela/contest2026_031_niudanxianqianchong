@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/init.h>
@@ -141,7 +142,6 @@ static int esp_erase(struct mtd_dev_s *dev, off_t startblock,
   uint32_t offset = startblock * MTD_ERASE_SIZE;
   uint32_t nbytes = nblocks * MTD_ERASE_SIZE;
   struct esp_mtd_dev_s *priv = (struct esp_mtd_dev_s *)dev;
-  irqstate_t flags;
 
   if ((offset > MTD_SIZE(priv)) || ((offset + nbytes) > MTD_SIZE(priv)))
     {
@@ -155,7 +155,15 @@ static int esp_erase(struct mtd_dev_s *dev, off_t startblock,
     }
   else
     {
-      ret = ERROR;
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+      syslog(LOG_ERR,
+             "P4X MTD erase failed: offset=0x%08" PRIx32
+             " size=0x%08" PRIx32 " flash_ret=%zd\n",
+             offset, nbytes, ret);
+#endif
+      /* Preserve the MTD-facing errno.  Returning ERROR here used to hide
+       * whether LittleFS failed while formatting or mounting. */
+      ret = ret < 0 ? ret : -EIO;
     }
 
   return ret;
@@ -188,6 +196,15 @@ static ssize_t esp_read(struct mtd_dev_s *dev, off_t offset,
     {
       ret = nbytes;
     }
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  else
+    {
+      syslog(LOG_ERR,
+             "P4X MTD read failed: offset=0x%08" PRIx32
+             " size=%zu flash_ret=%zd\n",
+             (uint32_t)offset, nbytes, ret);
+    }
+#endif
 
   return ret;
 }
@@ -221,6 +238,16 @@ static ssize_t esp_bread(struct mtd_dev_s *dev, off_t startblock,
     {
       ret = nblocks;
     }
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  else
+    {
+      syslog(LOG_ERR,
+             "P4X MTD bread failed: block=%ld count=%zu"
+             " offset=0x%08" PRIx32 " size=0x%08" PRIx32
+             " flash_ret=%zd\n",
+             (long)startblock, nblocks, addr, size, ret);
+    }
+#endif
 
   return ret;
 }
@@ -260,6 +287,15 @@ static ssize_t esp_write(struct mtd_dev_s *dev, off_t offset,
     {
       ret = nbytes;
     }
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  else
+    {
+      syslog(LOG_ERR,
+             "P4X MTD write failed: offset=0x%08" PRIx32
+             " size=%zu flash_ret=%zd\n",
+             (uint32_t)offset, nbytes, ret);
+    }
+#endif
 
   return ret;
 }
@@ -294,6 +330,16 @@ static ssize_t esp_bwrite(struct mtd_dev_s *dev, off_t startblock,
     {
       ret = nblocks;
     }
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  else
+    {
+      syslog(LOG_ERR,
+             "P4X MTD bwrite failed: block=%ld count=%zu"
+             " offset=0x%08" PRIx32 " size=0x%08" PRIx32
+             " flash_ret=%zd\n",
+             (long)startblock, nblocks, addr, size, ret);
+    }
+#endif
 
   return ret;
 }
@@ -430,6 +476,15 @@ struct mtd_dev_s *esp_spiflash_alloc_mtdpart(uint32_t mtd_offset,
 
   finfo("\tMTD offset = 0x%" PRIx32 "\n", mtd_offset);
   finfo("\tMTD size = 0x%" PRIx32 "\n", size);
+
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  syslog(LOG_INFO,
+         "P4X MTD partition: flash_size=0x%" PRIx32
+         " offset=0x%" PRIx32 " size=0x%" PRIx32
+         " block=%u erase=%u\n",
+         chip->chip_size, mtd_offset, size,
+         MTD_BLK_SIZE, MTD_ERASE_SIZE);
+#endif
 
   startblock = MTD_SIZE2BLK(priv, mtd_offset);
   blocks = MTD_SIZE2BLK(priv, size);

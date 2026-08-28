@@ -31,6 +31,7 @@
 
 #include <stdint.h>
 #include <assert.h>
+#include <syslog.h>
 
 #include <debug.h>
 #include <nuttx/mutex.h>
@@ -129,6 +130,12 @@ static int flash_esp32_read_check_enc(uint32_t address, void *buffer,
 
   if (ret != OK)
     {
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+      syslog(LOG_ERR,
+             "P4X flash read backend failed: address=0x%08" PRIx32
+             " length=%zu vendor_ret=%d\n",
+             address, length, ret);
+#endif
       ferr("ERROR: failed to read: ret=%d", ret);
       return -EIO;
     }
@@ -174,6 +181,12 @@ static int flash_esp32_write_check_enc(uint32_t address, const void *buffer,
 
   if (ret != 0)
     {
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+      syslog(LOG_ERR,
+             "P4X flash write backend failed: address=0x%08" PRIx32
+             " length=%zu vendor_ret=%d\n",
+             address, length, ret);
+#endif
       ferr("ERROR: failed to write: ret=%d", ret);
       return -EIO;
     }
@@ -462,6 +475,66 @@ static bool aligned_flash_erase(size_t addr, size_t size)
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: esp_spiflash_initialize
+ *
+ * Description:
+ *   Complete the ESP-IDF SPI flash initialization omitted when booting under
+ *   NuttX.  The raw esp_flash_* APIs substitute esp_flash_default_chip when
+ *   passed a NULL chip.  Without this initialization they return
+ *   ESP_ERR_FLASH_NOT_INITIALISED before attempting a physical flash read.
+ *
+ ****************************************************************************/
+
+int esp_spiflash_initialize(void)
+{
+  esp_err_t ret;
+
+  if (esp_flash_default_chip != NULL &&
+      esp_flash_chip_driver_initialized(esp_flash_default_chip))
+    {
+      return OK;
+    }
+
+  /* The MTD backend may receive PSRAM buffers from LittleFS.  Install the
+   * ESP Flash OS callbacks first so esp_flash_read() can acquire its
+   * internal SRAM bounce buffer while cache access is restricted.
+   */
+
+  ret = esp_flash_app_init();
+  if (ret != ESP_OK)
+    {
+      syslog(LOG_ERR,
+             "ERROR: P4X Flash app initialization failed: %d\n", ret);
+      return -EIO;
+    }
+
+  ret = esp_flash_init_default_chip();
+  if (ret != ESP_OK)
+    {
+      syslog(LOG_ERR,
+             "ERROR: P4X default Flash chip initialization failed: %d\n",
+             ret);
+      return -EIO;
+    }
+
+  if (esp_flash_default_chip == NULL ||
+      !esp_flash_chip_driver_initialized(esp_flash_default_chip))
+    {
+      syslog(LOG_ERR,
+             "ERROR: P4X default Flash chip remains unavailable after "
+             "initialization\n");
+      return -EIO;
+    }
+
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+  syslog(LOG_INFO, "P4X default Flash chip initialized: size=0x%08" PRIx32
+         "\n", esp_flash_default_chip->size);
+#endif
+
+  return OK;
+}
+
+/****************************************************************************
  * Name: esp_spiflash_read
  *
  * Description:
@@ -608,6 +681,12 @@ int esp_spiflash_erase(uint32_t address, uint32_t length)
 
   if (ret != OK)
     {
+#ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+      syslog(LOG_ERR,
+             "P4X flash erase backend failed: address=0x%08" PRIx32
+             " length=0x%08" PRIx32 " vendor_ret=%d\n",
+             address, length, ret);
+#endif
       ferr("ERROR: erase failed: ret=%d", ret);
       ret = ERROR;
     }

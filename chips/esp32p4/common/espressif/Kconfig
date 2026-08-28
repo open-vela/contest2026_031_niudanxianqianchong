@@ -3985,6 +3985,15 @@ config ESPRESSIF_STORAGE_MTD_DEBUG
 		If this option is enabled, Storage MTD driver read and write functions
 		will output input parameters and return values (if applicable).
 
+config ESPRESSIF_STORAGE_MTD_DIAGNOSTICS
+	bool "Storage MTD/LittleFS bring-up diagnostics"
+	default n
+	depends on ESPRESSIF_MTD
+	---help---
+		Print the P4 SPI Flash MTD partition geometry plus failed read, erase
+		and write operations during board LittleFS bring-up.  This is narrower
+		than DEBUG_FS_INFO and is intended for diagnosing a failed /data mount.
+
 config ESPRESSIF_STORAGE_MTD_OFFSET
 	hex "Storage MTD base address in SPI Flash"
 	default 0x180000 if !ESPRESSIF_BOOTLOADER_MCUBOOT

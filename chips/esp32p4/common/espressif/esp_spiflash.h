@@ -51,6 +51,23 @@ extern "C"
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: esp_spiflash_initialize
+ *
+ * Description:
+ *   Initialize the ESP-IDF default SPI flash chip for NuttX runtime access.
+ *   ESP-IDF normally invokes this from its system-init framework; the P4
+ *   NuttX port must perform the equivalent one-time initialization before
+ *   creating an MTD device or issuing esp_flash_* operations.
+ *
+ * Returned Values:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   failure.
+ *
+ ****************************************************************************/
+
+int esp_spiflash_initialize(void);
+
+/****************************************************************************
  * Name: esp_spiflash_read
  *
  * Description:
