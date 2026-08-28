@@ -156,8 +156,8 @@
 #  define LP_I2C_BUS_CLK_ATOMIC()    PERIPH_RCC_ATOMIC()
 #endif
 
-#define SCL_PIN_ATTR (FUNCTION_2 || INPUT_PULLUP || OUTPUT_OPEN_DRAIN)
-#define SDA_PIN_ATTR (FUNCTION_2 || INPUT_PULLUP || OUTPUT_OPEN_DRAIN)
+#define SCL_PIN_ATTR (INPUT_PULLUP | OUTPUT_OPEN_DRAIN)
+#define SDA_PIN_ATTR (INPUT_PULLUP | OUTPUT_OPEN_DRAIN)
 
 /****************************************************************************
  * Private Types
@@ -302,6 +302,8 @@ static int esp_i2c_sem_waitdone(struct esp_i2c_priv_s *priv);
 #ifdef CONFIG_I2C_POLLED
 static int esp_i2c_polling_waitdone(struct esp_i2c_priv_s *priv);
 #endif /* CONFIG_I2C_POLLED */
+static void esp_i2c_log_transfer_error(struct esp_i2c_priv_s *priv,
+                                       FAR const struct i2c_msg_s *msg);
 static int  esp_i2c_transfer(struct i2c_master_s *dev,
                              struct i2c_msg_s *msgs,
                              int count);
@@ -1113,6 +1115,32 @@ static int esp_i2c_polling_waitdone(struct esp_i2c_priv_s *priv)
 #endif
 
 /****************************************************************************
+ * Name: esp_i2c_log_transfer_error
+ *
+ * Description:
+ *   Log the raw I2C interrupt error mask and its decoded causes.  Keep this
+ *   diagnostic independent of CONFIG_DEBUG_I2C_ERROR so board bring-up can
+ *   distinguish a slave NACK from a controller timeout or arbitration loss.
+ *
+ ****************************************************************************/
+
+static void esp_i2c_log_transfer_error(struct esp_i2c_priv_s *priv,
+                                       FAR const struct i2c_msg_s *msg)
+{
+  uint32_t error = priv->error;
+
+  syslog(LOG_ERR,
+         "ERROR: I2C%" PRIu32 " transfer failed: msg=%" PRIu8
+         " addr=0x%02x frequency=%" PRIu32 " raw=0x%08" PRIx32
+         " nack=%u timeout=%u arbitration_lost=%u\n",
+         priv->id, priv->msgid, (unsigned int)msg->addr,
+         msg->frequency, error,
+         (unsigned int)((error & I2C_NACK_INT_ENA_M) != 0),
+         (unsigned int)((error & I2C_TIME_OUT_INT_ENA_M) != 0),
+         (unsigned int)((error & I2C_ARBITRATION_LOST_INT_ENA_M) != 0));
+}
+
+/****************************************************************************
  * Device Driver Operations
  ****************************************************************************/
 
@@ -1219,7 +1247,7 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
         {
           if (priv->error != 0)
             {
-              i2cerr("Transfer error %" PRIu32 "\n", priv->error);
+              esp_i2c_log_transfer_error(priv, &msgs[i]);
               ret = -EIO;
               break;
             }
@@ -1239,6 +1267,7 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
             }
           else
             {
+              esp_i2c_log_transfer_error(priv, &msgs[i]);
               ret = -EIO;
               break;
             }

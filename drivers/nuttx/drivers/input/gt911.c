@@ -18,6 +18,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <syslog.h>
 
 #ifdef CONFIG_INPUT_GT911_DIAGNOSTICS
 #  include <stdio.h>
@@ -694,9 +695,16 @@ static int gt911_probe(FAR struct gt911_dev_s *priv)
 
   ret = gt911_i2c_read(priv, GT911_REG_PRODUCT_ID, product_id,
                        sizeof(product_id));
-  if (ret >= 0)
+  if (ret < 0)
     {
-      sninfo("GT911 product id: %02x %02x %02x %02x (%.*s)\n",
+      syslog(LOG_ERR, "ERROR: GT911 probe failed: stage=product-id-read "
+             "i2c_addr=0x%02x frequency=%lu reg=0x%04x ret=%d\n",
+             priv->address, (unsigned long)priv->frequency,
+             GT911_REG_PRODUCT_ID, ret);
+    }
+  else
+    {
+      syslog(LOG_INFO, "GT911 product id: %02x %02x %02x %02x (%.*s)\n",
              product_id[0], product_id[1], product_id[2], product_id[3],
              (int)sizeof(product_id), (FAR const char *)product_id);
     }

@@ -63,7 +63,8 @@
 
 #define BOARD_GT911_I2C_BUS               0
 #define BOARD_GT911_I2C_ADDRESS            0x5d
-#define BOARD_GT911_I2C_FREQUENCY          400000
+#define BOARD_GT911_I2C_BACKUP_ADDRESS     0x14
+#define BOARD_GT911_I2C_FREQUENCY          100000
 #define BOARD_GT911_POLL_INTERVAL_MS       20
 #define BOARD_GT911_X_RESOLUTION            1024
 #define BOARD_GT911_Y_RESOLUTION             600

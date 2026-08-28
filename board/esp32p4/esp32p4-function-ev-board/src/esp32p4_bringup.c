@@ -533,6 +533,31 @@ int esp_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911
+  /* The GT911 resides on the LCD adapter.  Register it after the display-side
+   * peripherals so its first I2C transaction occurs after the adapter's
+   * power and reset sequence.
+   */
+
+  ret = board_gt911_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: P4X GT911 initialization failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESPRESSIF_SPIFLASH
+  /* Complete the GT911 product-ID probe before ESP-IDF Flash OS callbacks
+   * are installed.  LittleFS remains available before applications start.
+   */
+
+  ret = board_spiflash_init();
+  if (ret)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
+    }
+#endif
+
 #ifdef CONFIG_ESPRESSIF_USE_LP_CORE
 #  ifdef CONFIG_ESPRESSIF_LP_MAILBOX
   esp_lp_mailbox_init();
