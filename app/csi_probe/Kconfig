@@ -1,0 +1,16 @@
+#
+# ESP32-P4X MIPI-CSI staged camera probe.
+#
+
+config LVX_USE_DEMO_CONTEST2026_031_CSI_PROBE
+	bool "ESP32-P4X SC2336 camera probe"
+	depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+	select ESPRESSIF_I2C0
+	select ESP32P4_FUNCTION_EV_BOARD_CAMERA
+	select ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
+	default n
+	---help---
+		Build csi_probe, the staged camera validation program for the P4X
+		Function EV Board.  The first implementation supports "csi_probe
+		sensor" and validates the SC2336 product ID over SCCB/I2C0 without
+		starting MIPI-CSI, ISP or DMA.

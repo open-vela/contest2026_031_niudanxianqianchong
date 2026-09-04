@@ -11,6 +11,7 @@
   <project path="contest2026_031_niudanxianqianchong" name="contest2026_031_niudanxianqianchong">
     <linkfile src="app/hello_app" dest="packages/demos/contest2026_031_hello_app"/>
     <linkfile src="app/dsi_probe" dest="packages/demos/contest2026_031_dsi_probe"/>
+    <linkfile src="app/csi_probe" dest="packages/demos/contest2026_031_csi_probe"/>
     <linkfile src="quickapp/hello_quickapp" dest="packages/apps/contest2026_031_hello_quickapp"/>
     <linkfile src="board/contest_board" dest="vendor/openvela/boards/contest2026_031_board"/>
 
