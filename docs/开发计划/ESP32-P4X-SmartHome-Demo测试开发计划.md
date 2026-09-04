@@ -19,7 +19,7 @@
 | EK79007 DBI 命令通路 | 已通过 | 已对齐 ESP-IDF 的 Command ACK 与 LP 传输配置。 |
 | Host 内建色条 | 已通过 | `dsi_probe pattern 10` 真机可见。 |
 | PSRAM + GDMA RGB565 扫描 | 已通过 | `dsi_probe video 10` 真机可见。 |
-| NuttX framebuffer 设备 | 单缓冲真机 PASS；双缓冲待验收 | `fb_probe` 在 board late-init 注册 RGB565 `/dev/fb0`；双页 PSRAM、`FBIOPAN_DISPLAY` 与 DMA 帧边界换页已实现，待实板确认无撕裂。 |
+| NuttX framebuffer 设备 | 单缓冲真机 PASS；双缓冲待验收 | `/dev/fb0` 已完成 RGB565 绘制和刷新；已实现两页 PSRAM、`FBIOPAN_DISPLAY` 与 DMA 帧边界换页，待实板确认无撕裂。 |
 | LVGL Smart Home 页面 | P2 首屏真机 PASS；P3.2 待测 | 静态首页已通过 `/dev/fb0` 显示；正式 Agent + LVGL 离线启动配置已就绪，待真机验证页面与输入设备创建。 |
 | GT911 触摸 | P3.1 单指真机通过；P3.2 待测 | `/dev/input0` 与 `gt911_probe` 已验证 `DOWN/MOVE/UP`、坐标和 size；待交给正式 LVGL 的 `indev`。 |
 | P4X 以太网、DNS、TLS、云端模型 | 未验证 | 必须与显示问题分阶段验证。 |
@@ -43,7 +43,10 @@ P1：DSI DPI Panel -> /dev/fb0
 P2：LVGL 静态 Smart Home 首页（无网络、无触摸）
        |
        v
-P3：GT911 触摸与本地控制回归
+P3.1：GT911 原始触摸验证
+       |
+       v
+P3.2：正式 LVGL 离线 UI + GT911
        |
        v
 P4：以太网、DNS、TLS 与控制台 cAGENT
@@ -59,32 +62,43 @@ P6：MCP、Node、App Bridge（分别启用）
 
 ## 4. 配置与内存原则
 
-1. 新增独立配置目录，而不修改 `dsi_probe/defconfig`：
+1. 新增独立配置目录，而不修改 `dsi_probe/defconfig` 或
+   `fb_probe/defconfig`：
 
    ```text
    board/esp32p4/esp32p4-function-ev-board/configs/smart_home/
      defconfig
    ```
 
-   它以 `dsi_probe/defconfig` 为显示基线，并选择 `SMART_HOME_DEMO`。
+   它以 P1 `/dev/fb0` 配置为显示基线。P2 选择
+   `SMART_HOME_DEMO_STATIC_LVGL_HOME`；当前 P3.2 改用常规 Agent + LVGL
+   分支，并选择 `SMART_HOME_DEMO_OFFLINE_UI`。
 
-2. framebuffer 支持双 RGB565 扫描页：
+2. P3.2 使用双 RGB565 framebuffer：
 
    ```text
    1024 × 600 × 2 B × 2 = 2,457,600 B
    ```
 
-   两页连续放入 PSRAM。NuttX framebuffer 通过 `yres_virtual=1200` 暴露双页，
-   调用方使用 `FBIOPAN_DISPLAY` 提交后台页；板级仅在 DW-GDMA 完成当前整帧后
-   切换下一轮扫描源地址，不引入全屏软件复制。
+   两页连续放入 PSRAM。LVGL 的 NuttX framebuffer 后端通过
+   `yres_virtual=1200` 自动识别双缓冲，并在每次末次 flush 后提交
+   `FBIOPAN_DISPLAY`；板级仅在 DW-GDMA 完成当前整帧后切换下一轮扫描源地址。
+   因此 CPU 只写后台页，GDMA 只读前台页，不引入全屏软件复制。
 
-3. 首版 LVGL 使用内置 Montserrat 字体和已编译的图标字形；不把 FreeType、外置
-   MiSans 字体、PNG 文件部署或 `/data` 挂载作为首屏验收条件。文件资源在后续视觉
-   优化阶段单独恢复。
+3. P3.2 使用 LittleFS 的外置视觉资源：`/data/res/fonts/MiSans-Normal.ttf` 与
+   `/data/res/icons/*.png`。`make_p4x_littlefs_data_image.sh` 默认打包 MiSans Normal
+   子集和 PNG 图标；LVGL 启用 TinyTTF、POSIX 文件系统和 LodePNG。TinyTTF 直接从
+   LittleFS 流式读取 TTF，不依赖 OpenVela 根目录 `external/freetype`。内置 Montserrat
+   与编译图标字形仍保留，作为资源缺失或加载失败时的兜底，首屏与触摸验收不依赖云端。
+   其中 `src/ui/lvgl/icons/*.c` 的 `ac_20`、`fan_20`、`light_20` 等是嵌入式
+   LVGL 字体图标，会直接链接进固件；它们不打包到 LittleFS，供导航和设备语义图标使用。
 
-4. 首版关闭 `SMART_HOME_MCP_BRIDGE`、`SMART_HOME_NODE_GATEWAY`、
-   `SMART_HOME_APP_BRIDGE`，并不配置真实 API Key。这样首屏失败只能归因于
-   framebuffer、LVGL 或显示驱动。
+4. P2 静态模式不只是“关闭” `SMART_HOME_MCP_BRIDGE`、
+   `SMART_HOME_NODE_GATEWAY`、`SMART_HOME_APP_BRIDGE`：它不初始化 cAGENT、
+   网络、模型密钥或完整智能体运行源文件。P3.1 可在同一固件注册触摸设备，但 LVGL
+   在原始事件验收前仍不打开 `/dev/input0`；这样首屏问题仍可与输入问题隔离。P3.2
+   切回正式 UI 后，离线 profile 使用网络状态桩，不链接 Wi-Fi、DHCP、DNS 或 TLS；
+   缺少 `/data/res/skills` 仅记录技能不可用，不阻止 UI 启动。
 
 5. 云端链路启用后，模型密钥仅来自 `/data/smart_home/secrets.json`；示例文件或
    固件镜像不得携带真实密钥。
@@ -151,8 +165,19 @@ nsh> fb
 `FBIO_UPDATE` cache clean 已打通；详细串口证据见
 [framebuffer 真机验收记录](../开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md)。
 
-尚未完成的增强验证是连续执行 10 次、长时间扫描以及与 LVGL 并发刷新；这些不阻塞
-进入 P2，但应在 P2 回归项中保留。
+**双缓冲增强（代码完成，真机待验收）**：P4X framebuffer 现分配两页连续 RGB565
+PSRAM，报告 `fblen=2457600`、`yres_virtual=1200` 并实现 `pandisplay()`。页面更新先
+完成后台页 cache clean，再登记到 DSI DMA；GDMA 在整帧结束中断中更新下一页 LLI
+源地址，同时释放一条 NuttX pan 队列并发送 VSync 通知。验收时应执行：
+
+```text
+nsh> fb
+nsh> lvgldemo widgets &
+```
+
+预期 `fb` 显示 `fblen=2457600`、`yres_virtual=1200`；拖动 Widgets、连续切换页面或
+触发动画时不得出现横向撕裂、花屏或输入卡死。该项通过后，才将 P3.2 的 LVGL 交互
+稳定性标记为 PASS。
 
 ### P2：LVGL 静态 Smart Home 首页
 
@@ -163,24 +188,54 @@ flush。
 
 | 文件 | 改动 |
 | --- | --- |
-| `board/.../configs/smart_home/defconfig`（新增） | 以 P0/P1 配置为基线，选择 LVGL、NuttX framebuffer、`SMART_HOME_DEMO`、`SMART_HOME_DEMO_UI_LVGL` 和必要的 builtin app。 |
-| `demos/smart_home/src/ui/lvgl/smart_home_lvgl.c` | 将显示路径改为配置项：P4X 使用 `/dev/fb0`，保留现有 `/dev/lcd0` 兼容路径；初版不启用 libuv。 |
-| `demos/smart_home/Kconfig` | 增加可覆盖的 LVGL framebuffer 路径或明确的 P4 framebuffer 选择，避免用芯片型号猜设备路径。 |
-| `demos/smart_home/src/ui/lvgl/smart_home_lvgl_style.c` | 确保外置字体不可用时稳定回退到编译进固件的 Montserrat。 |
+| `board/.../configs/smart_home/defconfig`（新增） | 以 P1 配置为基线，选择 LVGL、NuttX framebuffer、`SMART_HOME_DEMO`、`SMART_HOME_DEMO_UI_LVGL` 与静态首页分支。 |
+| `demos/smart_home/src/app/smart_home_static_main.c`（新增） | P2 专用入口；只启动静态 LVGL 首页，禁止调用网络与 cAGENT 初始化。 |
+| `demos/smart_home/src/ui/lvgl/smart_home_lvgl_static.c`（新增） | 以固定设备/环境夹具构造首页，验证 LVGL 直写 `/dev/fb0` 与 `FBIO_UPDATE` flush。 |
+| `demos/smart_home/src/ui/lvgl/smart_home_lvgl.c` | 将完整 UI 的显示路径改为配置项；P4X 使用 `/dev/fb0`，现有 LCD 目标保留 `/dev/lcd0` 兼容路径。 |
+| `demos/smart_home/Kconfig`、`Makefile`、`CMakeLists.txt` | 增加静态 LVGL 分支、可覆盖的 framebuffer 路径；静态分支不选择 cAGENT，完整 Smart Home 分支行为保持不变。 |
 
 **配置边界**：
 
 - 启用 `GRAPHICS_LVGL`、`LV_USE_NUTTX` 与 framebuffer 后端；不选择
   `LV_USE_NUTTX_LCD`；
 - 先使用非 libuv 的 `lv_timer_handler() + usleep()` 循环，降低任务模型变量；
-- 只展示首页、底部导航和模拟设备卡片；禁用自动 MCP discovery、Node gateway、
-  App Bridge、云端模型请求；
+- 只展示首页、底部导航和模拟设备卡片；不初始化自动 MCP discovery、Node gateway、
+  App Bridge、云端模型请求、网络与触摸；
 - P4X 分辨率为 1024×600，布局需以实际 `lv_display` 分辨率计算，不能以 UI 默认的
   320×240 常量作为渲染尺寸。
 
-**操作与通过条件**：
+**P2 固件配置**：
 
 ```text
+CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER=y
+CONFIG_GRAPHICS_LVGL=y
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_USE_NUTTX=y
+# CONFIG_LV_USE_NUTTX_LCD is not set
+CONFIG_SMART_HOME_DEMO=y
+CONFIG_SMART_HOME_DEMO_UI_LVGL=y
+CONFIG_SMART_HOME_DEMO_STATIC_LVGL_HOME=y
+CONFIG_SMART_HOME_DEMO_LVGL_FB_PATH="/dev/fb0"
+```
+
+**构建、烧录与运行**：
+
+```bash
+cd ~/openvela
+export PATH="$PWD/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin:$PATH"
+
+./build.sh \
+  contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/smart_home \
+  -j2
+
+esptool --chip esp32p4 --port /dev/ttyACM0 --baud 921600 \
+  write-flash -fs 16MB -fm dio -ff 80m 0x2000 nuttx/nuttx.bin
+
+picocom -b 115200 /dev/ttyACM0
+```
+
+```text
+nsh> ls /dev/fb0
 nsh> smart_home
 ```
 
@@ -196,6 +251,32 @@ nsh> smart_home
 - 在启动前后分别记录 `ps`、`free`（本配置已启用 procfs；若提示未挂载，先执行
   `mount -t procfs /proc`），并保存完整串口日志与屏幕照片。
 
+**P2 首屏真机结果（2026-08-24）**：PASS。实板确认 `/dev/fb0` 存在，执行
+`smart_home` 后静态首页正常显示，串口依次输出：
+
+```text
+=== Smart Home Static LVGL P2 ===
+starting local dashboard without network, cAGENT, or touch
+
+[lvgl-static] lv_init
+[lvgl-static] framebuffer=/dev/fb0 resolution=1024x600
+[lvgl-static] dashboard shown; entering timer loop
+```
+
+该结果确认 P2 的 LVGL 初始化、1024×600 framebuffer 绑定和首帧刷新链路可用；连续
+10 分钟运行、`ps/free` 基线及重启回归仍作为保留回归项，不将本次首屏验收扩大解释为
+长期稳定性结论。详细记录见
+[P4X LVGL 静态首页真机验收](../开发日志/编译/2026-08-24-ESP32-P4X-LVGL静态首页真机验收.md)。
+
+**失败隔离**：
+
+| 现象 | 首先检查 | 不应同时做的事 |
+| --- | --- | --- |
+| `/dev/fb0` 缺失或 `smart_home` 报 framebuffer 初始化失败 | 回退 `fb_probe` 执行 `fb`，检查 board late-init 和 P1 DSI 基线。 | 不接入触摸、网络或完整 cAGENT。 |
+| 有日志但黑屏 / 花屏 | 复跑 `dsi_probe pattern 10`、`dsi_probe video 10`，再核对 LVGL 为 RGB565、`/dev/fb0`。 | 不调整模型栈或 TLS 配置。 |
+| 启动后 assert / 重启 | 保存 `dmesg`、`dumpstack`、`ps` 与 `free`，先检查 LVGL 栈和 framebuffer flush。 | 不把 MCP、Node、App Bridge 一并打开。 |
+| 出现网络、模型或密钥日志 | 检查静态配置是否同时设置 `SMART_HOME_DEMO_STATIC_LVGL_HOME=y`。 | 不通过补充 secrets.json 绕过问题。 |
+
 **P2 退出与下一阶段切换**：P2 首屏已通过，应保留本配置作为显示回归固件；不要直接在这
 个二进制中追加网络或触摸。P3/P4 另起增量配置时应取消：
 
@@ -209,24 +290,56 @@ nsh> smart_home
 
 **目的**：验证真实输入可驱动面板、设置和本地设备状态，而不是先接入云端。
 
-**前置条件**：P2 静态 UI 已稳定；P4X 的 GT911 I2C、INT、RST 引脚和板级电源连接已
-核实。
+**前置条件**：P2 静态 UI 已稳定；已确认 GT911 共享 I2C0（SCL=GPIO8、SDA=GPIO7）。
+官方 P4X adapter 未将 GT911 `RST/INT` 接到 SoC，因此 P3.1 固定采用 20 ms 轮询，
+不伪造 GPIO 复位或中断配置。
 
 **拟修改文件**：
 
 | 文件 | 改动 |
 | --- | --- |
-| `board/.../src/esp32p4_touch.c`（新增） | 初始化 I2C + GT911，并注册标准触摸输入设备。 |
-| `board/.../include/board.h`、`src/Make.defs` | 声明和编译触摸板级装配。 |
-| `board/.../configs/smart_home/defconfig` | 启用 I2C、GT911、`INPUT_TOUCHSCREEN` 与实际输入设备路径。 |
-| `smart_home_lvgl.c` | 通过配置指定 P4X 输入路径，不复用 ESP32-S3 专用宏。 |
+| `drivers/nuttx/drivers/input/gt911.c/.h` | NuttX touchscreen lower-half：GT911 ID、触点解析与轮询 worker。 |
+| `nuttx/drivers/input/{Kconfig,Make.defs,CMakeLists.txt}` | 新增 `CONFIG_INPUT_GT911`、临时 `CONFIG_INPUT_GT911_DIAGNOSTICS` 与 Make/CMake 构建入口。 |
+| `board/.../src/esp32p4_touch.c`（新增） | 获取 I2C0，以 100 kHz 按 `0x5d -> 0x14` 自动探测，并以 20 ms 轮询注册 `/dev/input0`。 |
+| `board/.../{Kconfig,include/board.h,src/Make.defs,src/CMakeLists.txt,src/esp32p4_bringup.c}` | 声明、构建并在 board late bring-up 中装配触摸设备。 |
+| `app/gt911_probe/`（新增） | 在 LVGL 之前读取并打印原始 Down/Move/Up 事件。 |
+| `board/.../configs/smart_home/defconfig` | 启用 I2C0 GPIO8/7、GT911 和探针应用；暂不向 LVGL 指定输入路径。 |
 
-**通过条件**：
+**P3.1 验收结果**：已验证 `/dev/input0` 和 `lpwork` 存在。临时启用
+`CONFIG_INPUT_GT911_DIAGNOSTICS` 后，串口统计确认 `scans` 与 `queued` 同步增长、
+`i2c_err=0`。排查过程修正了触点起始地址 `0x8150 -> 0x814f`，并将处理顺序
+收敛为“读状态 -> 读触点 -> 清 `0x814e` -> `touch_event()`”。`gt911_probe`
+已实测得到连续坐标和完整 `DOWN/MOVE/UP`。诊断开关现已关闭，
+避免干扰 NSH；保留 Kconfig 入口供后续板级排障使用。
 
-- 点击首页、对话、设置三个导航项，页面正确切换；
-- 本地 `set_light`、`set_fan` 工具可由页面控件修改设备状态；
-- 触摸坐标、旋转和边缘区域无明显偏移；
-- 触摸高频输入下 DSI 连续扫描不花屏。
+**P3.1 当前通过项**：`/dev/input0` 注册成功，`gt911_probe 15` 可重复输出
+单指 `DOWN/MOVE/UP`，坐标落在 1024×600 范围且 track ID 稳定。多点识别、
+坐标旋转和边界精度仍属 P3.1 剩余验收项。
+
+**P3.1 与存储联合复测**：P4 I2C 已能输出原始错误掩码，将一次注册失败
+收敛为 `raw=0x400` 的地址 NACK，而非 timeout 或 arbitration lost。板级现按
+`0x5d -> 0x14` 自动探测，且仅在 `-EIO` 时回退地址；最新真机启动在
+`0x5d/100kHz` 读取到 Product ID `911`、注册 `/dev/input0`，随后成功将
+0x800000 起的 LittleFS 挂载到 `/data`。该结果证明当前顺序可以共存，仍需
+通过多次断电冷启动覆盖地址回退和上电稳定性。
+
+**P3.2 已实现、待真机验收**：`configs/smart_home/defconfig` 已取消静态首页分支，
+启用 GT911、`LV_USE_NUTTX_TOUCHSCREEN`、`NETUTILS_CJSON`、
+`SMART_HOME_DEMO_OFFLINE_UI` 与 64 KiB 应用栈。cJSON 是设备状态、后端配置和
+技能元数据共用的 JSON 依赖，即使离线 UI 不启用网络/TLS 也必须保留。常规
+`smart_home_main.c`、`smart_home_agent_app_init()`、
+`smart_home_lvgl.c` 会参与构建；`/dev/input0` 由 LVGL NuttX port 创建为输入设备。
+该配置同时启用 SPI Flash LittleFS：`0x800000` 起的 1 MiB 分区自动挂载到
+`/data`，由 `scripts/make_p4x_littlefs_data_image.sh` 默认预置 skills、非敏感 JSON、
+MiSans Normal 子集（设备路径为 `/data/res/fonts/MiSans-Normal.ttf`）及
+`/data/res/icons/*.png`。完整 MiSans 字体不进入镜像，避免消耗约 7.6 MiB 的 Flash。
+没有 `/data/res/skills/*.md` 时应用记录 warning 并跳过场景目录，模型 Key 缺失时聊天页
+显示不可用状态，不应阻止首页、设置或本地设备面板出现。
+
+**P3.2 通过条件**：启动日志出现非空 `indev`，例如
+`[smart_home_lvgl] disp=... indev=... input=/dev/input0`；点击首页、对话、设置导航项
+正确切换，坐标方向和边缘区域无明显偏移。页面本地控制随后再映射为 `set_light`、
+`set_fan` 等本地工具，仍不引入云端。
 
 ### P4：以太网、DNS、TLS 与控制台 cAGENT
 
@@ -303,7 +416,7 @@ flash size 必须复用当前 P4X 已验证固件的产物规则，不在本计�
 | 风险 | 识别方法 | 止损动作 |
 | --- | --- | --- |
 | framebuffer cache 不一致 | `/dev/fb0` 写色后不刷新或局部花屏 | 回到 P1，以 `FBIO_UPDATE` 和 cache clean 单独验证。 |
-| LVGL 资源过重 | 启动失败、PSRAM 紧张、字体加载失败 | 关闭 FreeType/运行时 PNG，保留内置字体与图标。 |
+| LVGL 资源过重 | 启动失败、PSRAM 紧张、字体加载失败 | 关闭 TinyTTF/运行时 PNG，保留内置字体与图标。 |
 | UI 与网络相互影响 | P4 控制台模型成功而 LVGL 对话失败 | 先运行 P5 的 worker/栈诊断，禁止同时调试 MCP。 |
 | TLS/熵源不可用 | `tls_probe` 失败 | 停留在 P4，先修复网络或 entropy，不改 UI。 |
 | 触摸影响显示 | 触摸后花屏或 DSI 停止 | 回到 P3，隔离 I2C/IRQ 与 display 任务。 |

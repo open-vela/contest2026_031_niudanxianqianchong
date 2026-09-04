@@ -314,14 +314,6 @@ int esp_bringup(void)
 #  endif
 #endif /* CONFIG_ESPRESSIF_SPI */
 
-#ifdef CONFIG_ESPRESSIF_SPIFLASH
-  ret = board_spiflash_init();
-  if (ret)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
-    }
-#endif
-
 #if defined(CONFIG_ESPRESSIF_I2S)
   /* Configure I2S peripheral interfaces */
 
@@ -352,14 +344,6 @@ int esp_bringup(void)
     {
       syslog(LOG_ERR, "Failed to initialize BMP180 "
              "Driver for I2C0: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911
-  ret = board_gt911_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: P4X GT911 initialization failed: %d\n", ret);
     }
 #endif
 
@@ -534,9 +518,9 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911
-  /* The GT911 resides on the LCD adapter.  Register it after the display-side
-   * peripherals so its first I2C transaction occurs after the adapter's
-   * power and reset sequence.
+  /* The GT911 resides on the LCD adapter.  Register it after the DSI panel
+   * lifecycle has completed so its first I2C transaction occurs after the
+   * adapter's display-side power and reset sequence.
    */
 
   ret = board_gt911_initialize();
