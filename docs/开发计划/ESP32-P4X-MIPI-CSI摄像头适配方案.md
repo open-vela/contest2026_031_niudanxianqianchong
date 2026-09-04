@@ -346,6 +346,14 @@ ISP 读写和 LCD 扫描。实现时必须：
 
 新增独立 `csi_probe sensor` 模式，不初始化 CSI 和 ISP。
 
+当前 `esp32p4x-mipi-csi-camera-20260904` 分支已完成第一批 P1 实现：
+
+- 新增板级私有 SC2336 16 位寄存器地址 SCCB 读取与 `0xcb3a` ID 校验；
+- 新增一次性 `board_sc2336_probe(uint16_t *product_id)` 装配接口，平衡共享 I²C0 引用；
+- 新增独立 `csi_probe sensor` 应用和最小 `csi_probe/defconfig`；
+- 不接入默认 board bring-up，摄像头缺失不会阻止 NSH 和其他外设启动；
+- 暂未加入传感器 profile、stream on、MIPI-CSI、ISP、DMA 或 `/dev/video0`。
+
 ```text
 nsh> csi_probe sensor
 ```
