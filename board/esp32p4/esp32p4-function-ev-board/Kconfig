@@ -64,4 +64,23 @@ config ESP32P4_FUNCTION_EV_BOARD_GT911_MAX_POINTS
 
 endif # ESP32P4_FUNCTION_EV_BOARD_GT911
 
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA
+	bool "Enable P4X camera sensor control"
+	depends on ESPRESSIF_I2C0 && ESPRESSIF_I2C0_MASTER_MODE
+	default n
+	help
+		Enable board-private camera sensor control support.  The first-stage
+		implementation only owns the SCCB/I2C control path; MIPI-CSI, ISP,
+		DMA and /dev/video0 are introduced by later milestones.
+
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
+	bool "Enable SC2336 SCCB product-ID probe"
+	depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA
+	default n
+	---help---
+		Enable the board-private first-stage SC2336 sensor control path.
+		This option only reads the product ID over the P4X camera module's
+		SCCB/I2C0 connection.  It does not initialize MIPI-CSI, ISP, DMA or
+		register /dev/video0.
+
 endif # ARCH_BOARD_CUSTOM

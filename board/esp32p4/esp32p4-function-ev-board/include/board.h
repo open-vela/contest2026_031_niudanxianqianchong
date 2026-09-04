@@ -69,6 +69,15 @@
 #define BOARD_GT911_X_RESOLUTION            1024
 #define BOARD_GT911_Y_RESOLUTION             600
 
+/* SC2336 camera control bus.  The P4X camera module uses the shared I2C0
+ * controller on GPIO8/GPIO7.  Keep the initial SCCB probe at 100 kHz until
+ * the complete sensor profile has been validated on the target module.
+ */
+
+#define BOARD_SC2336_I2C_BUS                  0
+#define BOARD_SC2336_I2C_ADDRESS              0x30
+#define BOARD_SC2336_I2C_FREQUENCY            100000
+
 /* Keep the board endpoint compatible with the stock LVGL NuttX input
  * adapter when an older external-board Kconfig refresh does not materialize
  * the optional max-points symbol in nuttx/config.h.
@@ -236,5 +245,21 @@ int board_mipi_dsi_shutdown(FAR struct mipi_dsi_host *host);
 int board_gt911_initialize(void);
 
 #endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911 */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
+
+/****************************************************************************
+ * Name: board_sc2336_probe
+ *
+ * Description:
+ *   Read and validate the SC2336 product ID through the board's SCCB/I2C0
+ *   connection.  This diagnostic does not configure MIPI-CSI, start sensor
+ *   streaming or register a video device.
+ *
+ ****************************************************************************/
+
+int board_sc2336_probe(FAR uint16_t *product_id);
+
+#endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336 */
 
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_INCLUDE_BOARD_H */

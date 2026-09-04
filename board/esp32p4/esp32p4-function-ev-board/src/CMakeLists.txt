@@ -56,6 +56,12 @@ if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911)
   target_include_directories(board PRIVATE ${CMAKE_SOURCE_DIR}/drivers/input)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336)
+  list(APPEND SRCS esp32p4_camera.c esp32p4_sc2336.c)
+  target_include_directories(board PRIVATE
+    ${CMAKE_SOURCE_DIR}/arch/risc-v/src/chip/common)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

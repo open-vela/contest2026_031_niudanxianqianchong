@@ -63,6 +63,11 @@ ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911),y)
   DEPPATH += --dep-path $(TOPDIR)$(DELIM)drivers$(DELIM)input
 endif
 
+ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336),y)
+  CSRCS += esp32p4_camera.c esp32p4_sc2336.c
+  CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)risc-v$(DELIM)src$(DELIM)chip$(DELIM)common
+endif
+
 DEPPATH += --dep-path board
 VPATH += :board
 CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board
