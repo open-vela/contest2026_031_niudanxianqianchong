@@ -485,6 +485,14 @@ if(CONFIG_ESPRESSIF_MIPI_DSI)
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_lcd/${CHIP_SERIES}/mipi_dsi_periph.c)
 endif()
 
+if(CONFIG_ESPRESSIF_MIPI_CSI)
+  list(
+    APPEND
+    HAL_SRCS
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/mipi_csi_hal.c
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/${CHIP_SERIES}/mipi_csi_periph.c)
+endif()
+
 # Bootloader common
 list(
   APPEND HAL_SRCS
