@@ -208,6 +208,10 @@ ifeq ($(CONFIG_ESPRESSIF_MIPI_DSI),y)
 	endif
 endif
 
+ifeq ($(CONFIG_ESPRESSIF_MIPI_CSI),y)
+	CHIP_CSRCS += esp_mipi_csi.c
+endif
+
 ifeq ($(CONFIG_CRYPTO_CRYPTODEV_HARDWARE),y)
 	CHIP_CSRCS += esp_crypto.c
 endif
