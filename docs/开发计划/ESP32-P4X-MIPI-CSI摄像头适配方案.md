@@ -344,7 +344,8 @@ ISP 读写和 LCD 扫描。实现时必须：
 
 ### P1：SC2336 SCCB Probe
 
-新增独立 `csi_probe sensor` 模式，不初始化 CSI 和 ISP。
+新增独立 `csi_probe sensor` 模式，不初始化 CSI Host 或 ISP；为与 ESP-IDF
+基线一致，它会先申请 MIPI D-PHY LDO，再执行 SCCB ID 读取。
 
 当前 `esp32p4x-mipi-csi-camera-20260904` 分支已完成第一批 P1 实现：
 
@@ -352,7 +353,7 @@ ISP 读写和 LCD 扫描。实现时必须：
 - 新增一次性 `board_sc2336_probe(uint16_t *product_id)` 装配接口，平衡共享 I²C0 引用；
 - 新增独立 `csi_probe sensor` 应用和最小 `csi_probe/defconfig`；
 - 不接入默认 board bring-up，摄像头缺失不会阻止 NSH 和其他外设启动；
-- 暂未加入传感器 profile、stream on、MIPI-CSI、ISP、DMA 或 `/dev/video0`。
+- 暂未加入传感器 profile、stream on、CSI Host、ISP、DMA 或 `/dev/video0`。
 
 ```text
 nsh> csi_probe sensor
@@ -367,15 +368,26 @@ nsh> csi_probe sensor
 ### P2：CSI RAW8 单帧与连续帧
 
 ```text
+nsh> csi_probe raw
 nsh> csi_probe raw 10
-nsh> csi_probe save /data/frame.raw
 ```
 
-日志必须包含帧计数、帧字节数、CRC32、CSI ECC/CRC、FIFO overflow、DMA error
-和超时阶段。
+当前实现采用 `esp_cam_sensor` v1.7.0 的 SC2336 1024×600@30fps profile：
+24 MHz 输入、2 lane、RAW8/datatype `0x2a`、288 Mbps/lane、BGGR。它在
+PSRAM 中采集一块 614400-byte RAW 帧，输出帧计数、帧字节数、CRC32、
+非全零/非固定值判定、CSI ECC/CRC、FIFO overflow、DMA error 和超时阶段。
+初始化遵循 ESP-IDF 的摄像头相关顺序：板级 profile 提供 D-PHY LDO channel 3、
+2500mV，芯片层先申请并持有 LDO；随后 SC2336 SCCB 探测、profile 配置和
+stream on，最后初始化并启动 CSI Host/Bridge/DMA。失败与退出按反向顺序释放
+CSI Host、sensor stream、SCCB 和 LDO。
 
-**通过条件**：10 秒内帧计数持续增加，帧长度稳定，不出现 CSI/DMA
-错误；保存的 RAW 帧在主机端可见非全零、非固定值图像。
+`raw` 默认采一帧；通过后再使用 `raw 10`。RAW 文件保存（`save`）保留为
+后续小步：先独立确认 LittleFS 挂载和文件路径，再把写文件时序接入已验证的
+CSI 单缓冲链路。
+
+**当前通过条件**：每帧 1 秒超时内至少收到请求帧数，帧长度稳定为 614400
+bytes，RAW 非全零、非固定值，且不出现 CSI/DMA/Bridge 错误。文件保存和主机
+图像解码是后续验收项。
 
 ### P3：NuttX V4L2 `/dev/video0`
 
