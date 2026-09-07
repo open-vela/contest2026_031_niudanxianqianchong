@@ -248,6 +248,9 @@ int board_gt911_initialize(void);
 
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
 
+struct esp_mipi_csi_config_s;
+struct esp_mipi_csi_s;
+
 /****************************************************************************
  * Name: board_sc2336_probe
  *
@@ -259,6 +262,121 @@ int board_gt911_initialize(void);
  ****************************************************************************/
 
 int board_sc2336_probe(FAR uint16_t *product_id);
+
+/****************************************************************************
+ * Name: board_sc2336_sccb_read_write_test
+ *
+ * Description:
+ *   Run an SCCB read-write-read diagnostic on one I2C bus reference: verify
+ *   the SC2336 product ID, write stream-off to register 0x0100, then verify
+ *   the product ID again.  This does not configure MIPI-CSI or write a
+ *   sensor profile.
+ *
+ ****************************************************************************/
+
+int board_sc2336_sccb_read_write_test(FAR uint16_t *first_product_id,
+                                      FAR uint16_t *second_product_id);
+
+/****************************************************************************
+ * Name: board_sc2336_sccb_pointer_test
+ *
+ * Description:
+ *   Send the SC2336 product-ID register address (0x3107) as a single SCCB
+ *   write message.  It does not read data or write any sensor control
+ *   register.
+ *
+ ****************************************************************************/
+
+int board_sc2336_sccb_pointer_test(void);
+
+/****************************************************************************
+ * Name: board_sc2336_sccb_split_test
+ *
+ * Description:
+ *   Read SC2336 register 0x3107 through separate pointer-write and read-only
+ *   I2C transfers.  This does not write a sensor control register.
+ *
+ ****************************************************************************/
+
+int board_sc2336_sccb_split_test(FAR uint8_t *value);
+
+/****************************************************************************
+ * Name: board_sc2336_sccb_write_test
+ *
+ * Description:
+ *   Run the write-first SC2336 SCCB diagnostic on one I2C bus reference:
+ *   software-reset the sensor, wait for reset completion, write stream-off,
+ *   then read and validate the product ID.  This does not configure MIPI-CSI
+ *   or write the complete sensor profile.
+ *
+ ****************************************************************************/
+
+int board_sc2336_sccb_write_test(FAR uint16_t *product_id);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_power_acquire
+ *
+ * Description:
+ *   Build the board's P2 SC2336 RAW8 profile and acquire its D-PHY LDO.
+ *   This operation does not initialize CSI Host or access SCCB/I2C.
+ *
+ ****************************************************************************/
+
+int board_sc2336_csi_power_acquire(
+  FAR struct esp_mipi_csi_config_s *config,
+  FAR struct esp_mipi_csi_s **csi);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_initialize
+ *
+ * Description:
+ *   Initialize CSI Host, Bridge and DMA after SC2336 SCCB configuration and
+ *   stream-on.  The board profile must already hold the D-PHY LDO.
+ *
+ ****************************************************************************/
+
+int board_sc2336_csi_initialize(FAR struct esp_mipi_csi_s *csi,
+  FAR const struct esp_mipi_csi_config_s *config);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_prepare
+ *
+ * Description:
+ *   Verify SC2336 and configure the board's P2 RAW8 profile, leaving the
+ *   sensor stream off.  The D-PHY LDO must already be acquired by
+ *   board_sc2336_csi_power_acquire().
+ *
+ ****************************************************************************/
+
+int board_sc2336_csi_prepare(FAR uint16_t *product_id);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_deinitialize
+ ****************************************************************************/
+
+int board_sc2336_csi_deinitialize(FAR struct esp_mipi_csi_s *csi);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_power_release
+ ****************************************************************************/
+
+int board_sc2336_csi_power_release(FAR struct esp_mipi_csi_s *csi);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_set_stream
+ ****************************************************************************/
+
+int board_sc2336_csi_set_stream(bool enable);
+
+/****************************************************************************
+ * Name: board_sc2336_csi_release
+ *
+ * Description:
+ *   Stop an active sensor stream and release the board-owned SCCB reference.
+ *
+ ****************************************************************************/
+
+int board_sc2336_csi_release(void);
 
 #endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336 */
 

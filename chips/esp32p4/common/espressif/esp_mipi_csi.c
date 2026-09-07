@@ -21,6 +21,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <syslog.h>
 
 #include "esp_cache.h"
 #include "esp_clk_tree.h"
@@ -89,6 +90,7 @@
 struct esp_mipi_csi_s
 {
   mipi_csi_hal_context_t      hal;
+  FAR struct esp_ldo_channel_s *phy_ldo;
   mutex_t                     lock;
   spinlock_t                  irq_lock;
   sem_t                       frame_sem;
@@ -100,6 +102,7 @@ struct esp_mipi_csi_s
   int                         dma_cpuint;
   int                         bridge_cpuint;
   bool                        phy_clock_enabled;
+  bool                        powered;
   bool                        initialized;
   bool                        running;
 };
@@ -212,6 +215,7 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
   FAR struct esp_mipi_csi_s *priv = arg;
   uint32_t dma_status;
   uint32_t host_status;
+  irqstate_t flags;
 
   (void)irq;
   (void)context;
@@ -230,19 +234,32 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
 
   dw_gdma_ll_channel_clear_intr(priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL,
                                 dma_status);
+  host_status = 0;
+  if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
+    {
+      host_status = priv->hal.host_dev->int_st_main.val;
+    }
+
+  flags = spin_lock_irqsave(&priv->irq_lock);
   priv->stats.last_dma_status = dma_status;
 
   if ((dma_status & ESP_MIPI_CSI_DMA_ERROR_EVENTS) != 0)
     {
       priv->stats.dma_error_count++;
+      spin_unlock_irqrestore(&priv->irq_lock, flags);
       return OK;
     }
 
   if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
     {
-      host_status = priv->hal.host_dev->int_st_main.val;
       esp_mipi_csi_count_host_status(priv, host_status);
+      priv->stats.frame_count++;
+    }
 
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
+
+  if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
+    {
       /* The P4 invalidates terminal descriptors after use.  Revalidate the
        * same caller-owned buffer before the next frame arrives.
        */
@@ -256,7 +273,6 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
         (uint32_t)(uintptr_t)&priv->dma_lli);
       dw_gdma_ll_channel_enable(priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL,
                                  true);
-      priv->stats.frame_count++;
       nxsem_post(&priv->frame_sem);
     }
 
@@ -268,6 +284,7 @@ static int esp_mipi_csi_bridge_interrupt(int irq, FAR void *context,
 {
   FAR struct esp_mipi_csi_s *priv = arg;
   uint32_t status;
+  irqstate_t flags;
 
   (void)irq;
   (void)context;
@@ -284,6 +301,7 @@ static int esp_mipi_csi_bridge_interrupt(int irq, FAR void *context,
     }
 
   priv->hal.bridge_dev->int_clr.val = status;
+  flags = spin_lock_irqsave(&priv->irq_lock);
   priv->stats.last_bridge_status = status;
 
   if ((status & ESP_MIPI_CSI_BRG_OVERRUN) != 0)
@@ -306,6 +324,8 @@ static int esp_mipi_csi_bridge_interrupt(int irq, FAR void *context,
     {
       priv->stats.bridge_frame_size_error_count++;
     }
+
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
 
   return OK;
 }
@@ -513,16 +533,72 @@ static void esp_mipi_csi_disable_hardware(FAR struct esp_mipi_csi_s *priv)
  * Public Functions
  ****************************************************************************/
 
-int esp_mipi_csi_initialize(FAR const struct esp_mipi_csi_config_s *config,
-                            FAR struct esp_mipi_csi_s **csi)
+int esp_mipi_csi_power_acquire(
+  FAR const struct esp_mipi_csi_config_s *config,
+  FAR struct esp_mipi_csi_s **csi)
+{
+  FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+  bool ldo_acquired = false;
+  int ret;
+
+  if (config == NULL || csi == NULL ||
+      config->phy_ldo.voltage_mv != ESP_MIPI_CSI_DPHY_VOLTAGE_MV)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (priv->powered)
+    {
+      ret = -EBUSY;
+      goto out;
+    }
+
+  ret = esp_ldo_acquire(&config->phy_ldo, &priv->phy_ldo);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: MIPI-CSI D-PHY LDO acquire failed channel=%d "
+             "voltage_mv=%d ret=%d\n",
+             config->phy_ldo.channel_id, config->phy_ldo.voltage_mv, ret);
+      goto out;
+    }
+
+  ldo_acquired = true;
+
+  syslog(LOG_INFO,
+         "INFO: MIPI-CSI D-PHY LDO ready channel=%d voltage_mv=%d\n",
+         config->phy_ldo.channel_id, config->phy_ldo.voltage_mv);
+
+  priv->powered = true;
+  *csi = priv;
+  ret = OK;
+
+out:
+  if (ret < 0 && ldo_acquired)
+    {
+      esp_ldo_release(priv->phy_ldo);
+      priv->phy_ldo = NULL;
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
+int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
+                            FAR const struct esp_mipi_csi_config_s *config)
 {
   FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
   mipi_csi_hal_config_t hal_config;
   size_t frame_bytes;
   int ret;
 
-  if (config == NULL || csi == NULL ||
-      config->lane_num == 0 ||
+  if (csi != priv || config == NULL || config->lane_num == 0 ||
       config->lane_num > ESP_MIPI_CSI_MAX_DATA_LANES ||
       config->lane_bit_rate_mbps < ESP_MIPI_CSI_MIN_RATE_MBPS ||
       config->lane_bit_rate_mbps > ESP_MIPI_CSI_MAX_RATE_MBPS ||
@@ -542,6 +618,12 @@ int esp_mipi_csi_initialize(FAR const struct esp_mipi_csi_config_s *config,
   if (ret < 0)
     {
       return ret;
+    }
+
+  if (!priv->powered || priv->phy_ldo == NULL)
+    {
+      ret = -EPIPE;
+      goto out;
     }
 
   if (priv->initialized)
@@ -598,7 +680,6 @@ int esp_mipi_csi_initialize(FAR const struct esp_mipi_csi_config_s *config,
   nxsem_init(&priv->frame_sem, 0, 0);
   priv->expected_frame_bytes = frame_bytes;
   priv->initialized = true;
-  *csi = priv;
   ret = OK;
 
 out:
@@ -611,7 +692,7 @@ out:
   return ret;
 }
 
-int esp_mipi_csi_shutdown(FAR struct esp_mipi_csi_s *csi)
+int esp_mipi_csi_deinitialize(FAR struct esp_mipi_csi_s *csi)
 {
   FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
   int ret;
@@ -627,24 +708,67 @@ int esp_mipi_csi_shutdown(FAR struct esp_mipi_csi_s *csi)
       return ret;
     }
 
-  if (!priv->initialized)
+  if (!priv->powered)
     {
       ret = -ESHUTDOWN;
       goto out;
     }
 
-  if (priv->running)
+  if (priv->initialized && priv->running)
     {
       mipi_csi_brg_ll_enable(priv->hal.bridge_dev, false);
       priv->running = false;
     }
 
-  esp_mipi_csi_release_dma(priv);
-  esp_mipi_csi_disable_hardware(priv);
-  nxsem_destroy(&priv->frame_sem);
-  priv->expected_frame_bytes = 0;
-  priv->initialized = false;
+  if (priv->initialized)
+    {
+      esp_mipi_csi_release_dma(priv);
+      esp_mipi_csi_disable_hardware(priv);
+      nxsem_destroy(&priv->frame_sem);
+      priv->expected_frame_bytes = 0;
+      priv->initialized = false;
+    }
+
   ret = OK;
+
+out:
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
+int esp_mipi_csi_power_release(FAR struct esp_mipi_csi_s *csi)
+{
+  FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+  int ret;
+
+  if (csi != priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (!priv->powered || priv->phy_ldo == NULL)
+    {
+      ret = -ESHUTDOWN;
+    }
+  else if (priv->initialized)
+    {
+      ret = -EBUSY;
+    }
+  else
+    {
+      ret = esp_ldo_release(priv->phy_ldo);
+      if (ret >= 0)
+        {
+          priv->phy_ldo = NULL;
+          priv->powered = false;
+        }
+    }
 
 out:
   nxmutex_unlock(&priv->lock);
@@ -686,7 +810,21 @@ int esp_mipi_csi_start(FAR struct esp_mipi_csi_s *csi,
         {
         }
 
-      ret = esp_mipi_csi_prepare_dma(priv, frame_buffer, frame_buffer_bytes);
+      /* A caller normally clears or initializes its capture buffer before
+       * starting a test.  Flush those dirty cache lines before DMA owns the
+       * buffer, otherwise a later cache eviction can overwrite received
+       * data.
+       */
+
+      ret = esp_mipi_csi_result(esp_cache_msync(
+        frame_buffer, frame_buffer_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+        ESP_CACHE_MSYNC_FLAG_UNALIGNED));
+      if (ret >= 0)
+        {
+          ret = esp_mipi_csi_prepare_dma(priv, frame_buffer,
+                                         frame_buffer_bytes);
+        }
+
       if (ret >= 0)
         {
           priv->running = true;

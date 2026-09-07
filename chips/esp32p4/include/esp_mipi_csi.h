@@ -20,12 +20,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <arch/chip/esp_ldo.h>
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 #define ESP_MIPI_CSI_BUS0                 0
 #define ESP_MIPI_CSI_MAX_DATA_LANES        2
+#define ESP_MIPI_CSI_DPHY_VOLTAGE_MV    2500
 
 /* CSI-2 data types used by the raw capture path. */
 
@@ -53,6 +56,7 @@ struct esp_mipi_csi_config_s
   uint16_t height;
   uint32_t lane_bit_rate_mbps;
   bool     byte_swap;
+  struct esp_ldo_config_s phy_ldo;
 };
 
 struct esp_mipi_csi_stats_s
@@ -77,27 +81,55 @@ struct esp_mipi_csi_stats_s
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: esp_mipi_csi_power_acquire
+ *
+ * Description:
+ *   Acquire the ESP32-P4 CSI D-PHY LDO described by config->phy_ldo.  This
+ *   is separate from CSI Host initialization so a board can follow the
+ *   Espressif camera bring-up order: power the MIPI PHY, configure and start
+ *   the sensor, then initialize the CSI receiver.  Only one CSI receiver
+ *   exists on ESP32-P4.
+ *
+ ****************************************************************************/
+
+int esp_mipi_csi_power_acquire(
+  FAR const struct esp_mipi_csi_config_s *config,
+  FAR struct esp_mipi_csi_s **csi);
+
+/****************************************************************************
  * Name: esp_mipi_csi_initialize
  *
  * Description:
  *   Configure the ESP32-P4 CSI PHY, Host and Bridge for a raw CSI-2 stream.
- *   The caller must have configured, but not necessarily started, the image
- *   sensor.  Only one CSI receiver exists on ESP32-P4.
+ *   The caller must acquire power with esp_mipi_csi_power_acquire() first.
  *
  ****************************************************************************/
 
-int esp_mipi_csi_initialize(FAR const struct esp_mipi_csi_config_s *config,
-                            FAR struct esp_mipi_csi_s **csi);
+int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
+                            FAR const struct esp_mipi_csi_config_s *config);
 
 /****************************************************************************
- * Name: esp_mipi_csi_shutdown
+ * Name: esp_mipi_csi_deinitialize
  *
  * Description:
- *   Stop a running capture if necessary and release the CSI hardware.
+ *   Stop a running capture if necessary and release CSI Host, Bridge and DMA
+ *   resources.  The D-PHY LDO remains acquired until
+ *   esp_mipi_csi_power_release() is called.
  *
  ****************************************************************************/
 
-int esp_mipi_csi_shutdown(FAR struct esp_mipi_csi_s *csi);
+int esp_mipi_csi_deinitialize(FAR struct esp_mipi_csi_s *csi);
+
+/****************************************************************************
+ * Name: esp_mipi_csi_power_release
+ *
+ * Description:
+ *   Release a D-PHY LDO acquired by esp_mipi_csi_power_acquire().  CSI Host
+ *   resources must have been deinitialized first.
+ *
+ ****************************************************************************/
+
+int esp_mipi_csi_power_release(FAR struct esp_mipi_csi_s *csi);
 
 /****************************************************************************
  * Name: esp_mipi_csi_start

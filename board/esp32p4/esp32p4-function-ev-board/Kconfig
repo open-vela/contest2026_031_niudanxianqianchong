@@ -69,18 +69,20 @@ config ESP32P4_FUNCTION_EV_BOARD_CAMERA
 	depends on ESPRESSIF_I2C0 && ESPRESSIF_I2C0_MASTER_MODE
 	default n
 	help
-		Enable board-private camera sensor control support.  The first-stage
-		implementation only owns the SCCB/I2C control path; MIPI-CSI, ISP,
-		DMA and /dev/video0 are introduced by later milestones.
+		Enable board-private camera sensor control support.  The P2 staged
+		implementation owns SCCB/I2C control and a fixed SC2336 RAW8 sensor
+		profile for the csi_probe diagnostic.  It does not register /dev/video0
+		or enable ISP processing.
 
 config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
-	bool "Enable SC2336 SCCB product-ID probe"
+	bool "Enable SC2336 staged camera control"
 	depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA
 	default n
 	---help---
-		Enable the board-private first-stage SC2336 sensor control path.
-		This option only reads the product ID over the P4X camera module's
-		SCCB/I2C0 connection.  It does not initialize MIPI-CSI, ISP, DMA or
-		register /dev/video0.
+		Enable the board-private SC2336 sensor control path.  It supports
+		product-ID probing and the fixed P2 1024x600 RAW8 profile over the
+		P4X camera module's SCCB/I2C0 connection.  CSI, DMA and diagnostics
+		are initiated by the csi_probe application; this option does not
+		register /dev/video0 or enable ISP processing.
 
 endif # ARCH_BOARD_CUSTOM
