@@ -44,6 +44,7 @@
 #include <nuttx/clock.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <arch/board/board.h>
@@ -258,6 +259,7 @@ struct esp_i2c_priv_s
   uint32_t error;              /* I2C transform error */
 
   bool ready_read;             /* If I2C is ready for receiving data */
+  bool start_irq_pending;      /* Log the first IRQ after each START */
 
   soc_module_clk_t clk_src;   /* Clock source */
 
@@ -564,20 +566,30 @@ static void esp_i2c_intr_disable(struct esp_i2c_priv_s *priv)
 static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
 {
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
+  bool bus_busy;
   uint32_t fifo_val = 0;
-  i2c_ll_hw_cmd_t restart_cmd;
-  i2c_ll_hw_cmd_t write_cmd;
-  i2c_ll_hw_cmd_t end_cmd;
+  uint32_t status;
+  i2c_ll_hw_cmd_t restart_cmd =
+    {
+      .op_code = I2C_LL_CMD_RESTART
+    };
 
-  /* Write I2C command registers */
+  i2c_ll_hw_cmd_t write_cmd =
+    {
+      .byte_num = 1,
+      .ack_en = 1,
+      .ack_exp = 0,
+      .op_code = I2C_LL_CMD_WRITE
+    };
 
-  restart_cmd.op_code = I2C_LL_CMD_RESTART;
+  i2c_ll_hw_cmd_t end_cmd =
+    {
+      .op_code = I2C_LL_CMD_END
+    };
 
-  write_cmd.byte_num = 1;
-  write_cmd.ack_en = 1;
-  write_cmd.op_code = I2C_LL_CMD_WRITE;
-
-  end_cmd.op_code = I2C_LL_CMD_END;
+  /* The HAL writes the entire command word, so initialize all fields and
+   * expect a low ACK bit when sending the address.
+   */
 
   i2c_ll_master_write_cmd_reg(priv->ctx->dev, restart_cmd, 0);
   i2c_ll_master_write_cmd_reg(priv->ctx->dev, write_cmd, 1);
@@ -586,6 +598,27 @@ static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
   /* Write data to FIFO register */
 
   fifo_val = (msg->addr << 1) | (msg->flags & I2C_M_READ);
+
+  /* Keep the start diagnostic at the common controller boundary.  This
+   * distinguishes a physical address NACK from an error raised after the
+   * transfer has progressed to payload bytes.
+   */
+
+  bus_busy = i2c_ll_is_bus_busy(priv->ctx->dev);
+  status = GET_STATUS(priv->ctx->dev);
+  syslog(LOG_INFO,
+         "I2C%" PRIu32 " start: msg=%" PRIu8 " state=%u busy=%u"
+         " flags=0x%04x addr=0x%02x fifo0=0x%02x sr=0x%08" PRIx32
+         " lines(sda=%u:%u scl=%u:%u)\n",
+         priv->id, priv->msgid, (unsigned int)priv->i2cstate,
+         (unsigned int)bus_busy, (unsigned int)msg->flags,
+         (unsigned int)msg->addr, (unsigned int)(uint8_t)fifo_val, status,
+         priv->config->sda_pin,
+         (unsigned int)esp_gpioread(priv->config->sda_pin),
+         priv->config->scl_pin,
+         (unsigned int)esp_gpioread(priv->config->scl_pin));
+
+  priv->start_irq_pending = true;
   i2c_ll_write_txfifo(priv->ctx->dev, (uint8_t *)&fifo_val, 1);
 
   /* Enable I2C master TX interrupt */
@@ -617,6 +650,7 @@ static void esp_i2c_senddata(struct esp_i2c_priv_s *priv)
   i2c_ll_hw_cmd_t write_cmd =
     {
       .ack_en = 1,
+      .ack_exp = 0,
       .op_code = I2C_LL_CMD_WRITE
     };
 
@@ -690,8 +724,15 @@ static void esp_i2c_startrecv(struct esp_i2c_priv_s *priv)
   int ack_value = 0;
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
   int n = msg->length - priv->bytes;
-  i2c_ll_hw_cmd_t read_cmd;
-  i2c_ll_hw_cmd_t end_cmd;
+  i2c_ll_hw_cmd_t read_cmd =
+    {
+      .op_code = I2C_LL_CMD_READ
+    };
+
+  i2c_ll_hw_cmd_t end_cmd =
+    {
+      .op_code = I2C_LL_CMD_END
+    };
 
   if (n > 1)
     {
@@ -706,10 +747,8 @@ static void esp_i2c_startrecv(struct esp_i2c_priv_s *priv)
 
   read_cmd.byte_num = n;
   read_cmd.ack_val = ack_value;
-  read_cmd.op_code = I2C_LL_CMD_READ;
   i2c_ll_master_write_cmd_reg(priv->ctx->dev, read_cmd, 0);
 
-  end_cmd.op_code = I2C_LL_CMD_END;
   i2c_ll_master_write_cmd_reg(priv->ctx->dev, end_cmd, 1);
 
   /* Enable I2C master RX interrupt */
@@ -1127,17 +1166,32 @@ static int esp_i2c_polling_waitdone(struct esp_i2c_priv_s *priv)
 static void esp_i2c_log_transfer_error(struct esp_i2c_priv_s *priv,
                                        FAR const struct i2c_msg_s *msg)
 {
+  FAR const char *phase;
   uint32_t error = priv->error;
+
+  /* bytes is still zero when the address phase fails.  The driver advances
+   * it only after the address has been accepted and the payload is queued.
+   */
+
+  phase = priv->bytes == 0 ? "address" : "data";
 
   syslog(LOG_ERR,
          "ERROR: I2C%" PRIu32 " transfer failed: msg=%" PRIu8
-         " addr=0x%02x frequency=%" PRIu32 " raw=0x%08" PRIx32
-         " nack=%u timeout=%u arbitration_lost=%u\n",
-         priv->id, priv->msgid, (unsigned int)msg->addr,
-         msg->frequency, error,
+         " phase=%s bytes=%zd flags=0x%04x addr=0x%02x"
+         " frequency=%" PRIu32 " raw=0x%08" PRIx32
+         " nack=%u timeout=%u arbitration_lost=%u"
+         " lines(sda=%u:%u scl=%u:%u) state=%u\n",
+         priv->id, priv->msgid, phase, priv->bytes,
+         (unsigned int)msg->flags,
+         (unsigned int)msg->addr, msg->frequency, error,
          (unsigned int)((error & I2C_NACK_INT_ENA_M) != 0),
          (unsigned int)((error & I2C_TIME_OUT_INT_ENA_M) != 0),
-         (unsigned int)((error & I2C_ARBITRATION_LOST_INT_ENA_M) != 0));
+         (unsigned int)((error & I2C_ARBITRATION_LOST_INT_ENA_M) != 0),
+         priv->config->sda_pin,
+         (unsigned int)esp_gpioread(priv->config->sda_pin),
+         priv->config->scl_pin,
+         (unsigned int)esp_gpioread(priv->config->scl_pin),
+         (unsigned int)priv->i2cstate);
 }
 
 /****************************************************************************
@@ -1166,6 +1220,7 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
                             int count)
 {
   int ret = OK;
+  bool bus_busy;
   struct esp_i2c_priv_s *priv = (struct esp_i2c_priv_s *)dev;
 #ifdef CONFIG_I2C_TRACE
   uint32_t status = 0;
@@ -1185,8 +1240,21 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
   esp_pm_lock_acquire(priv->pm_lock);
 #endif
 
-  if (priv->i2cstate != I2CSTATE_IDLE)
+  /* A completed transaction may have returned the software state to idle
+   * before the controller has released the physical bus.  Check the
+   * hardware state as well, matching the ESP-IDF I2C recovery sequence.
+   */
+
+  bus_busy = i2c_ll_is_bus_busy(priv->ctx->dev);
+  if (priv->i2cstate != I2CSTATE_IDLE || bus_busy)
     {
+      if (bus_busy)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: I2C%" PRIu32 " bus busy before transfer; "
+                 "resetting FSM\n", priv->id);
+        }
+
       esp_i2c_reset_fsmc(priv);
       priv->i2cstate = I2CSTATE_IDLE;
     }
@@ -1200,6 +1268,7 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
       priv->bytes = 0;
       priv->msgid = i;
       priv->ready_read = false;
+      priv->start_irq_pending = false;
       priv->error = 0;
       priv->i2cstate = I2CSTATE_PROC;
 
@@ -1368,6 +1437,7 @@ static int esp_i2c_reset(struct i2c_master_s *dev)
   priv->msgid      = 0;
   priv->bytes      = 0;
   priv->ready_read = false;
+  priv->start_irq_pending = false;
 
   leave_critical_section(flags);
 
@@ -1604,10 +1674,25 @@ static inline void esp_i2c_process(struct esp_i2c_priv_s *priv,
                                    uint32_t irq_status)
 {
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
-#ifdef CONFIG_I2C_TRACE
-  uint32_t status = 0;
+  uint32_t status;
   status = GET_STATUS(priv->ctx->dev);
-#endif
+
+  if (priv->start_irq_pending)
+    {
+      syslog(LOG_INFO,
+             "I2C%" PRIu32 " start irq: msg=%" PRIu8
+             " raw=0x%08" PRIx32 " nack=%u timeout=%u"
+             " arbitration_lost=%u bytes=%zd state=%u sr=0x%08" PRIx32
+             "\n",
+             priv->id, priv->msgid, irq_status,
+             (unsigned int)((irq_status & I2C_NACK_INT_ENA_M) != 0),
+             (unsigned int)((irq_status & I2C_TIME_OUT_INT_ENA_M) != 0),
+             (unsigned int)((irq_status &
+                             I2C_ARBITRATION_LOST_INT_ENA_M) != 0),
+             priv->bytes, (unsigned int)priv->i2cstate, status);
+      priv->start_irq_pending = false;
+    }
+
   /* Check for any errors */
 
   if (I2C_INT_ERR_MASK & irq_status)
