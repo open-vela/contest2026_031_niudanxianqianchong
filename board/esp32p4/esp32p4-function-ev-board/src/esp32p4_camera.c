@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/videoio.h>
 
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/video/imgsensor.h>
