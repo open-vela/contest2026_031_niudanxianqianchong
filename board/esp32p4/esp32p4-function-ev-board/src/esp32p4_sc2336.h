@@ -44,6 +44,14 @@
 #define SC2336_RAW8_LANE_RATE_MBPS      288
 #define SC2336_RAW8_FPS                 30
 
+/* The SC2336 mode table declares a 288 MHz serial lane rate.  The verified
+ * ESP-IDF P4X camera baseline uses 200 Mbps/lane for the P4 CSI Host PHY
+ * HS-frequency selector with this exact mode.  Keep both values explicit:
+ * they describe the sensor mode and the receiver calibration respectively.
+ */
+
+#define SC2336_CSI_PHY_LANE_RATE_MBPS   200
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/

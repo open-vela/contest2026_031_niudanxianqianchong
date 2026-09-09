@@ -42,6 +42,7 @@ static void csi_probe_usage(FAR const char *program)
   fprintf(stderr,
           "Usage: %s sensor | sccb | pointer | split | write | raw [1-%d]\n",
           program, CSI_PROBE_MAX_FRAMES);
+  fprintf(stderr, "       %s rawdiag\n", program);
 }
 
 static void csi_probe_print_stats(
@@ -61,6 +62,20 @@ static void csi_probe_print_stats(
          stats->csi_phy_error_count, stats->csi_packet_error_count,
          stats->last_dma_status, stats->last_bridge_status,
          stats->last_host_status);
+  printf("stats: host(main=0x%08" PRIx32 " phy_fatal=0x%08" PRIx32
+         " packet_fatal=0x%08" PRIx32 " phy=0x%08" PRIx32 ")\n",
+         stats->last_host_status, stats->last_host_phy_fatal_status,
+         stats->last_host_packet_fatal_status, stats->last_host_phy_status);
+  printf("stats: phy(rx=0x%08" PRIx32 " stopstate=0x%08" PRIx32
+         ") bridge(raw=0x%08" PRIx32 " enable=0x%08" PRIx32
+         " buffer=0x%08" PRIx32 ")\n",
+         stats->last_phy_rx_status, stats->last_phy_stopstate_status,
+         stats->last_bridge_raw_status, stats->last_bridge_enable_status,
+         stats->last_bridge_buffer_status);
+  printf("stats: dma(channel=0x%08" PRIx32 " completed_block_64bit=%" PRIu32
+         " post_block_fifo_64bit=%" PRIu32 " source=0x%08" PRIx32 ")\n",
+         stats->last_dma_channel_status, stats->last_dma_transfer_units,
+         stats->last_dma_fifo_units, stats->last_dma_source_status);
 }
 
 static bool csi_probe_stats_clean(
@@ -340,7 +355,7 @@ out:
   return ret < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-static int csi_probe_raw(unsigned int requested_frames)
+static int csi_probe_raw(unsigned int requested_frames, bool diagnostic)
 {
   struct esp_mipi_csi_config_s config;
   struct esp_mipi_csi_stats_s stats;
@@ -376,7 +391,7 @@ static int csi_probe_raw(unsigned int requested_frames)
   frame_bytes = (size_t)config.width * config.height *
                 config.bits_per_pixel / 8;
   printf("profile: sensor=SC2336 lanes=%u dt=0x%02x "
-         "RAW%u %ux%u %uMbps/lane frame_bytes=%zu\n",
+         "RAW%u %ux%u phy_rate=%" PRIu32 "Mbps/lane frame_bytes=%zu\n",
          config.lane_num, config.data_type,
          config.bits_per_pixel, config.width, config.height,
          config.lane_bit_rate_mbps, frame_bytes);
@@ -425,9 +440,23 @@ static int csi_probe_raw(unsigned int requested_frames)
   csi_running = true;
   for (frame = 0; frame < requested_frames; frame++)
     {
-      ret = esp_mipi_csi_wait_frame(csi, CSI_PROBE_FRAME_TIMEOUT_MS);
+      if (diagnostic)
+        {
+          ret = esp_mipi_csi_wait_frame_diag(csi,
+                                             CSI_PROBE_FRAME_TIMEOUT_MS);
+        }
+      else
+        {
+          ret = esp_mipi_csi_wait_frame(csi, CSI_PROBE_FRAME_TIMEOUT_MS);
+        }
+
       if (ret < 0)
         {
+          if (esp_mipi_csi_get_stats(csi, &stats) >= 0)
+            {
+              csi_probe_print_stats(&stats);
+            }
+
           fprintf(stderr,
                   "csi_probe: FAIL step=wait_frame frame=%u ret=%d\n",
                   frame + 1, ret);
@@ -582,13 +611,18 @@ int main(int argc, FAR char *argv[])
 
   if (argc == 2 && strcmp(argv[1], "raw") == 0)
     {
-      return csi_probe_raw(frame_count);
+      return csi_probe_raw(frame_count, false);
     }
 
   if (argc == 3 && strcmp(argv[1], "raw") == 0 &&
       csi_probe_parse_frame_count(argv[2], &frame_count) == OK)
     {
-      return csi_probe_raw(frame_count);
+      return csi_probe_raw(frame_count, false);
+    }
+
+  if (argc == 2 && strcmp(argv[1], "rawdiag") == 0)
+    {
+      return csi_probe_raw(1, true);
     }
 
   csi_probe_usage(argv[0]);
