@@ -39,6 +39,8 @@
 
 #define BOARD_MIPI_CSI_PHY_LDO_CHANNEL 3
 #define BOARD_MIPI_CSI_PHY_SETTLE_MS  10
+#define BOARD_SC2336_RGB565_FRAME_BYTES \
+  (SC2336_RAW8_WIDTH * SC2336_RAW8_HEIGHT * 2)
 
 /****************************************************************************
  * Private Data
@@ -58,6 +60,16 @@ static bool g_sc2336_streaming;
 static FAR struct esp_mipi_csi_s *g_video_csi;
 static struct esp_mipi_csi_video_s g_video_data;
 static struct imgsensor_s g_video_sensor;
+
+static const struct esp_mipi_csi_video_config_s g_video_data_config =
+{
+  .width = SC2336_RAW8_WIDTH,
+  .height = SC2336_RAW8_HEIGHT,
+  .pixelformat = IMGDATA_PIX_FMT_RGB565,
+  .frame_bytes = BOARD_SC2336_RGB565_FRAME_BYTES,
+  .alignment = ESP_MIPI_CSI_VIDEO_MIN_ALIGNMENT,
+  .interval = { 1, SC2336_RAW8_FPS },
+};
 
 static const struct v4l2_fmtdesc g_video_fmts[] =
 {
@@ -821,7 +833,8 @@ int board_camera_initialize(void)
   g_video_sensor.frmsizes_num = 1;
   g_video_sensor.frmintervals = g_video_intervals;
   g_video_sensor.frmintervals_num = 1;
-  ret = esp_mipi_csi_video_initialize(&g_video_data, NULL);
+  ret = esp_mipi_csi_video_initialize(&g_video_data, NULL,
+                                       &g_video_data_config);
   if (ret < 0)
     return ret;
 
