@@ -84,11 +84,11 @@ nuttx/include/nuttx/video/imgsensor.h
 
 | 文件 | 动作 | 实现内容 |
 | --- | --- | --- |
-| `chips/esp32p4/common/espressif/esp_mipi_csi.c` | 修改 | 保留已验证的 D-PHY、CSI Host 和 GDMA 基础；增加 ISP 输出模式；由 RAW bypass 配置改为根据模式配置 CSI 输入和 Bridge 输出；实现 DMA 完成后切换下一 V4L2 缓冲。 |
-| `chips/esp32p4/include/esp_mipi_csi.h` | 修改 | 保留 `csi_probe` 单缓冲 API；新增面向视频数据面的队列、开始、停止、帧完成回调和错误快照接口。 |
+| `chips/esp32p4/common/espressif/esp_mipi_csi.c` | 修改 | 保留已验证的 D-PHY、CSI Host 和 GDMA 基础；增加 ISP 输出模式；由 RAW bypass 配置改为根据模式配置 CSI 输入和 Bridge 输出；在 DMA ISR 中轮换三块暂存帧并投递 HPWORK。 |
+| `chips/esp32p4/include/esp_mipi_csi.h` | 修改 | 保留 `csi_probe` 单缓冲 API；新增面向视频数据面的三缓冲队列、开始、停止、延后帧完成回调和错误快照接口。 |
 | `chips/esp32p4/common/espressif/esp_isp.c` | 新增 | P4 ISP 原生适配：配置输入 CSI、RAW8、BGGR、1024 × 600，关闭 bypass，输出 RGB565；管理 ISP 时钟、复位、寄存器影子更新及停机。 |
 | `chips/esp32p4/include/esp_isp.h` | 新增 | 声明 ISP 配置、初始化、启动、停止和反初始化接口；不暴露 ESP-IDF 的任务、队列或 FreeRTOS 类型。 |
-| `chips/esp32p4/common/espressif/esp_mipi_csi_video.c` | 新增 | 实现 `struct imgdata_s`：V4L2 缓冲地址校验、64-byte 对齐分配、队列提交、采集开始/停止，以及向 upper-half 报告完成帧。 |
+| `chips/esp32p4/common/espressif/esp_mipi_csi_video.c` | 新增 | 实现 `struct imgdata_s`：V4L2 缓冲地址校验、64-byte 对齐分配、三块 DMA 暂存帧、工作队列中的复制与完成帧上报。 |
 | `chips/esp32p4/include/esp_mipi_csi_video.h` | 新增 | 声明 P4 CSI 视频数据面初始化接口，供板级装配代码创建 `imgdata_s`。 |
 | `chips/esp32p4/common/espressif/Kconfig` | 修改 | 新增 `ESPRESSIF_ISP` 与 `ESPRESSIF_MIPI_CSI_VIDEO`；视频开关依赖 CSI，并选择必要的时钟、LDO 与 GDMA 能力。 |
 | `chips/esp32p4/common/espressif/Make.defs` | 修改 | 在相应配置开启时编译 `esp_isp.c` 和 `esp_mipi_csi_video.c`。 |
@@ -177,42 +177,43 @@ RGB565 每帧大小为：
 `esp_mipi_csi_video.c` 的 `.alloc` 必须以 64-byte 对齐分配，不能依赖
 V4L2 默认的 32-byte 对齐分配。
 
-首期采用“软件多缓冲队列，至少双缓冲”的模型：
+首期采用“DMA 暂存三缓冲 + V4L2 交付缓冲”的模型。暂存帧让 CSI 在 V4L2
+upper-half 处理上一帧时继续接收；V4L2 缓冲仍由应用经 `QBUF` / `DQBUF` 管理：
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Free
-  Free --> Queued: VIDIOC_QBUF
-  Queued --> Active: GDMA 写入
-  Active --> Done: DMA 完成 + Cache C2M
-  Done --> Dequeued: VIDIOC_DQBUF
-  Dequeued --> Queued: 应用再次 QBUF
-  Queued --> Free: STREAMOFF
-  Active --> Free: STREAMOFF
+  [*] --> DmaReady
+  DmaReady --> DmaActive: GDMA 写入
+  DmaActive --> DmaDone: DMA ISR
+  DmaDone --> DmaReady: HPWORK 复制后归还
+  DmaDone --> V4L2Done: HPWORK 复制至 QBUF
+  V4L2Done --> Dequeued: VIDIOC_DQBUF
+  Dequeued --> V4L2Done: 应用再次 QBUF
+  DmaActive --> DmaReady: STREAMOFF
 ```
 
 默认 `REQBUFS(count=3)`：
 
-- 一块由 GDMA 正在写入；
-- 一块作为 V4L2 队列中的下一可用帧；
-- 一块可由应用持有、显示或处理。
+- 三块由 GDMA 轮换写入的 64-byte 对齐暂存帧；
+- 三块由 V4L2 队列管理的交付帧，应用可在其中一块上显示或处理；
+- HPWORK 将完成的暂存帧复制到当前交付帧，通知 upper-half 后再归还暂存帧。
 
-若内存压力较大，`REQBUFS(count=2)` 是最小可用配置，但应用必须在一帧周期内
-完成 `DQBUF` 后的处理和重新 `QBUF`，否则队列耗尽，驱动停止接收并报告
-丢帧或 `-ENOBUFS`。
+`REQBUFS(count=2)` 仍可工作，但应用必须及时重新 `QBUF`。若没有可交付的
+V4L2 缓冲，驱动会丢弃暂存帧内容而不覆写已完成的应用帧。
 
-`esp_mipi_csi_video.c` 的 `set_buf()` 只做不可睡眠的入队和地址校验。
+`esp_mipi_csi_video.c` 的 `set_buf()` 只记录当前 V4L2 交付缓冲和地址校验。
 GDMA 完成路径执行：
 
 1. 采样 DMA、CSI Host、Bridge 错误状态；
-2. 对完成帧执行 Cache C2M 同步；
-3. 标记当前 buffer 完成，并向 V4L2 callback 报告精确的 RGB565 帧大小与时间戳；
-4. 取出下一块已排队 buffer，执行 M2C 同步并重装 GDMA 目标；
-5. 没有下一缓冲时安全停流，不得继续覆写已完成帧。
+2. 在硬中断中将当前暂存帧放入完成队列，取下一暂存帧并重装 GDMA；
+3. 投递 HPWORK；硬中断不调用 V4L2 callback、不获取 mutex、不复制像素；
+4. HPWORK 对完成暂存帧执行 Cache M2C 同步，复制到当前 V4L2 缓冲并报告精确
+   的 RGB565 帧大小与时间戳；
+5. HPWORK 将暂存帧归还 ready 队列；没有 ready 暂存帧时，CSI 暂停并在帧归还后恢复。
 
-首期可以使用单个 GDMA 通道和“完成中断内快速重装下一 buffer”的软件 ping-pong。
-若实测帧间存在 Bridge 溢出或丢帧，再升级为预装双 LLI 的硬件双缓冲；该升级只
-改变 `esp_mipi_csi.c` 的 DMA 描述符管理，不改变 V4L2 或板级接口。
+首期使用单个 GDMA 通道和“完成中断内快速重装下一暂存帧”的软件三缓冲。若实测
+帧间存在 Bridge 溢出或丢帧，再升级为预装多个 LLI 的硬件队列；该升级只改变
+`esp_mipi_csi.c` 的 DMA 描述符管理，不改变 V4L2 或板级接口。
 
 ## 6. 实施顺序与验收
 
@@ -238,10 +239,11 @@ V1 只证明 ISP 数据通路，不证明画质。V5 前必须分别检查 Bayer
 - **动态 IRQ 问题**：当前第二次动态 IRQ 分配存在已知问题。首期 ISP 不启用
   AE/AWB/AF 等额外 ISP 中断，只保留已验证的 GDMA 完成 IRQ 与 Bridge 错误轮询；
   IRQ 分配器修复独立推进。
-- **ISR 上下文**：帧完成回调和下一缓冲重装路径不能分配内存、获取 mutex 或访问
-  不在 IRAM 的依赖。需要延后处理的统计、文件写入和显示操作必须移交应用线程。
-- **内存**：三块 RGB565 帧缓冲占约 3.52 MiB，尚未包含 LCD framebuffer、LVGL、
-  应用栈和 ISP 调优表；`video` defconfig 必须在目标功能组合下核对 PSRAM 余量。
+- **ISR 上下文**：DMA ISR 只轮换暂存帧、重装 LLI 和投递 HPWORK；V4L2 callback、
+  cache M2C、像素复制和可能获取 mutex 的路径均在工作线程执行。
+- **内存**：三块 DMA 暂存帧占约 3.52 MiB；默认三块 V4L2 交付帧再占约 3.52 MiB，
+  合计约 7.03 MiB，尚未包含 LCD framebuffer、LVGL、应用栈和 ISP 调优表；
+  `video` defconfig 必须在目标功能组合下核对 PSRAM 余量。
 - **ISP 调优**：Espressif HAL 的 RAW8→RGB565 测试可用作寄存器配置参考，但
   不能视为 SC2336 画质参数。BLC、WBG、CCM、Gamma 和 LSC 需要基于本模组实测。
 
