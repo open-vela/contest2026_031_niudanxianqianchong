@@ -9,6 +9,7 @@
 
 #include "esp_clk_tree.h"
 #include "esp_err.h"
+#include "esp_private/esp_clk_tree_common.h"
 #include "esp_private/periph_ctrl.h"
 #include "hal/isp_ll.h"
 
