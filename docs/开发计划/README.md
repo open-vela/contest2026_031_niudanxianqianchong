@@ -22,9 +22,9 @@ DSI Bridge 和 D-PHY 的逐函数路径见
 defconfig 方向和验收矩阵见
 [ESP32-P4X SmartHome Demo 测试开发计划](ESP32-P4X-SmartHome-Demo测试开发计划.md)。
 
-P4X MIPI-CSI 摄像头的芯片层、板级装配、V4L2 接入以及“板级私有
-SC2336”与“NuttX 通用 driver”两种实施路径见
-[ESP32-P4X MIPI-CSI 摄像头适配方案](ESP32-P4X-MIPI-CSI摄像头适配方案.md)。
+P4X MIPI-CSI 摄像头的 `/dev/video0` 实施采用“板级私有 SC2336 驱动、
+ESP32-P4 ISP 输出 RGB565、V4L2 多缓冲队列”的路径；改动文件、资源生命周期和
+验收条件见[ESP32-P4X MIPI-CSI 摄像头适配方案](ESP32-P4X-MIPI-CSI摄像头适配方案.md)。
 
 上游 Apache NuttX / OpenVela 的 ESP32-P4 成熟基础适配采用“固定来源、逐能力
 单元吸收、本地 DSI overlay 保留”的策略，详见

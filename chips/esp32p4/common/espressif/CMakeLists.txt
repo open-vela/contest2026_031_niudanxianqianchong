@@ -199,6 +199,12 @@ endif()
 
 if(CONFIG_ESPRESSIF_MIPI_CSI)
   list(APPEND SRCS esp_mipi_csi.c)
+  if(CONFIG_ESPRESSIF_ISP)
+    list(APPEND SRCS esp_isp.c)
+  endif()
+  if(CONFIG_ESPRESSIF_MIPI_CSI_VIDEO)
+    list(APPEND SRCS esp_mipi_csi_video.c)
+  endif()
 endif()
 
 if(CONFIG_CRYPTO_CRYPTODEV_HARDWARE)

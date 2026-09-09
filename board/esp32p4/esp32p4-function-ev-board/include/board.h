@@ -378,6 +378,10 @@ int board_sc2336_csi_set_stream(bool enable);
 
 int board_sc2336_csi_release(void);
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+int board_camera_initialize(void);
+#endif
+
 #endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336 */
 
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_INCLUDE_BOARD_H */
