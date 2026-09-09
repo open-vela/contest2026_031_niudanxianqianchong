@@ -100,6 +100,9 @@ struct esp_mipi_csi_s
   dw_gdma_link_list_item_t    dma_lli;
   FAR dw_gdma_dev_t           *dma_dev;
   FAR void                    *frame_buffer;
+  FAR void                    *queued_buffer;
+  esp_mipi_csi_frame_callback_t frame_callback;
+  FAR void                    *frame_callback_arg;
   size_t                      expected_frame_bytes;
   struct esp_mipi_csi_stats_s stats;
   int                         dma_cpuint;
@@ -388,6 +391,29 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
   bridge_status = 0;
   if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
     {
+      FAR void *completed = priv->frame_buffer;
+
+      if (priv->frame_callback != NULL)
+        {
+          esp_cache_msync(completed, priv->expected_frame_bytes,
+                          ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+          priv->frame_callback(completed, priv->expected_frame_bytes,
+                               priv->frame_callback_arg);
+          if (priv->queued_buffer == NULL)
+            {
+              mipi_csi_brg_ll_enable(priv->hal.bridge_dev, false);
+              priv->running = false;
+              return OK;
+            }
+
+          priv->frame_buffer = priv->queued_buffer;
+          priv->queued_buffer = NULL;
+          dw_gdma_ll_lli_set_dst_addr(&priv->dma_lli,
+            (uint32_t)(uintptr_t)priv->frame_buffer);
+          dw_gdma_ll_lli_set_dst_master_port(&priv->dma_lli,
+            (intptr_t)priv->frame_buffer);
+        }
+
       host_status = priv->hal.host_dev->int_st_main.val;
     }
 
@@ -478,6 +504,9 @@ static void esp_mipi_csi_release_dma(FAR struct esp_mipi_csi_s *priv)
 
   memset(&priv->dma_lli, 0, sizeof(priv->dma_lli));
   priv->frame_buffer = NULL;
+  priv->queued_buffer = NULL;
+  priv->frame_callback = NULL;
+  priv->frame_callback_arg = NULL;
 }
 
 static int esp_mipi_csi_prepare_dma(FAR struct esp_mipi_csi_s *priv,
@@ -1144,6 +1173,49 @@ int esp_mipi_csi_wait_frame(FAR struct esp_mipi_csi_s *csi,
     }
 
   return ret;
+}
+
+int esp_mipi_csi_start_video(FAR struct esp_mipi_csi_s *csi,
+                             FAR void *buffer, size_t bytes,
+                             esp_mipi_csi_frame_callback_t callback,
+                             FAR void *arg)
+{
+  FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+
+  if (csi != priv || callback == NULL)
+    {
+      return -EINVAL;
+    }
+
+  priv->frame_callback = callback;
+  priv->frame_callback_arg = arg;
+  return esp_mipi_csi_start(csi, buffer, bytes);
+}
+
+int esp_mipi_csi_queue_buffer(FAR struct esp_mipi_csi_s *csi,
+                              FAR void *buffer, size_t bytes)
+{
+  FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+
+  if (csi != priv || buffer == NULL || bytes != priv->expected_frame_bytes ||
+      ((uintptr_t)buffer & (ESP_MIPI_CSI_CACHE_LINE_BYTES - 1)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  if (priv->queued_buffer != NULL)
+    {
+      return -EBUSY;
+    }
+
+  if (esp_mipi_csi_result(esp_cache_msync(buffer, bytes,
+      ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED)) < 0)
+    {
+      return -EIO;
+    }
+
+  priv->queued_buffer = buffer;
+  return OK;
 }
 
 int esp_mipi_csi_wait_frame_diag(FAR struct esp_mipi_csi_s *csi,

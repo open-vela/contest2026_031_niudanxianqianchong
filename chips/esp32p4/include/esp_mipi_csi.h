@@ -42,6 +42,8 @@
  ****************************************************************************/
 
 struct esp_mipi_csi_s;
+typedef void (*esp_mipi_csi_frame_callback_t)(FAR void *buffer, size_t bytes,
+                                              FAR void *arg);
 
 /* This is deliberately a receiver-only primitive.  A board owns sensor
  * reset, MCLK, SCCB and the sensor's stream profile; this layer only accepts
@@ -160,6 +162,12 @@ int esp_mipi_csi_power_release(FAR struct esp_mipi_csi_s *csi);
 
 int esp_mipi_csi_start(FAR struct esp_mipi_csi_s *csi,
                        FAR void *frame_buffer, size_t frame_buffer_bytes);
+int esp_mipi_csi_start_video(FAR struct esp_mipi_csi_s *csi,
+                             FAR void *buffer, size_t bytes,
+                             esp_mipi_csi_frame_callback_t callback,
+                             FAR void *arg);
+int esp_mipi_csi_queue_buffer(FAR struct esp_mipi_csi_s *csi,
+                              FAR void *buffer, size_t bytes);
 
 /****************************************************************************
  * Name: esp_mipi_csi_wait_frame
