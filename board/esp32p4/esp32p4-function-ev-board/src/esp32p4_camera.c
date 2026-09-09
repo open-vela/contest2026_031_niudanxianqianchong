@@ -103,7 +103,7 @@ static int board_sc2336_csi_get_profile(
   config->bits_per_pixel = SC2336_RAW8_BITS_PER_PIXEL;
   config->width = SC2336_RAW8_WIDTH;
   config->height = SC2336_RAW8_HEIGHT;
-  config->lane_bit_rate_mbps = SC2336_RAW8_LANE_RATE_MBPS;
+  config->lane_bit_rate_mbps = SC2336_CSI_PHY_LANE_RATE_MBPS;
   config->byte_swap = false;
   config->phy_ldo.channel_id = BOARD_MIPI_CSI_PHY_LDO_CHANNEL;
   config->phy_ldo.voltage_mv = ESP_MIPI_CSI_DPHY_VOLTAGE_MV;
@@ -621,10 +621,11 @@ int board_sc2336_csi_prepare(FAR uint16_t *product_id)
          "SC2336 CSI prepare: stage=profile_configure result=%d\n", ret);
   syslog(LOG_INFO,
          "SC2336 CSI profile ready: %u lane(s), dt=0x%02x, "
-         "%ux%u RAW%u @%u Mbps/lane\n",
+         "%ux%u RAW%u sensor_rate=%uMbps/lane phy_rate=%uMbps/lane\n",
          SC2336_RAW8_LANE_NUM, SC2336_RAW8_DATA_TYPE,
          SC2336_RAW8_WIDTH, SC2336_RAW8_HEIGHT,
-         SC2336_RAW8_BITS_PER_PIXEL, SC2336_RAW8_LANE_RATE_MBPS);
+         SC2336_RAW8_BITS_PER_PIXEL, SC2336_RAW8_LANE_RATE_MBPS,
+         SC2336_CSI_PHY_LANE_RATE_MBPS);
   ret = OK;
   goto out;
 

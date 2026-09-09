@@ -74,6 +74,18 @@ struct esp_mipi_csi_stats_s
   uint32_t last_dma_status;
   uint32_t last_bridge_status;
   uint32_t last_host_status;
+  uint32_t last_bridge_raw_status;
+  uint32_t last_bridge_enable_status;
+  uint32_t last_bridge_buffer_status;
+  uint32_t last_host_phy_fatal_status;
+  uint32_t last_host_packet_fatal_status;
+  uint32_t last_host_phy_status;
+  uint32_t last_phy_rx_status;
+  uint32_t last_phy_stopstate_status;
+  uint32_t last_dma_channel_status;
+  uint32_t last_dma_transfer_units;
+  uint32_t last_dma_fifo_units;
+  uint32_t last_dma_source_status;
 };
 
 /****************************************************************************
@@ -100,7 +112,9 @@ int esp_mipi_csi_power_acquire(
  * Name: esp_mipi_csi_initialize
  *
  * Description:
- *   Configure the ESP32-P4 CSI PHY, Host and Bridge for a raw CSI-2 stream.
+ *   Configure CSI PHY, Host, ISP bypass and Bridge for a raw CSI-2 stream
+ *   without explicit line-start/line-end packets.  Each line must be aligned
+ *   to 64 bits.  ISP clocks remain enabled until deinitialization.
  *   The caller must acquire power with esp_mipi_csi_power_acquire() first.
  *
  ****************************************************************************/
@@ -156,6 +170,22 @@ int esp_mipi_csi_wait_frame(FAR struct esp_mipi_csi_s *csi,
                             uint32_t timeout_ms);
 
 /****************************************************************************
+ * Name: esp_mipi_csi_wait_frame_diag
+ *
+ * Description:
+ *   Wait for a frame while logging PHY, ISP and DMA observations.  For the
+ *   standalone bring-up command only: observe sticky frame events using the
+ *   ISP clock already owned by initialization.  Do not change clocks or the
+ *   data-path configuration.  Return -EPIPE if reception or the ISP clock
+ *   is not active.  Samples are spaced by one scheduler tick; absence of
+ *   sampled HS activity does not prove absence of a stream.
+ *
+ ****************************************************************************/
+
+int esp_mipi_csi_wait_frame_diag(FAR struct esp_mipi_csi_s *csi,
+                                 uint32_t timeout_ms);
+
+/****************************************************************************
  * Name: esp_mipi_csi_stop
  *
  * Description:
@@ -171,7 +201,8 @@ int esp_mipi_csi_stop(FAR struct esp_mipi_csi_s *csi);
  *
  * Description:
  *   Invalidate a completed frame before CPU CRC, non-zero checks or file
- *   writes.  The buffer must be the one passed to esp_mipi_csi_start().
+ *   writes.  The buffer must be the one passed to esp_mipi_csi_start(), with
+ *   both its address and its size aligned to the 64-byte P4 cache line.
  *
  ****************************************************************************/
 
