@@ -223,6 +223,7 @@ static void esp_mipi_csi_frame_worker(FAR void *arg)
   FAR void *callback_arg;
   FAR void *buffer;
   irqstate_t flags;
+  int ret;
 
   for (;;)
     {
@@ -238,11 +239,19 @@ static void esp_mipi_csi_frame_worker(FAR void *arg)
       callback_arg = priv->frame_callback_arg;
       spin_unlock_irqrestore(&priv->irq_lock, flags);
 
-      if (callback != NULL &&
-          esp_mipi_csi_buffer_sync_for_cpu(buffer,
-                                           priv->expected_frame_bytes) >= 0)
+      if (callback != NULL)
         {
-          callback(buffer, priv->expected_frame_bytes, callback_arg);
+          ret = esp_mipi_csi_buffer_sync_for_cpu(buffer,
+                                                  priv->expected_frame_bytes);
+          if (ret >= 0)
+            {
+              callback(buffer, priv->expected_frame_bytes, callback_arg);
+            }
+          else
+            {
+              esp_mipi_csi_queue_buffer(priv, buffer,
+                                        priv->expected_frame_bytes);
+            }
         }
     }
 }
@@ -1458,7 +1467,7 @@ int esp_mipi_csi_wait_video_idle(FAR struct esp_mipi_csi_s *csi)
   priv->done_tail = 0;
   priv->done_count = 0;
   spin_unlock_irqrestore(&priv->irq_lock, flags);
-  return ret == -ENOENT ? OK : ret;
+  return ret < 0 && ret != -ENOENT ? ret : OK;
 }
 
 int esp_mipi_csi_wait_frame_diag(FAR struct esp_mipi_csi_s *csi,
