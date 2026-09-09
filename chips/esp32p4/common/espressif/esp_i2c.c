@@ -566,9 +566,11 @@ static void esp_i2c_intr_disable(struct esp_i2c_priv_s *priv)
 static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
 {
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
-  bool bus_busy;
   uint32_t fifo_val = 0;
+#ifdef CONFIG_DEBUG_I2C_INFO
+  bool bus_busy;
   uint32_t status;
+#endif
   i2c_ll_hw_cmd_t restart_cmd =
     {
       .op_code = I2C_LL_CMD_RESTART
@@ -599,24 +601,24 @@ static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
 
   fifo_val = (msg->addr << 1) | (msg->flags & I2C_M_READ);
 
-  /* Keep the start diagnostic at the common controller boundary.  This
-   * distinguishes a physical address NACK from an error raised after the
-   * transfer has progressed to payload bytes.
+  /* Keep the start diagnostic at the common controller boundary when I2C
+   * information logging is explicitly enabled.
    */
 
+#ifdef CONFIG_DEBUG_I2C_INFO
   bus_busy = i2c_ll_is_bus_busy(priv->ctx->dev);
   status = GET_STATUS(priv->ctx->dev);
-  syslog(LOG_INFO,
-         "I2C%" PRIu32 " start: msg=%" PRIu8 " state=%u busy=%u"
-         " flags=0x%04x addr=0x%02x fifo0=0x%02x sr=0x%08" PRIx32
-         " lines(sda=%u:%u scl=%u:%u)\n",
-         priv->id, priv->msgid, (unsigned int)priv->i2cstate,
-         (unsigned int)bus_busy, (unsigned int)msg->flags,
-         (unsigned int)msg->addr, (unsigned int)(uint8_t)fifo_val, status,
-         priv->config->sda_pin,
-         (unsigned int)esp_gpioread(priv->config->sda_pin),
-         priv->config->scl_pin,
-         (unsigned int)esp_gpioread(priv->config->scl_pin));
+  i2cinfo("I2C%" PRIu32 " start: msg=%" PRIu8 " state=%u busy=%u"
+          " flags=0x%04x addr=0x%02x fifo0=0x%02x sr=0x%08" PRIx32
+          " lines(sda=%u:%u scl=%u:%u)\n",
+          priv->id, priv->msgid, (unsigned int)priv->i2cstate,
+          (unsigned int)bus_busy, (unsigned int)msg->flags,
+          (unsigned int)msg->addr, (unsigned int)(uint8_t)fifo_val, status,
+          priv->config->sda_pin,
+          (unsigned int)esp_gpioread(priv->config->sda_pin),
+          priv->config->scl_pin,
+          (unsigned int)esp_gpioread(priv->config->scl_pin));
+#endif
 
   priv->start_irq_pending = true;
   i2c_ll_write_txfifo(priv->ctx->dev, (uint8_t *)&fifo_val, 1);
@@ -1679,17 +1681,16 @@ static inline void esp_i2c_process(struct esp_i2c_priv_s *priv,
 
   if (priv->start_irq_pending)
     {
-      syslog(LOG_INFO,
-             "I2C%" PRIu32 " start irq: msg=%" PRIu8
-             " raw=0x%08" PRIx32 " nack=%u timeout=%u"
-             " arbitration_lost=%u bytes=%zd state=%u sr=0x%08" PRIx32
-             "\n",
-             priv->id, priv->msgid, irq_status,
-             (unsigned int)((irq_status & I2C_NACK_INT_ENA_M) != 0),
-             (unsigned int)((irq_status & I2C_TIME_OUT_INT_ENA_M) != 0),
-             (unsigned int)((irq_status &
-                             I2C_ARBITRATION_LOST_INT_ENA_M) != 0),
-             priv->bytes, (unsigned int)priv->i2cstate, status);
+      i2cinfo("I2C%" PRIu32 " start irq: msg=%" PRIu8
+              " raw=0x%08" PRIx32 " nack=%u timeout=%u"
+              " arbitration_lost=%u bytes=%zd state=%u sr=0x%08" PRIx32
+              "\n",
+              priv->id, priv->msgid, irq_status,
+              (unsigned int)((irq_status & I2C_NACK_INT_ENA_M) != 0),
+              (unsigned int)((irq_status & I2C_TIME_OUT_INT_ENA_M) != 0),
+              (unsigned int)((irq_status &
+                              I2C_ARBITRATION_LOST_INT_ENA_M) != 0),
+              priv->bytes, (unsigned int)priv->i2cstate, status);
       priv->start_irq_pending = false;
     }
 
