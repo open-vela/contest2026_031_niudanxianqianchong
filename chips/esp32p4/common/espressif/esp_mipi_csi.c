@@ -106,6 +106,7 @@ struct esp_mipi_csi_s
   int                         bridge_cpuint;
   bool                        phy_clock_enabled;
   bool                        isp_clock_enabled;
+  struct esp_isp_s            isp;
   bool                        powered;
   bool                        initialized;
   bool                        running;
@@ -154,7 +155,8 @@ static int esp_mipi_csi_frame_bytes(
     }
 
   bits = (uint64_t)config->width * config->height *
-         config->bits_per_pixel;
+         (config->output == ESP_ISP_OUTPUT_RGB565 ? 16 :
+          config->bits_per_pixel);
   if ((bits & 7) != 0 || bits / 8 > SIZE_MAX)
     {
       return -EINVAL;
@@ -652,14 +654,7 @@ static void esp_mipi_csi_disable_hardware(FAR struct esp_mipi_csi_s *priv)
 
   if (priv->isp_clock_enabled)
     {
-      ISP.int_ena.val = 0;
-      isp_ll_enable(ISP_LL_GET_HW(0), false);
-      isp_ll_clk_enable(ISP_LL_GET_HW(0), false);
-      PERIPH_RCC_ATOMIC()
-        {
-          isp_ll_enable_module_clock(ISP_LL_GET_HW(0), false);
-        }
-
+      esp_isp_deinitialize(&priv->isp);
       esp_clk_tree_enable_src((soc_module_clk_t)ISP_CLK_SRC_PLL160, false);
       priv->isp_clock_enabled = false;
     }
@@ -747,7 +742,6 @@ int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
 {
   FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
   mipi_csi_hal_config_t hal_config;
-  hal_utils_clk_div_t isp_div;
   FAR isp_dev_t *isp = ISP_LL_GET_HW(0);
   FAR const char *stage;
   size_t frame_bytes;
@@ -854,49 +848,34 @@ int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
   syslog(LOG_INFO,
          "INFO: MIPI-CSI initialize: stage=%s result=%d\n", stage, OK);
 
-  /* RAW bypass still uses the ISP input and tail.  Enable its working clock
-   * through HP_SYS_CLKRST before ANY ISP register access: even reading
-   * ISP.clk_en with the working clock gated can stall the CPU bus.
-   */
+  stage = "isp_configure";
+  {
+    struct esp_isp_config_s isp_config =
+    {
+      .width = config->width,
+      .height = config->height,
+      .input_bpp = config->bits_per_pixel,
+      .bayer_order = config->bayer_order,
+      .byte_swap = config->byte_swap,
+      .output = config->output
+    };
 
-  stage = "isp_clock_enable";
-  syslog(LOG_INFO, "INFO: MIPI-CSI initialize: stage=%s\n", stage);
-  ret = esp_mipi_csi_result(esp_clk_tree_enable_src(
-    (soc_module_clk_t)ISP_CLK_SRC_PLL160, true));
+    ret = esp_isp_initialize(&priv->isp, &isp_config);
+  }
   if (ret < 0)
     {
       goto out;
     }
 
-  memset(&isp_div, 0, sizeof(isp_div));
-  isp_div.integer = 2;
-  PERIPH_RCC_ATOMIC()
-    {
-      isp_ll_select_clk_source(isp, ISP_CLK_SRC_PLL160);
-      isp_ll_set_clock_div(isp, &isp_div);
-      isp_ll_enable_module_clock(isp, true);
-      isp_ll_reset_module_clock(isp);
-    }
-
   priv->isp_clock_enabled = true;
-  stage = "isp_bypass_configure";
-  syslog(LOG_INFO, "INFO: MIPI-CSI initialize: stage=%s\n", stage);
-  isp_ll_init(isp);
-  isp_ll_clk_enable(isp, true);
-  isp->int_ena.val = 0;
-  isp_ll_enable(isp, false);
-  isp_ll_set_input_data_source(isp, ISP_INPUT_DATA_SOURCE_CSI);
-  isp_ll_enable_line_start_packet_exist(isp, false);
-  isp_ll_enable_line_end_packet_exist(isp, false);
-  isp_ll_set_intput_data_h_pixel_num(isp, line_bits / 32);
-  isp_ll_set_intput_data_v_row_num(isp, config->height);
-  isp_ll_shadow_set_mode(isp, ISP_SHADOW_MODE_UPDATE_ONLY_NEXT_VSYNC);
   syslog(LOG_INFO,
          "INFO: MIPI-CSI initialize: stage=%s result=%d "
          "isp_en=%u mipi_data_en=%u input_words32=%lu cntl=0x%08lx\n",
          stage, OK, (unsigned int)isp->cntl.isp_en,
          (unsigned int)isp->cntl.mipi_data_en,
-         (unsigned long)(line_bits / 32), (unsigned long)isp->cntl.val);
+         (unsigned long)(config->output == ESP_ISP_OUTPUT_RGB565 ?
+                         config->width : line_bits / 32),
+         (unsigned long)isp->cntl.val);
 
   /* The Bridge width counts 64-bit words, not sensor pixels.  The ISP
    * bypass width above counts 32-bit words.  Neither is the pixel width.
@@ -908,14 +887,15 @@ int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
          "dt=0x%02x burst_words=%u fifo_threshold=%u words64_per_line=%lu\n",
          stage, config->width, config->height, config->data_type,
          ESP_MIPI_CSI_DMA_BURST_WORDS, ESP_MIPI_CSI_DMA_FIFO_THRESHOLD,
-         (unsigned long)(line_bits / 64));
+         (unsigned long)(frame_bytes / config->height / 8));
   mipi_csi_brg_ll_set_intput_data_h_pixel_num(priv->hal.bridge_dev,
-                                               line_bits / 64);
+    frame_bytes / config->height / 8);
   mipi_csi_brg_ll_set_intput_data_v_row_num(priv->hal.bridge_dev,
                                              config->height);
   mipi_csi_brg_ll_enable_has_hsync(priv->hal.bridge_dev, false);
   mipi_csi_brg_ll_enable_color_conversion(priv->hal.bridge_dev, true);
-  mipi_csi_brg_ll_set_color_mode_bypass(priv->hal.bridge_dev, true);
+  mipi_csi_brg_ll_set_color_mode_bypass(priv->hal.bridge_dev,
+    config->output != ESP_ISP_OUTPUT_RGB565);
   mipi_csi_brg_ll_set_data_type_min(priv->hal.bridge_dev, config->data_type);
   mipi_csi_brg_ll_set_data_type_max(priv->hal.bridge_dev, config->data_type);
   mipi_csi_brg_ll_set_burst_len(priv->hal.bridge_dev,

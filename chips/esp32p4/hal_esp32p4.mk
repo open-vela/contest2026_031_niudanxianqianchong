@@ -260,6 +260,10 @@ ifeq ($(CONFIG_ESPRESSIF_MIPI_CSI),y)
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_cam$(DELIM)mipi_csi_hal.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_cam$(DELIM)$(CHIP_SERIES)$(DELIM)mipi_csi_periph.c
 endif
+ifeq ($(CONFIG_ESPRESSIF_ISP),y)
+CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_cam$(DELIM)isp_hal.c
+CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_cam$(DELIM)$(CHIP_SERIES)$(DELIM)isp_periph.c
+endif
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_mcpwm$(DELIM)$(CHIP_SERIES)$(DELIM)mcpwm_periph.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_mcpwm$(DELIM)mcpwm_hal.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hal_mspi$(DELIM)spi_flash_encrypt_hal_iram.c

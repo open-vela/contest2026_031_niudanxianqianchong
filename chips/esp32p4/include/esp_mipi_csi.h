@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include <arch/chip/esp_ldo.h>
+#include <arch/chip/esp_isp.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -56,6 +57,8 @@ struct esp_mipi_csi_config_s
   uint16_t height;
   uint32_t lane_bit_rate_mbps;
   bool     byte_swap;
+  enum esp_isp_output_e output;
+  uint8_t  bayer_order;
   struct esp_ldo_config_s phy_ldo;
 };
 

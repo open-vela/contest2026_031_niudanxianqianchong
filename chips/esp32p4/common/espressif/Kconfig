@@ -1907,11 +1907,22 @@ config ESPRESSIF_MIPI_CSI
 	depends on ESP32P4_REV_MIN_301
 	default n
 	select ESPRESSIF_LDO
+	select ESPRESSIF_ISP
 	---help---
 		Enable the ESP32-P4 MIPI CSI receiver Host, Bridge and DW-GDMA
 		primitive. The receiver acquires its D-PHY LDO using the board-supplied
 		profile. Sensor reset, MCLK and SCCB configuration remain board
-		responsibilities.
+	responsibilities.
+
+config ESPRESSIF_ISP
+	bool "ESP32-P4 image signal processor"
+	depends on ESPRESSIF_MIPI_CSI
+	default n
+
+config ESPRESSIF_MIPI_CSI_VIDEO
+	bool "MIPI CSI V4L2 data adapter"
+	depends on ESPRESSIF_ISP && DRIVERS_VIDEO && VIDEO_STREAM
+	default n
 
 if ESPRESSIF_MIPI_DSI
 
