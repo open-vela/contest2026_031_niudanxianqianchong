@@ -15,6 +15,7 @@ framebuffer 上完成首屏验收。GT911 P3.1 已完成 P4X I2C 轮询装配，
 ```text
 docs/
 ├── 硬件适配/    # P4 架构、板级适配和构建说明
+├── 开发指南/    # 已验收能力的 Demo 接入和 API 使用说明
 ├── 开发日志/    # 已发生问题、命令和结论的历史记录
 │   └── 编译/    # Kconfig 与构建链路排障记录
 ├── 开发计划/    # 当前阶段、验收条件和下一步
@@ -33,6 +34,10 @@ docs/
 | [P4X DSI Host Probe 排障](开发日志/编译/2026-08-21-DSI-Host-Probe排障记录.md) | DSI Host、Probe 注册与 USB Console 专项排障 | 验证 DSI 命令链路时 |
 | [P4X DSI 黑屏 DBI 配置排障闭环](开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md) | DBI 命令 LP 传输配置导致黑屏的根因、修复和实板双路径验收 | 排查或复测 P4X 显示时 |
 | [P4X LittleFS 挂载失败与修复](开发日志/ESP32-P4X-LittleFS挂载失败与修复.md) | ESP HAL 默认 Flash 芯片未初始化导致数据资源无法挂载的根因、修复和复测步骤 | 数据资源或完整 Smart Home 启动异常时 |
+| [P4X SC2336 CSI/DMA 数据流与调用链](开发日志/SC2336-CSI-DMA数据流与调用链.md) | SCCB 控制面、MIPI 数据面、CSI Host/Bridge、GDMA、IRQ 与首帧超时定位边界 | 排查 SC2336 RAW 采集时 |
+| [P4X SC2336 摄像头 Demo 接入指南](开发指南/ESP32-P4X-SC2336摄像头Demo接入指南.md) | 在 Demo 中调用 SC2336 板级接口、CSI 接收 API、缓存同步和 RAW 数据流 | 新增摄像头 Demo 或接入算法时 |
+| [P4X SC2336 CSI RAW 接收故障修复](开发日志/ESP32-P4X-SC2336-CSI-RAW接收故障修复.md) | ISP/Bridge/GDMA/缓存同步故障的根因、修复和真机验收 | 追溯 CSI RAW 接收实现时 |
+| [P4X SC2336 CSI RAW 接收交接](硬件适配/ESP32-P4X-SC2336-CSI-RAW接收交接.md) | 当前完成度、首帧超时证据、排查边界和后续接手顺序 | 继续 SC2336 MIPI 采集适配时 |
 | [P4X framebuffer 真机验收](开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md) | `/dev/fb0` 注册、标准 `fb` 示例和 `FBIO_UPDATE` 的真机结果 | 接入 LVGL 前确认显示设备时 |
 | [P4X LVGL 静态首页真机验收](开发日志/编译/2026-08-24-ESP32-P4X-LVGL静态首页真机验收.md) | P2 静态 Smart Home 首页绑定 `/dev/fb0`、首帧显示与定时刷新循环的真机结果 | 进入触摸或完整 Smart Home 前确认 UI 基线时 |
 | [P4 移植开发记录](开发日志/dev.md) | 已发生问题的历史记录 | 复现相同错误时；不代表当前构建结论 |
