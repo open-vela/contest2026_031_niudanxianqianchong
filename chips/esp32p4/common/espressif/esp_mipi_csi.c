@@ -18,6 +18,7 @@
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spinlock.h>
+#include <nuttx/wqueue.h>
 
 #include <errno.h>
 #include <string.h>
@@ -50,6 +51,7 @@
 #define ESP_MIPI_CSI_CACHE_LINE_BYTES            64
 #define ESP_MIPI_CSI_DMA_BURST_WORDS           512
 #define ESP_MIPI_CSI_DMA_FIFO_THRESHOLD        960
+#define ESP_MIPI_CSI_VIDEO_BUFFER_COUNT           3
 #define ESP_MIPI_CSI_DMA_DONE_EVENTS \
   (DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE | \
    DW_GDMA_LL_CHANNEL_EVENT_DMA_TFR_DONE)
@@ -100,10 +102,18 @@ struct esp_mipi_csi_s
   dw_gdma_link_list_item_t    dma_lli;
   FAR dw_gdma_dev_t           *dma_dev;
   FAR void                    *frame_buffer;
-  FAR void                    *queued_buffer;
+  FAR void                    *ready_buffers[ESP_MIPI_CSI_VIDEO_BUFFER_COUNT];
+  FAR void                    *done_buffers[ESP_MIPI_CSI_VIDEO_BUFFER_COUNT];
+  struct work_s               frame_work;
   esp_mipi_csi_frame_callback_t frame_callback;
   FAR void                    *frame_callback_arg;
   size_t                      expected_frame_bytes;
+  uint8_t                     ready_head;
+  uint8_t                     ready_tail;
+  uint8_t                     ready_count;
+  uint8_t                     done_head;
+  uint8_t                     done_tail;
+  uint8_t                     done_count;
   struct esp_mipi_csi_stats_s stats;
   int                         dma_cpuint;
   int                         bridge_cpuint;
@@ -113,6 +123,9 @@ struct esp_mipi_csi_s
   bool                        powered;
   bool                        initialized;
   bool                        running;
+  bool                        video_mode;
+  bool                        frame_work_pending;
+  bool                        dma_paused;
 };
 
 /****************************************************************************
@@ -144,6 +157,94 @@ static int esp_mipi_csi_result(esp_err_t result)
     }
 
   return result < 0 ? result : -EIO;
+}
+
+static bool esp_mipi_csi_ready_pop_locked(FAR struct esp_mipi_csi_s *priv,
+                                          FAR void **buffer)
+{
+  if (priv->ready_count == 0)
+    {
+      return false;
+    }
+
+  *buffer = priv->ready_buffers[priv->ready_head];
+  priv->ready_head = (priv->ready_head + 1) % ESP_MIPI_CSI_VIDEO_BUFFER_COUNT;
+  priv->ready_count--;
+  return true;
+}
+
+static bool esp_mipi_csi_done_push_locked(FAR struct esp_mipi_csi_s *priv,
+                                          FAR void *buffer)
+{
+  if (priv->done_count == ESP_MIPI_CSI_VIDEO_BUFFER_COUNT)
+    {
+      return false;
+    }
+
+  priv->done_buffers[priv->done_tail] = buffer;
+  priv->done_tail = (priv->done_tail + 1) % ESP_MIPI_CSI_VIDEO_BUFFER_COUNT;
+  priv->done_count++;
+  return true;
+}
+
+static bool esp_mipi_csi_done_pop_locked(FAR struct esp_mipi_csi_s *priv,
+                                         FAR void **buffer)
+{
+  if (priv->done_count == 0)
+    {
+      return false;
+    }
+
+  *buffer = priv->done_buffers[priv->done_head];
+  priv->done_head = (priv->done_head + 1) % ESP_MIPI_CSI_VIDEO_BUFFER_COUNT;
+  priv->done_count--;
+  return true;
+}
+
+static void esp_mipi_csi_rearm_dma(FAR struct esp_mipi_csi_s *priv,
+                                   FAR void *buffer)
+{
+  dw_gdma_ll_lli_set_dst_addr(&priv->dma_lli, (uint32_t)(uintptr_t)buffer);
+  dw_gdma_ll_lli_set_dst_master_port(&priv->dma_lli, (intptr_t)buffer);
+  dw_gdma_ll_lli_set_block_markers(&priv->dma_lli, false, true, true);
+  esp_cache_msync(&priv->dma_lli, sizeof(priv->dma_lli),
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                  ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  dw_gdma_ll_channel_set_link_list_head_addr(
+    priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL,
+    (uint32_t)(uintptr_t)&priv->dma_lli);
+  dw_gdma_ll_channel_enable(priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL, true);
+}
+
+static void esp_mipi_csi_frame_worker(FAR void *arg)
+{
+  FAR struct esp_mipi_csi_s *priv = arg;
+  esp_mipi_csi_frame_callback_t callback;
+  FAR void *callback_arg;
+  FAR void *buffer;
+  irqstate_t flags;
+
+  for (;;)
+    {
+      flags = spin_lock_irqsave(&priv->irq_lock);
+      if (!esp_mipi_csi_done_pop_locked(priv, &buffer))
+        {
+          priv->frame_work_pending = false;
+          spin_unlock_irqrestore(&priv->irq_lock, flags);
+          return;
+        }
+
+      callback = priv->frame_callback;
+      callback_arg = priv->frame_callback_arg;
+      spin_unlock_irqrestore(&priv->irq_lock, flags);
+
+      if (callback != NULL &&
+          esp_mipi_csi_buffer_sync_for_cpu(buffer,
+                                           priv->expected_frame_bytes) >= 0)
+        {
+          callback(buffer, priv->expected_frame_bytes, callback_arg);
+        }
+    }
 }
 
 static int esp_mipi_csi_frame_bytes(
@@ -369,6 +470,10 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
   uint32_t host_status;
   uint32_t bridge_status;
   irqstate_t flags;
+  FAR void *next_buffer = NULL;
+  bool schedule_work = false;
+  bool rearm_video_dma = false;
+  bool video_mode = false;
 
   (void)irq;
   (void)context;
@@ -391,27 +496,40 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
   bridge_status = 0;
   if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
     {
-      FAR void *completed = priv->frame_buffer;
-
-      if (priv->frame_callback != NULL)
+      flags = spin_lock_irqsave(&priv->irq_lock);
+      video_mode = priv->video_mode;
+      if (video_mode)
         {
-          esp_cache_msync(completed, priv->expected_frame_bytes,
-                          ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-          priv->frame_callback(completed, priv->expected_frame_bytes,
-                               priv->frame_callback_arg);
-          if (priv->queued_buffer == NULL)
+          if (esp_mipi_csi_done_push_locked(priv, priv->frame_buffer) &&
+              esp_mipi_csi_ready_pop_locked(priv, &next_buffer))
             {
-              mipi_csi_brg_ll_enable(priv->hal.bridge_dev, false);
-              priv->running = false;
-              return OK;
+              priv->frame_buffer = next_buffer;
+              rearm_video_dma = true;
+            }
+          else
+            {
+              /* Preserve completed buffers.  Reception resumes when the
+               * worker returns one through esp_mipi_csi_queue_buffer().
+               */
+
+              priv->frame_buffer = NULL;
+              priv->dma_paused = true;
             }
 
-          priv->frame_buffer = priv->queued_buffer;
-          priv->queued_buffer = NULL;
-          dw_gdma_ll_lli_set_dst_addr(&priv->dma_lli,
-            (uint32_t)(uintptr_t)priv->frame_buffer);
-          dw_gdma_ll_lli_set_dst_master_port(&priv->dma_lli,
-            (intptr_t)priv->frame_buffer);
+          if (!priv->frame_work_pending)
+            {
+              priv->frame_work_pending = true;
+              schedule_work = true;
+            }
+        }
+
+      spin_unlock_irqrestore(&priv->irq_lock, flags);
+
+      if (video_mode && !rearm_video_dma)
+        {
+          mipi_csi_brg_ll_enable(priv->hal.bridge_dev, false);
+          dw_gdma_ll_channel_enable(priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL,
+                                    false);
         }
 
       host_status = priv->hal.host_dev->int_st_main.val;
@@ -441,7 +559,12 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
 
   spin_unlock_irqrestore(&priv->irq_lock, flags);
 
-  if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0)
+  if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0 && video_mode &&
+      rearm_video_dma)
+    {
+      esp_mipi_csi_rearm_dma(priv, next_buffer);
+    }
+  else if ((dma_status & ESP_MIPI_CSI_DMA_DONE_EVENTS) != 0 && !video_mode)
     {
       /* The P4 invalidates terminal descriptors after use.  Revalidate the
        * same caller-owned buffer before the next frame arrives.
@@ -457,6 +580,12 @@ static int esp_mipi_csi_dma_interrupt(int irq, FAR void *context,
       dw_gdma_ll_channel_enable(priv->dma_dev, ESP_MIPI_CSI_DMA_CHANNEL,
                                  true);
       nxsem_post(&priv->frame_sem);
+    }
+
+  if (schedule_work)
+    {
+      work_queue(HPWORK, &priv->frame_work, esp_mipi_csi_frame_worker,
+                 priv, 0);
     }
 
   return OK;
@@ -481,6 +610,8 @@ static void esp_mipi_csi_disable_interrupts(FAR struct esp_mipi_csi_s *priv)
 
 static void esp_mipi_csi_release_dma(FAR struct esp_mipi_csi_s *priv)
 {
+  irqstate_t flags;
+
   esp_mipi_csi_disable_interrupts(priv);
 
   if (priv->dma_dev != NULL)
@@ -504,9 +635,21 @@ static void esp_mipi_csi_release_dma(FAR struct esp_mipi_csi_s *priv)
 
   memset(&priv->dma_lli, 0, sizeof(priv->dma_lli));
   priv->frame_buffer = NULL;
-  priv->queued_buffer = NULL;
+  priv->video_mode = false;
+  priv->dma_paused = false;
+
+  flags = spin_lock_irqsave(&priv->irq_lock);
+  memset(priv->ready_buffers, 0, sizeof(priv->ready_buffers));
+  memset(priv->done_buffers, 0, sizeof(priv->done_buffers));
+  priv->ready_head = 0;
+  priv->ready_tail = 0;
+  priv->ready_count = 0;
+  priv->done_head = 0;
+  priv->done_tail = 0;
+  priv->done_count = 0;
   priv->frame_callback = NULL;
   priv->frame_callback_arg = NULL;
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
 }
 
 static int esp_mipi_csi_prepare_dma(FAR struct esp_mipi_csi_s *priv,
@@ -1181,31 +1324,71 @@ int esp_mipi_csi_start_video(FAR struct esp_mipi_csi_s *csi,
                              FAR void *arg)
 {
   FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+  irqstate_t flags;
+  int ret;
 
   if (csi != priv || callback == NULL)
     {
       return -EINVAL;
     }
 
-  priv->frame_callback = callback;
-  priv->frame_callback_arg = arg;
-  return esp_mipi_csi_start(csi, buffer, bytes);
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  flags = spin_lock_irqsave(&priv->irq_lock);
+  if (priv->running)
+    {
+      ret = -EBUSY;
+    }
+  else if (priv->ready_count < ESP_MIPI_CSI_VIDEO_BUFFER_COUNT - 1)
+    {
+      ret = -ENOBUFS;
+    }
+  else
+    {
+      priv->video_mode = true;
+      priv->dma_paused = false;
+      priv->frame_callback = callback;
+      priv->frame_callback_arg = arg;
+      ret = OK;
+    }
+
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
+  nxmutex_unlock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_mipi_csi_start(csi, buffer, bytes);
+  if (ret < 0)
+    {
+      flags = spin_lock_irqsave(&priv->irq_lock);
+      priv->video_mode = false;
+      priv->frame_callback = NULL;
+      priv->frame_callback_arg = NULL;
+      spin_unlock_irqrestore(&priv->irq_lock, flags);
+    }
+
+  return ret;
 }
 
 int esp_mipi_csi_queue_buffer(FAR struct esp_mipi_csi_s *csi,
                               FAR void *buffer, size_t bytes)
 {
   FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+  irqstate_t flags;
+  bool resume_dma = false;
+  FAR void *next_buffer = NULL;
+  int ret;
 
   if (csi != priv || buffer == NULL || bytes != priv->expected_frame_bytes ||
       ((uintptr_t)buffer & (ESP_MIPI_CSI_CACHE_LINE_BYTES - 1)) != 0)
     {
       return -EINVAL;
-    }
-
-  if (priv->queued_buffer != NULL)
-    {
-      return -EBUSY;
     }
 
   if (esp_mipi_csi_result(esp_cache_msync(buffer, bytes,
@@ -1214,8 +1397,68 @@ int esp_mipi_csi_queue_buffer(FAR struct esp_mipi_csi_s *csi,
       return -EIO;
     }
 
-  priv->queued_buffer = buffer;
-  return OK;
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  flags = spin_lock_irqsave(&priv->irq_lock);
+  if (!priv->initialized || (priv->running && !priv->video_mode))
+    {
+      ret = -ESHUTDOWN;
+    }
+  else if (priv->ready_count == ESP_MIPI_CSI_VIDEO_BUFFER_COUNT)
+    {
+      ret = -EBUSY;
+    }
+  else
+    {
+      priv->ready_buffers[priv->ready_tail] = buffer;
+      priv->ready_tail = (priv->ready_tail + 1) %
+                         ESP_MIPI_CSI_VIDEO_BUFFER_COUNT;
+      priv->ready_count++;
+      if (priv->running && priv->dma_paused &&
+          esp_mipi_csi_ready_pop_locked(priv, &next_buffer))
+        {
+          priv->frame_buffer = next_buffer;
+          priv->dma_paused = false;
+          resume_dma = true;
+        }
+
+      ret = OK;
+    }
+
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
+  if (resume_dma)
+    {
+      esp_mipi_csi_rearm_dma(priv, next_buffer);
+      mipi_csi_brg_ll_enable(priv->hal.bridge_dev, true);
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
+int esp_mipi_csi_wait_video_idle(FAR struct esp_mipi_csi_s *csi)
+{
+  FAR struct esp_mipi_csi_s *priv = &g_esp_mipi_csi;
+  irqstate_t flags;
+  int ret;
+
+  if (csi != priv)
+    {
+      return -EINVAL;
+    }
+
+  ret = work_cancel_sync(HPWORK, &priv->frame_work);
+  flags = spin_lock_irqsave(&priv->irq_lock);
+  priv->frame_work_pending = false;
+  priv->done_head = 0;
+  priv->done_tail = 0;
+  priv->done_count = 0;
+  spin_unlock_irqrestore(&priv->irq_lock, flags);
+  return ret == -ENOENT ? OK : ret;
 }
 
 int esp_mipi_csi_wait_frame_diag(FAR struct esp_mipi_csi_s *csi,

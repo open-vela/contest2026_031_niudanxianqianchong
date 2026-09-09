@@ -155,19 +155,35 @@ int esp_mipi_csi_power_release(FAR struct esp_mipi_csi_s *csi);
  *
  * Description:
  *   Start continuous reception into a caller-owned DMA-capable buffer.  The
- *   same buffer is re-armed at each completed frame; callers that need a
- *   queue of frames will be added by the video upper-half in P3.
+ *   same buffer is re-armed at each completed frame.
  *
  ****************************************************************************/
 
 int esp_mipi_csi_start(FAR struct esp_mipi_csi_s *csi,
                        FAR void *frame_buffer, size_t frame_buffer_bytes);
+
+/* Queue two DMA-capable buffers with esp_mipi_csi_queue_buffer() before
+ * starting video.  The CSI interrupt rotates the three buffers and defers
+ * frame callbacks to HPWORK.
+ */
+
 int esp_mipi_csi_start_video(FAR struct esp_mipi_csi_s *csi,
                              FAR void *buffer, size_t bytes,
                              esp_mipi_csi_frame_callback_t callback,
                              FAR void *arg);
 int esp_mipi_csi_queue_buffer(FAR struct esp_mipi_csi_s *csi,
                               FAR void *buffer, size_t bytes);
+
+/****************************************************************************
+ * Name: esp_mipi_csi_wait_video_idle
+ *
+ * Description:
+ *   Wait until all deferred video frame callbacks have completed.  Call this
+ *   after esp_mipi_csi_stop() and before releasing video DMA buffers.
+ *
+ ****************************************************************************/
+
+int esp_mipi_csi_wait_video_idle(FAR struct esp_mipi_csi_s *csi);
 
 /****************************************************************************
  * Name: esp_mipi_csi_wait_frame
