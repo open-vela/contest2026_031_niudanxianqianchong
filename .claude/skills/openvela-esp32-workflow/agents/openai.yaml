@@ -1,0 +1,3 @@
+interface:
+  display_name: "OpenVela ESP32 Workflow"
+  short_description: "OpenVela ESP32 build and flash"
