@@ -25,12 +25,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define ESP_MIPI_CSI_VIDEO_WIDTH       1024
-#define ESP_MIPI_CSI_VIDEO_HEIGHT       600
-#define ESP_MIPI_CSI_VIDEO_FRAME_BYTES \
-  (ESP_MIPI_CSI_VIDEO_WIDTH * ESP_MIPI_CSI_VIDEO_HEIGHT * 2)
-#define ESP_MIPI_CSI_VIDEO_ALIGNMENT      64
-
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -59,8 +53,8 @@ static int esp_mipi_csi_video_allocate_dma_buffers(
 
   for (i = 0; i < ESP_MIPI_CSI_VIDEO_DMA_BUFFERS; i++)
     {
-      video->dma_buffers[i] = kumm_memalign(ESP_MIPI_CSI_VIDEO_ALIGNMENT,
-                                             video->bytes);
+      video->dma_buffers[i] = kumm_memalign(video->config.alignment,
+                                             video->config.frame_bytes);
       if (video->dma_buffers[i] == NULL)
         {
           esp_mipi_csi_video_free_dma_buffers(video);
@@ -146,9 +140,9 @@ static int esp_mipi_csi_video_set_buf(FAR struct imgdata_s *data,
   int ret;
 
   if (nr_datafmts != 1 || datafmts == NULL ||
-      datafmts[0].pixelformat != IMGDATA_PIX_FMT_RGB565 ||
-      addr == NULL || size != ESP_MIPI_CSI_VIDEO_FRAME_BYTES ||
-      ((uintptr_t)addr & (ESP_MIPI_CSI_VIDEO_ALIGNMENT - 1)) != 0)
+      datafmts[0].pixelformat != video->config.pixelformat ||
+      addr == NULL || size != video->config.frame_bytes ||
+      ((uintptr_t)addr & (video->config.alignment - 1)) != 0)
     {
       return -EINVAL;
     }
@@ -161,7 +155,6 @@ static int esp_mipi_csi_video_set_buf(FAR struct imgdata_s *data,
   else
     {
       video->v4l2_buffer = addr;
-      video->bytes = size;
       ret = OK;
     }
 
@@ -174,11 +167,14 @@ static int esp_mipi_csi_video_validate(FAR struct imgdata_s *data,
                                        FAR imgdata_format_t *datafmts,
                                        FAR imgdata_interval_t *interval)
 {
+  FAR struct esp_mipi_csi_video_s *video = (FAR void *)data;
+
   if (nr_datafmts != 1 || datafmts == NULL || interval == NULL ||
-      datafmts[0].pixelformat != IMGDATA_PIX_FMT_RGB565 ||
-      datafmts[0].width != ESP_MIPI_CSI_VIDEO_WIDTH ||
-      datafmts[0].height != ESP_MIPI_CSI_VIDEO_HEIGHT ||
-      interval->numerator != 1 || interval->denominator != 30)
+      datafmts[0].pixelformat != video->config.pixelformat ||
+      datafmts[0].width != video->config.width ||
+      datafmts[0].height != video->config.height ||
+      interval->numerator != video->config.interval.numerator ||
+      interval->denominator != video->config.interval.denominator)
     {
       return -ENOTSUP;
     }
@@ -225,19 +221,19 @@ static int esp_mipi_csi_video_start(FAR struct imgdata_s *data,
   if (ret >= 0)
     {
       ret = esp_mipi_csi_queue_buffer(video->csi, video->dma_buffers[1],
-                                      video->bytes);
+                                      video->config.frame_bytes);
     }
 
   if (ret >= 0)
     {
       ret = esp_mipi_csi_queue_buffer(video->csi, video->dma_buffers[2],
-                                      video->bytes);
+                                      video->config.frame_bytes);
     }
 
   if (ret >= 0)
     {
       ret = esp_mipi_csi_start_video(video->csi, video->dma_buffers[0],
-                                     video->bytes,
+                                     video->config.frame_bytes,
                                      esp_mipi_csi_video_done, video);
     }
 
@@ -271,9 +267,9 @@ static int esp_mipi_csi_video_stop(FAR struct imgdata_s *data)
 static FAR void *esp_mipi_csi_video_alloc(FAR struct imgdata_s *data,
                                           uint32_t align_size, uint32_t size)
 {
-  uint32_t alignment = ESP_MIPI_CSI_VIDEO_ALIGNMENT;
+  FAR struct esp_mipi_csi_video_s *video = (FAR void *)data;
+  uint32_t alignment = video->config.alignment;
 
-  (void)data;
   if (align_size > alignment)
     {
       alignment = align_size;
@@ -305,15 +301,24 @@ static const struct imgdata_ops_s g_esp_mipi_csi_video_ops =
  ****************************************************************************/
 
 int esp_mipi_csi_video_initialize(FAR struct esp_mipi_csi_video_s *video,
-                                  FAR struct esp_mipi_csi_s *csi)
+                                  FAR struct esp_mipi_csi_s *csi,
+                                  FAR const struct esp_mipi_csi_video_config_s
+                                  *config)
 {
-  if (video == NULL)
+  if (video == NULL || config == NULL || config->width == 0 ||
+      config->height == 0 || config->pixelformat == 0 ||
+      config->frame_bytes == 0 || config->interval.numerator == 0 ||
+      config->interval.denominator == 0 ||
+      config->alignment < ESP_MIPI_CSI_VIDEO_MIN_ALIGNMENT ||
+      (config->alignment & (config->alignment - 1)) != 0 ||
+      (config->frame_bytes % ESP_MIPI_CSI_VIDEO_MIN_ALIGNMENT) != 0)
     {
       return -EINVAL;
     }
 
   memset(video, 0, sizeof(*video));
   video->data.ops = &g_esp_mipi_csi_video_ops;
+  video->config = *config;
   video->csi = csi;
   video->lock = SP_UNLOCKED;
   return OK;

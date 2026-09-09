@@ -88,8 +88,8 @@ nuttx/include/nuttx/video/imgsensor.h
 | `chips/esp32p4/include/esp_mipi_csi.h` | 修改 | 保留 `csi_probe` 单缓冲 API；新增面向视频数据面的三缓冲队列、开始、停止、延后帧完成回调和错误快照接口。 |
 | `chips/esp32p4/common/espressif/esp_isp.c` | 新增 | P4 ISP 原生适配：配置输入 CSI、RAW8、BGGR、1024 × 600，关闭 bypass，输出 RGB565；管理 ISP 时钟、复位、寄存器影子更新及停机。 |
 | `chips/esp32p4/include/esp_isp.h` | 新增 | 声明 ISP 配置、初始化、启动、停止和反初始化接口；不暴露 ESP-IDF 的任务、队列或 FreeRTOS 类型。 |
-| `chips/esp32p4/common/espressif/esp_mipi_csi_video.c` | 新增 | 实现 `struct imgdata_s`：V4L2 缓冲地址校验、64-byte 对齐分配、三块 DMA 暂存帧、工作队列中的复制与完成帧上报。 |
-| `chips/esp32p4/include/esp_mipi_csi_video.h` | 新增 | 声明 P4 CSI 视频数据面初始化接口，供板级装配代码创建 `imgdata_s`。 |
+| `chips/esp32p4/common/espressif/esp_mipi_csi_video.c` | 新增 | 实现 `struct imgdata_s`：按调用方提供的格式校验 V4L2 缓冲、对齐分配、三块 DMA 暂存帧、工作队列中的复制与完成帧上报；不包含 SC2336 专属常量。 |
+| `chips/esp32p4/include/esp_mipi_csi_video.h` | 新增 | 声明 P4 CSI 视频数据面初始化接口和通用格式配置，供板级装配代码创建 `imgdata_s` 并传入宽高、像素格式、帧长度、对齐和帧间隔。 |
 | `chips/esp32p4/common/espressif/Kconfig` | 修改 | 新增 `ESPRESSIF_ISP` 与 `ESPRESSIF_MIPI_CSI_VIDEO`；视频开关依赖 CSI，并选择必要的时钟、LDO 与 GDMA 能力。 |
 | `chips/esp32p4/common/espressif/Make.defs` | 修改 | 在相应配置开启时编译 `esp_isp.c` 和 `esp_mipi_csi_video.c`。 |
 | `chips/esp32p4/common/espressif/CMakeLists.txt` | 修改 | 与 Make 构建保持相同的条件源文件列表。 |
