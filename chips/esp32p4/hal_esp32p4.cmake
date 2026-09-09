@@ -492,6 +492,11 @@ if(CONFIG_ESPRESSIF_MIPI_CSI)
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/mipi_csi_hal.c
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/${CHIP_SERIES}/mipi_csi_periph.c)
 endif()
+if(CONFIG_ESPRESSIF_ISP)
+  list(APPEND HAL_SRCS
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/isp_hal.c
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_cam/${CHIP_SERIES}/isp_periph.c)
+endif()
 
 # Bootloader common
 list(
