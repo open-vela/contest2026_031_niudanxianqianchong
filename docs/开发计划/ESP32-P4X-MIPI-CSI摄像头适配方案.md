@@ -1,477 +1,269 @@
-# ESP32-P4X MIPI-CSI 摄像头适配方案
+# ESP32-P4X SC2336 `/dev/video0` 实施方案
 
-## 1. 文档目的
+> 状态：待实现。本文是代码改造与验收计划，不表示 `/dev/video0`、ISP 或 RGB565
+> 已可用。
+>
+> 适用硬件：ESP32-P4 Function EV Board、SC2336 摄像头模组。
+>
+> 固定首期输出：1024 × 600、30 fps、`V4L2_PIX_FMT_RGB565`。
 
-本文档定义 `ESP32-P4X-Function-EV-Board` 在 OpenVela/NuttX 下的
-MIPI-CSI 摄像头适配方案，并明确区分两种传感器驱动布局：
+## 1. 目标与边界
 
-1. **板级私有驱动**：用于竞赛期间快速完成 SC2336 真机验证；
-2. **NuttX 通用 driver**：用于形成可复用、可上游的摄像头驱动实现。
+本阶段将已验证的 SC2336 RAW8 CSI 接收链路接入 NuttX V4L2 capture
+upper-half，在板级注册 `/dev/video0`。传感器仍输出 RAW8/BGGR；ESP32-P4
+ISP 完成去马赛克后，DMA 向 V4L2 交付 RGB565 帧。
 
-两种方案只改变 **SC2336 传感器控制驱动的存放位置和构建归属**。
-ESP32-P4 的 CSI Host、DMA 和 ISP 始终属于芯片层；P4X 的排线、I²C 总线和
-`/dev/video0` 实例装配始终属于板级层。
+本方案作出以下确定选择：
 
-本文以乐鑫官方验证过的 SC2336 MIPI-CSI 模组为首个目标，初始
-profile 为 2 lane、RAW8、1280×720@30fps。实际的 I²C 地址、lane bitrate、
-Bayer 顺序和寄存器表必须以实物模组和已点亮的 ESP-IDF 基准工程为准。
+1. 在 ESP32-P4 芯片层新增 NuttX 原生 ISP 适配层。
+2. `/dev/video0` 固定协商 `V4L2_PIX_FMT_RGB565`，不修改
+   `nuttx/drivers/video/v4l2_cap.c`、`imgdata.h` 或 `imgsensor.h`。
+3. SC2336 保持 P4X 板级私有驱动，继续以
+   `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_sc2336.c` 为实现位置；
+   不新增 NuttX 通用 `sc2336.c`。
+4. 数据面实现 V4L2 缓冲队列，最少支持双缓冲，默认申请三块 PSRAM 帧缓冲。
+5. `csi_probe` 保留 RAW bypass 诊断用途；`video` defconfig 不与其同时启用，
+   防止两个端点竞争唯一的 CSI Host、ISP、Bridge、GDMA 与 SC2336 会话。
 
-## 2. 当前基线与缺口
+当前已验证的 RAW 基线是 1024 × 600、RAW8 BGGR、2 Lane、DT `0x2a`，
+SC2336 传感器模式串行速率为 288 Mbps/lane，P4 CSI Host 使用已验证的
+200 Mbps/lane PHY 校准值。该基线是 ISP 视频方案的输入前提，不在本阶段调整。
 
-| 能力 | 当前状态 | 结论 |
+## 2. 目标数据流
+
+```mermaid
+flowchart LR
+  subgraph control[板级控制面]
+    APP[应用: open /dev/video0] --> V4L2[NuttX V4L2 capture]
+    V4L2 --> SENSOR[板级私有 SC2336 imgsensor_s]
+    SENSOR --> SCCB[I2C0 / SCCB]
+    SCCB --> CAM[SC2336 RAW8 BGGR]
+  end
+
+  subgraph data[ESP32-P4 像素数据面]
+    CAM --> PHY[D-PHY / CSI Host]
+    PHY --> ISP[ISP: RAW8 BGGR → RGB565]
+    ISP --> BRIDGE[CSI Bridge]
+    BRIDGE --> DMA[DW-GDMA 缓冲队列]
+    DMA --> DATA[esp_mipi_csi_video: imgdata_s]
+    DATA --> V4L2
+  end
+
+  V4L2 --> VIDEO[/dev/video0: RGB565/]
+```
+
+`/dev/video0` 是采集端点，不直接写入 `/dev/fb0`。预览应用必须在
+`DQBUF` 取得独立的 RGB565 帧后，再按 framebuffer 的格式和更新规则显示，
+不能让摄像头 DMA 覆盖 LCD 扫描缓冲。
+
+## 3. 为什么不修改 v4l2_cap.c
+
+NuttX 当前 capture upper-half 已支持 `V4L2_PIX_FMT_RGB565`：
+
+- 能将 V4L2 RGB565 转换为 `imgsensor_s` 与 `imgdata_s` 的内部 RGB565 格式；
+- 接受 RGB565 的格式协商；
+- 按 `width × height × 2` 计算帧缓冲长度。
+
+因此，首期使用 RGB565 可以避开 RAW Bayer 格式贯通所需的通用修改。尤其不应把
+RAW8 数据伪装成 RGB565；实际 DMA 内容必须是 ISP 已处理的 RGB565。
+
+这也意味着本期不修改以下文件：
+
+```text
+nuttx/drivers/video/v4l2_cap.c
+nuttx/include/nuttx/video/imgdata.h
+nuttx/include/nuttx/video/imgsensor.h
+```
+
+若将来需要发布 RAW Bayer `/dev/video0`，再单独为
+`V4L2_PIX_FMT_SBGGR8` 扩展上面三个通用文件，不能混入本期 RGB565 工作。
+
+## 4. 必须修改和新增的文件
+
+### 4.1 ESP32-P4 芯片层
+
+| 文件 | 动作 | 实现内容 |
 | --- | --- | --- |
-| P4X USB Console / NSH | 已通过 | 可用于摄像头 Probe 命令与诊断日志 |
-| EK79007 `/dev/fb0` | 已通过 | 可作为后续预览输出，不是摄像头采集设备 |
-| GT911 `/dev/input0` | 已通过 | 与摄像头 SCCB 共用 I²C0，需保持总线引用计数平衡 |
-| PSRAM | 已启用 | 可容纳 LCD 与摄像头双缓冲，但必须预分配并做 cache 同步 |
-| NuttX V4L2 upper-half | 已存在 | 可复用 `imgsensor_s`、`imgdata_s` 和 `capture_register()` |
-| ESP32-P4 CSI/ISP NuttX adapter | 缺失 | 需在竞赛芯片层新增 |
-| SC2336 传感器驱动 | 缺失 | 当前 HAL 工作树中没有可直接使用的 SC2336 驱动 |
-| `/dev/video0` | 缺失 | 必须在 sensor 与 CSI `imgdata` 都可用后注册 |
+| `chips/esp32p4/common/espressif/esp_mipi_csi.c` | 修改 | 保留已验证的 D-PHY、CSI Host 和 GDMA 基础；增加 ISP 输出模式；由 RAW bypass 配置改为根据模式配置 CSI 输入和 Bridge 输出；实现 DMA 完成后切换下一 V4L2 缓冲。 |
+| `chips/esp32p4/include/esp_mipi_csi.h` | 修改 | 保留 `csi_probe` 单缓冲 API；新增面向视频数据面的队列、开始、停止、帧完成回调和错误快照接口。 |
+| `chips/esp32p4/common/espressif/esp_isp.c` | 新增 | P4 ISP 原生适配：配置输入 CSI、RAW8、BGGR、1024 × 600，关闭 bypass，输出 RGB565；管理 ISP 时钟、复位、寄存器影子更新及停机。 |
+| `chips/esp32p4/include/esp_isp.h` | 新增 | 声明 ISP 配置、初始化、启动、停止和反初始化接口；不暴露 ESP-IDF 的任务、队列或 FreeRTOS 类型。 |
+| `chips/esp32p4/common/espressif/esp_mipi_csi_video.c` | 新增 | 实现 `struct imgdata_s`：V4L2 缓冲地址校验、64-byte 对齐分配、队列提交、采集开始/停止，以及向 upper-half 报告完成帧。 |
+| `chips/esp32p4/include/esp_mipi_csi_video.h` | 新增 | 声明 P4 CSI 视频数据面初始化接口，供板级装配代码创建 `imgdata_s`。 |
+| `chips/esp32p4/common/espressif/Kconfig` | 修改 | 新增 `ESPRESSIF_ISP` 与 `ESPRESSIF_MIPI_CSI_VIDEO`；视频开关依赖 CSI，并选择必要的时钟、LDO 与 GDMA 能力。 |
+| `chips/esp32p4/common/espressif/Make.defs` | 修改 | 在相应配置开启时编译 `esp_isp.c` 和 `esp_mipi_csi_video.c`。 |
+| `chips/esp32p4/common/espressif/CMakeLists.txt` | 修改 | 与 Make 构建保持相同的条件源文件列表。 |
+| `chips/esp32p4/hal_esp32p4.mk` | 修改 | `CONFIG_ESPRESSIF_ISP=y` 时加入 `esp_hal_cam/isp_hal.c` 与 `esp_hal_cam/esp32p4/isp_periph.c`。 |
+| `chips/esp32p4/hal_esp32p4.cmake` | 修改 | 与 Make 构建保持相同的 ISP HAL 源文件列表。 |
 
-P4 HAL 工作树已存在 `esp_hal_cam/mipi_csi_hal.c`、P4 CSI peripheral
-描述和 ISP HAL，但当前 `hal_esp32p4.mk/.cmake` 没有将摄像头源文件加入
-构建。因此不能只增加一个 board 开关就得到摄像头能力。
+不直接编译或搬运 `upper_hal_isp` 完整组件。它依赖 ESP-IDF/FreeRTOS 运行时；
+`esp_isp.c` 只参考其中的 ISP HAL/LL 配置和 CSI RAW8→RGB565 测试参数。
 
-## 3. 总体调用链
-
-```text
-csi_probe / nxcamera / Smart Home
-                |
-                v
-        NuttX V4L2 /dev/video0
-                |
-        +-------+-------+
-        |               |
-        v               v
- SC2336 imgsensor   P4 CSI imgdata
- SCCB/I2C 控制      CSI/DMA 数据采集
-        |               |
-        +------ board --+
-                |
-       P4 CSI PHY/Host/Bridge
-                |
-          PSRAM 帧缓冲
-                |
-        P4 ISP / 格式转换
-                |
-        LVGL / 图像文件 / AI
-```
-
-`/dev/video0` 是采集端点，`/dev/fb0` 是显示端点。摄像头 DMA 不应直接
-覆盖 LVGL 正在使用的 DSI 扫描页，预览时应使用独立采集缓冲，在帧完成后
-再由应用层转换、缩放并提交给 LVGL。
-
-## 4. 共同芯片层：两种方案都必须实现
-
-### 4.1 新增文件
+ISP 的最小配置为：
 
 ```text
-chips/esp32p4/common/espressif/
-  esp_mipi_csi.c
-  esp_mipi_csi.h
-  esp_mipi_csi_imgdata.c
-  esp_isp.c                 # ISP 阶段再引入
-  esp_isp.h
+input source       CSI
+input color        RAW8
+Bayer order        BGGR
+resolution         1024 x 600
+line packets       disabled
+ISP bypass         disabled
+output color       RGB565
 ```
 
-| 文件 | 职责 |
+现有 RAW bypass 的 ISP 输入宽度按每行 32-bit word 计算，Bridge 宽度按每行
+64-bit word 计算。RGB565 输出每行为 2048 byte，即 Bridge 输出宽度应为
+256 个 64-bit word；不得继续使用 RAW8 的 128 word 设置，也不得把像素宽度
+1024 直接写入 Bridge 寄存器。
+
+### 4.2 P4X 板级层与私有 SC2336 驱动
+
+| 文件 | 动作 | 实现内容 |
+| --- | --- | --- |
+| `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_sc2336.c` | 修改 | 保留并扩展私有 SCCB、产品 ID、RAW8 profile、stream on/off；保留 SCCB、产品 ID、RAW8 profile 与 stream 控制；`esp32p4_camera.c` 在同一板级私有实现中封装 `imgsensor_s`，并向 V4L2 宣告 RGB565 输出能力。传感器本身仍配置为 RAW8。 |
+| `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_sc2336.h` | 修改 | 增加私有 sensor 实例、初始化/反初始化、V4L2 format 与控制接口声明；保留寄存器表相关声明。 |
+| `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_camera.c` | 修改 | 从诊断专用会话重构为 `board_camera_initialize()` 装配器：构造 LDO、CSI、ISP、SC2336 与 `imgdata_s` 配置，调用 `capture_register("/dev/video0", ...)`。 |
+| `board/esp32p4/esp32p4-function-ev-board/include/board.h` | 修改 | 增加 `board_camera_initialize(void)`；保留 `csi_probe` 需要的诊断接口，并用 Kconfig 区分两种注册路径。 |
+| `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_bringup.c` | 修改 | 在视频配置开启时调用 `board_camera_initialize()`，只注册设备，不在 bringup 时开始传感器 stream。 |
+| `board/esp32p4/esp32p4-function-ev-board/Kconfig` | 修改 | 新增 `ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO`，选择私有 camera、P4 CSI、P4 ISP、`DRIVERS_VIDEO` 与 `VIDEO_STREAM`；与 `csi_probe` 配置互斥。 |
+| `board/esp32p4/esp32p4-function-ev-board/src/Make.defs` | 修改 | 在视频配置下编译板级 camera 装配与私有 SC2336 video 部分。 |
+| `board/esp32p4/esp32p4-function-ev-board/src/CMakeLists.txt` | 修改 | 与 Make 构建保持相同的条件源文件列表。 |
+| `board/esp32p4/esp32p4-function-ev-board/configs/video/defconfig` | 新增 | 面向 `/dev/video0` 的独立配置，启用 PSRAM、V4L2 video stream、CSI、ISP、私有 SC2336 camera 和三缓冲上限。 |
+
+板级 session 的资源顺序必须适配 NuttX capture upper-half 的调用顺序：
+
+```text
+首次 open
+  1. SC2336 imgsensor.init
+     - 获取 D-PHY LDO channel 3 / 2500 mV
+     - 初始化 I2C0，校验 ID，写 RAW8 profile，保持 stream off
+  2. CSI imgdata.init
+     - 初始化 CSI Host、ISP RGB565 路径、Bridge 与 GDMA
+
+STREAMON
+  3. imgdata.start_capture：提交 DMA 缓冲、使能接收端
+  4. imgsensor.start_capture：SC2336 stream on
+
+STREAMOFF / 最后 close
+  5. 停止 GDMA、Bridge 和 CSI 接收
+  6. SC2336 stream off，释放 I2C0
+  7. 反初始化 ISP、CSI Host，最后释放 D-PHY LDO
+```
+
+LDO 在 `imgsensor.init` 获取、在数据面彻底停机后释放，是因为当前 upper-half
+先调用 sensor init、后调用 imgdata init。板级共享 session 必须记录该归属；
+sensor 的 uninit 不能在 CSI/ISP 仍运行时提前释放 LDO。
+
+### 4.3 维持不变或仅用于验收的文件
+
+| 文件 | 决策 |
 | --- | --- |
-| `esp_mipi_csi.c/.h` | D-PHY 供电和 PLL、CSI Host/Bridge、lane 与 datatype、DMA、中断、错误状态和 cache 同步 |
-| `esp_mipi_csi_imgdata.c` | 将 CSI 采集封装为 NuttX `struct imgdata_s`，实现 buffer/start/stop/callback |
-| `esp_isp.c/.h` | 封装 P4 ISP，完成 RAW Bayer 到 RGB565/YUV 的数据通路，后续再加 AE/AWB |
+| `app/csi_probe/*` | 保留，不改为 V4L2 应用；继续验证 RAW bypass、SCCB 和 CSI/GDMA 基线。 |
+| `nuttx/drivers/video/v4l2_cap.c` | 不修改。 |
+| `nuttx/include/nuttx/video/imgdata.h` | 不修改。 |
+| `nuttx/include/nuttx/video/imgsensor.h` | 不修改。 |
+| `chips/esp32p4/common/espressif/esp_i2c.c` | 不修改；当前 SCCB 所需 I2C 修复已完成。 |
+| `app/video_test/` | 可选新增；只用于 V4L2 验收，不承担 ISP 或 SC2336 驱动职责。 |
 
-芯片层不应包含 SC2336 寄存器表、传感器 I²C 地址、P4X 插座接线或
-Smart Home 逻辑。
+## 5. 多缓冲队列设计
 
-### 4.2 修改构建文件
-
-```text
-chips/esp32p4/common/espressif/Kconfig
-chips/esp32p4/common/espressif/Make.defs
-chips/esp32p4/common/espressif/CMakeLists.txt
-chips/esp32p4/hal_esp32p4.mk
-chips/esp32p4/hal_esp32p4.cmake
-```
-
-建议的芯片层开关：
+RGB565 每帧大小为：
 
 ```text
-CONFIG_ESPRESSIF_MIPI_CSI
-CONFIG_ESPRESSIF_MIPI_CSI_DMA
-CONFIG_ESPRESSIF_MIPI_CSI_IMGDATA
-CONFIG_ESPRESSIF_MIPI_CSI_TIMEOUT_MS
-CONFIG_ESPRESSIF_ISP
+1024 × 600 × 2 = 1,228,800 byte
 ```
 
-首期只有条件地编译已确认必需的低层 HAL：
+每块 DMA 缓冲的起始地址和长度必须均为 64-byte 对齐。帧大小可被 64 整除；
+`esp_mipi_csi_video.c` 的 `.alloc` 必须以 64-byte 对齐分配，不能依赖
+V4L2 默认的 32-byte 对齐分配。
+
+首期采用“软件多缓冲队列，至少双缓冲”的模型：
+
+```mermaid
+stateDiagram-v2
+  [*] --> Free
+  Free --> Queued: VIDIOC_QBUF
+  Queued --> Active: GDMA 写入
+  Active --> Done: DMA 完成 + Cache C2M
+  Done --> Dequeued: VIDIOC_DQBUF
+  Dequeued --> Queued: 应用再次 QBUF
+  Queued --> Free: STREAMOFF
+  Active --> Free: STREAMOFF
+```
+
+默认 `REQBUFS(count=3)`：
+
+- 一块由 GDMA 正在写入；
+- 一块作为 V4L2 队列中的下一可用帧；
+- 一块可由应用持有、显示或处理。
+
+若内存压力较大，`REQBUFS(count=2)` 是最小可用配置，但应用必须在一帧周期内
+完成 `DQBUF` 后的处理和重新 `QBUF`，否则队列耗尽，驱动停止接收并报告
+丢帧或 `-ENOBUFS`。
+
+`esp_mipi_csi_video.c` 的 `set_buf()` 只做不可睡眠的入队和地址校验。
+GDMA 完成路径执行：
+
+1. 采样 DMA、CSI Host、Bridge 错误状态；
+2. 对完成帧执行 Cache C2M 同步；
+3. 标记当前 buffer 完成，并向 V4L2 callback 报告精确的 RGB565 帧大小与时间戳；
+4. 取出下一块已排队 buffer，执行 M2C 同步并重装 GDMA 目标；
+5. 没有下一缓冲时安全停流，不得继续覆写已完成帧。
+
+首期可以使用单个 GDMA 通道和“完成中断内快速重装下一 buffer”的软件 ping-pong。
+若实测帧间存在 Bridge 溢出或丢帧，再升级为预装双 LLI 的硬件双缓冲；该升级只
+改变 `esp_mipi_csi.c` 的 DMA 描述符管理，不改变 V4L2 或板级接口。
+
+## 6. 实施顺序与验收
+
+| 阶段 | 工作 | 完成判据 |
+| --- | --- | --- |
+| V0 | 保持 `csi_probe raw 10` 通过，记录 RAW8 的无 CRC/ECC/Bridge/DMA 错误基线。 | 10 帧 RAW8 非零、非恒定，错误计数全零。 |
+| V1 | 新增 `esp_isp.c`，在独立 ISP probe 中完成 CSI RAW8→RGB565 单帧。 | RGB565 缓冲长度为 1228800，图像几何关系正确，颜色块可辨。 |
+| V2 | 将 CSI 接收端改为队列化并加入 `esp_mipi_csi_video.c`。 | 连续 30 帧完成，无 DMA/Bridge/CSI 错误；完成帧不会被下一帧覆盖。 |
+| V3 | 实现板级私有 `imgsensor_s` 和 `board_camera_initialize()`，注册 `/dev/video0`。 | `ls /dev/video0` 存在；可枚举并设置 RGB565、1024×600。 |
+| V4 | 使用 `video_test` 或等价程序走 V4L2 队列。 | `REQBUFS(3) → QBUF(3) → STREAMON → DQBUF` 连续成功，帧长度正确。 |
+| V5 | 视觉与并发验收。 | RGB565 颜色顺序确认；与 `/dev/fb0` 同时启用时 CSI、DSI 和共享 LDO 无异常。 |
+
+V1 只证明 ISP 数据通路，不证明画质。V5 前必须分别检查 Bayer 顺序、RGB565
+字节序、黑电平、白平衡、颜色矩阵、Gamma 和镜头阴影。首版图像若存在色偏，
+应先记录并进入 ISP tuning 阶段，不能回退为将 RAW 数据标记成 RGB565。
+
+## 7. 已知风险与控制点
+
+- **共享资源**：P4X 的 CSI 与 DSI 使用 D-PHY LDO channel 3、2500 mV。视频和
+  LCD 并发测试必须纳入最终验收。
+- **CSI Bridge 单实例**：P4 只有一个 CSI receiver/Bridge；`csi_probe` 和
+  `/dev/video0` 不可并发持有。
+- **动态 IRQ 问题**：当前第二次动态 IRQ 分配存在已知问题。首期 ISP 不启用
+  AE/AWB/AF 等额外 ISP 中断，只保留已验证的 GDMA 完成 IRQ 与 Bridge 错误轮询；
+  IRQ 分配器修复独立推进。
+- **ISR 上下文**：帧完成回调和下一缓冲重装路径不能分配内存、获取 mutex 或访问
+  不在 IRAM 的依赖。需要延后处理的统计、文件写入和显示操作必须移交应用线程。
+- **内存**：三块 RGB565 帧缓冲占约 3.52 MiB，尚未包含 LCD framebuffer、LVGL、
+  应用栈和 ISP 调优表；`video` defconfig 必须在目标功能组合下核对 PSRAM 余量。
+- **ISP 调优**：Espressif HAL 的 RAW8→RGB565 测试可用作寄存器配置参考，但
+  不能视为 SC2336 画质参数。BLC、WBG、CCM、Gamma 和 LSC 需要基于本模组实测。
+
+## 8. V4L2 验收调用
 
 ```text
-components/esp_hal_cam/mipi_csi_hal.c
-components/esp_hal_cam/esp32p4/mipi_csi_periph.c
+open("/dev/video0")
+VIDIOC_QUERYCAP
+VIDIOC_ENUM_FMT                 -> RGB565
+VIDIOC_S_FMT                    -> 1024x600 / RGB565
+VIDIOC_REQBUFS(count = 3)
+VIDIOC_QUERYBUF + mmap          -> 3 个缓冲
+VIDIOC_QBUF                     -> 依次提交 3 个缓冲
+VIDIOC_STREAMON
+循环：
+  VIDIOC_DQBUF                  -> 检查 bytesused = 1228800、sequence、timestamp
+  消费或显示 RGB565
+  VIDIOC_QBUF                   -> 归还该缓冲
+VIDIOC_STREAMOFF
+close
 ```
 
-接入 ISP 时再加：
-
-```text
-components/esp_hal_cam/isp_hal.c
-components/esp_hal_cam/esp32p4/isp_periph.c
-```
-
-首期不直接整包编译 `upper_hal_cam`、`upper_hal_isp` 或 ESP-IDF `esp_video`。
-这些组件包含 FreeRTOS/ESP-IDF OS 依赖，应先识别其 HAL 调用和时序，再由
-NuttX adapter 接入，避免引入第二套任务、队列和 V4L2 抽象。
-
-## 5. 方案 A：板级私有 SC2336 驱动
-
-### 5.1 定位
-
-方案 A 用于最快完成 P4X + SC2336 真机闭环，不要求修改 NuttX 主仓
-`drivers/video` 的 Kconfig 和构建文件。它可以继续使用 NuttX `imgsensor_s` 和 V4L2
-API；“源码在 board 下”并不等于“绕过 NuttX 框架”。
-
-### 5.2 文件布局
-
-```text
-board/esp32p4/esp32p4-function-ev-board/
-  Kconfig
-  include/board.h
-  src/
-    esp32p4_camera.c
-    esp32p4_sc2336.c
-    esp32p4_sc2336.h
-    esp32p4_bringup.c
-    Make.defs
-    CMakeLists.txt
-```
-
-`esp32p4_sc2336.c` 负责：
-
-- SCCB/I²C 寄存器读写；
-- 产品 ID 检测；
-- 传感器 profile 寄存器表；
-- 曝光、增益、翻转和 stream on/off；
-- `struct imgsensor_ops_s` 的板级私有实现。
-
-`esp32p4_camera.c` 负责：
-
-- 获取共用 I²C0；
-- 构造 SC2336 与 P4 CSI 配置；
-- 连接 `imgsensor_s` 和 `imgdata_s`；
-- 调用 `capture_register("/dev/video0", ...)`；
-- 失败时按相反顺序释放资源。
-
-### 5.3 Kconfig 归属
-
-传感器开关定义在 P4X board Kconfig，不定义成
-`CONFIG_ESPRESSIF_SC2336`：
-
-```kconfig
-config ESP32P4_FUNCTION_EV_BOARD_CAMERA
-	bool "Enable P4X MIPI-CSI camera"
-	depends on ESPRESSIF_I2C0 && ESPRESSIF_I2C0_MASTER_MODE
-	select ESPRESSIF_MIPI_CSI
-	select DRIVERS_VIDEO
-	select VIDEO_STREAM
-
-config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
-	bool "Use the P4X SC2336 camera module"
-	depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA
-	default y
-```
-
-### 5.4 优缺点
-
-| 优点 | 限制 |
-| --- | --- |
-| 不直接修改 NuttX 主仓的 video driver 构建项 | SC2336 与 P4X board 名称和实例绑定 |
-| 最适合先做产品 ID 和单帧验证 | 其他板卡复用时需要抽取 |
-| 仍可以注册标准 `/dev/video0` | 不适合直接作为上游最终补丁 |
-| 调试时文件数量少 | 如不控制边界，容易把 sensor 与 CSI 逻辑写成单一大文件 |
-
-## 6. 方案 B：NuttX 通用 SC2336 driver
-
-### 6.1 定位
-
-方案 B 将 SC2336 建模为与 SoC 和板卡无关的 I²C image sensor。该方案
-适合多板卡复用、代码评审与后续上游，是最终建议形态。
-
-### 6.2 竞赛仓内的源码位置
-
-```text
-drivers/nuttx/drivers/video/
-  sc2336.c
-  sc2336.h
-
-scripts/
-  link_nuttx_camera_drivers.sh
-```
-
-竞赛期间源码仍由竞赛仓管理，脚本只将其映射到当前 NuttX 工作树。
-脚本必须具备 `--check` 模式，且不覆盖已存在的非本项目文件。
-
-上游正式补丁对应为：
-
-```text
-nuttx/drivers/video/sc2336.c
-nuttx/include/nuttx/video/sc2336.h
-nuttx/drivers/video/Kconfig
-nuttx/drivers/video/Make.defs
-nuttx/drivers/video/CMakeLists.txt
-```
-
-### 6.3 通用驱动边界
-
-`sc2336.c` 只接收由 board 提供的总线和配置，不主动初始化 ESP32-P4
-I²C 控制器，不包含 P4X GPIO 号，不调用 CSI HAL。建议接口形式为：
-
-```c
-struct sc2336_config_s
-{
-  uint8_t  i2c_address;
-  uint32_t i2c_frequency;
-  uint8_t  lane_num;
-  bool     reset_active_high;
-  CODE int (*set_reset)(bool asserted);
-  CODE int (*set_power)(bool enabled);
-};
-
-int sc2336_register(FAR struct i2c_master_s *i2c,
-                    FAR const struct sc2336_config_s *config,
-                    FAR struct imgsensor_s **sensor);
-```
-
-reset/power 回调可为 `NULL`。如官方 P4X 模组没有将 reset、pwdn 或 xclk
-引出到 SoC，board 层不得虚构 GPIO 配置。
-
-### 6.4 优缺点
-
-| 优点 | 代价 |
-| --- | --- |
-| 传感器与 ESP32-P4/P4X 解耦 | 需要完整 Kconfig、Make 和 CMake 集成 |
-| 可由其他 I²C + CSI 平台复用 | 公共头文件和生命周期必须稳定 |
-| 适合 NuttX 风格评审和上游 | 第一次真机调试速度慢于板级私有方案 |
-| 容易扩展曝光、增益和 V4L2 controls | 必须处理多实例、并发和失败回滚 |
-
-## 7. 两种方案共用的 P4X 板级装配
-
-无论选择哪一种 SC2336 布局，都建议保留独立的：
-
-```text
-board/esp32p4/esp32p4-function-ev-board/src/esp32p4_camera.c
-```
-
-同时修改：
-
-```text
-board/esp32p4/esp32p4-function-ev-board/Kconfig
-board/esp32p4/esp32p4-function-ev-board/include/board.h
-board/esp32p4/esp32p4-function-ev-board/src/Make.defs
-board/esp32p4/esp32p4-function-ev-board/src/CMakeLists.txt
-board/esp32p4/esp32p4-function-ev-board/src/esp32p4_bringup.c
-```
-
-### 7.1 `esp32p4_camera.c` 初始化步骤
-
-```text
-1. esp_i2cbus_initialize(0)
-2. 读取 SC2336 product ID
-3. 创建 imgsensor_s
-4. 初始化 P4 CSI imgdata，但不立即开流
-5. capture_register("/dev/video0", ...)
-6. 应用 open/ioctl/streamon 时才分配帧缓冲并启动传感器
-```
-
-只注册 `/dev/video0` 不应立即进行持续 CSI 扫描，否则会在 NSH 启动前长期
-占用 PSRAM 带宽和中断资源。
-
-### 7.2 I²C0 共享约束
-
-SC2336 SCCB 与 GT911 共用 GPIO8/SCL 和 GPIO7/SDA，必须遵守：
-
-- 使用现有 `esp_i2cbus_initialize(0)` 引用计数；
-- 每个成功 initialize 只能对应一次 uninitialize；
-- sensor driver 不重新配置 I²C GPIO；
-- 每组 `i2c_msg_s` 携带对应设备频率；
-- 首次调试建议 100 kHz，产品 ID 稳定后再评估 400 kHz；
-- 一个设备 NACK 时不重置整个总线，避免破坏另一设备的会话。
-
-建议的 board bring-up 关系为：
-
-```text
-DSI framebuffer
-    -> GT911 注册
-    -> SC2336 产品 ID 与 /dev/video0 注册
-    -> LittleFS
-    -> NSH/应用
-```
-
-若摄像头不存在，应记录错误并继续启动 NSH、LCD 和触摸，不得使整机
-bring-up 失败。
-
-## 8. 内存、DMA 和 cache 设计
-
-| 格式 | 单帧大小 | 双缓冲 |
-| --- | ---: | ---: |
-| RAW8 1280×720 | 921,600 B | 1,843,200 B |
-| RGB565 1280×720 | 1,843,200 B | 3,686,400 B |
-| RGB565 1024×600 LCD | 1,228,800 B | 2,457,600 B |
-
-RAW8 1280×720@30fps 的有效 payload 约为 27.6 MB/s，还未包含 CSI packet 开销、
-ISP 读写和 LCD 扫描。实现时必须：
-
-- 在 stream on 前一次性预分配 2～3 个 PSRAM 缓冲；
-- 缓冲地址和长度满足 CSI DMA 对齐限制；
-- 禁止每帧 `malloc/free`；
-- 明确 DMA 写完后 CPU invalidate 和 CPU 写完后 DMA clean 的方向；
-- 帧完成中断只更新队列和计数，格式转换放在 worker 上下文；
-- 先做单帧 RAW8 CRC，不与 LVGL、ISP 和 AI 同时启用。
-
-## 9. 分阶段实施与验收
-
-### P0：ESP-IDF 硬件基准
-
-在同一块 P4X、同一摄像头、同一条 FPC 上运行乐鑫官方 MIPI-CSI/ISP
-示例，记录：
-
-- 模组型号和 board revision；
-- I²C 地址与 product ID；
-- lane 数和 lane bitrate；
-- 输入像素时钟、RAW datatype 和 Bayer 顺序；
-- 分辨率、帧率和寄存器 profile。
-
-**通过条件**：ESP-IDF 能稳定采集并显示图像。
-
-### P1：SC2336 SCCB Probe
-
-新增独立 `csi_probe sensor` 模式，不初始化 CSI Host 或 ISP；为与 ESP-IDF
-基线一致，它会先申请 MIPI D-PHY LDO，再执行 SCCB ID 读取。
-
-当前 `esp32p4x-mipi-csi-camera-20260904` 分支已完成第一批 P1 实现：
-
-- 新增板级私有 SC2336 16 位寄存器地址 SCCB 读取与 `0xcb3a` ID 校验；
-- 新增一次性 `board_sc2336_probe(uint16_t *product_id)` 装配接口，平衡共享 I²C0 引用；
-- 新增独立 `csi_probe sensor` 应用和最小 `csi_probe/defconfig`；
-- 不接入默认 board bring-up，摄像头缺失不会阻止 NSH 和其他外设启动；
-- 暂未加入传感器 profile、stream on、CSI Host、ISP、DMA 或 `/dev/video0`。
-
-```text
-nsh> csi_probe sensor
-```
-
-**通过条件**：
-
-- 连续重启 10 次都可读取正确 product ID；
-- GT911 同时保持可用；
-- 缺少摄像头时在有界时间内返回 `-ENODEV`/`-EIO`，不卡住 bring-up。
-
-### P2：CSI RAW8 单帧与连续帧
-
-```text
-nsh> csi_probe raw
-nsh> csi_probe raw 10
-```
-
-当前实现采用 `esp_cam_sensor` v1.7.0 的 SC2336 1024×600@30fps profile：
-24 MHz 输入、2 lane、RAW8/datatype `0x2a`、288 Mbps/lane、BGGR。它在
-PSRAM 中采集一块 614400-byte RAW 帧，输出帧计数、帧字节数、CRC32、
-非全零/非固定值判定、CSI ECC/CRC、FIFO overflow、DMA error 和超时阶段。
-初始化遵循 ESP-IDF 的摄像头相关顺序：板级 profile 提供 D-PHY LDO channel 3、
-2500mV，芯片层先申请并持有 LDO；随后 SC2336 SCCB 探测、profile 配置和
-stream on，最后初始化并启动 CSI Host/Bridge/DMA。失败与退出按反向顺序释放
-CSI Host、sensor stream、SCCB 和 LDO。
-
-`raw` 默认采一帧；通过后再使用 `raw 10`。RAW 文件保存（`save`）保留为
-后续小步：先独立确认 LittleFS 挂载和文件路径，再把写文件时序接入已验证的
-CSI 单缓冲链路。
-
-**当前通过条件**：每帧 1 秒超时内至少收到请求帧数，帧长度稳定为 614400
-bytes，RAW 非全零、非固定值，且不出现 CSI/DMA/Bridge 错误。文件保存和主机
-图像解码是后续验收项。
-
-### P3：NuttX V4L2 `/dev/video0`
-
-使用 `imgsensor_s + imgdata_s + capture_register()` 注册标准采集设备。
-
-```text
-nsh> ls /dev/video0
-nsh> nxcamera
-```
-
-**通过条件**：V4L2 format/buffer/stream ioctls 能完成一次完整
-`REQBUFS -> QBUF -> STREAMON -> DQBUF -> STREAMOFF` 周期。
-
-### P4：ISP 和 LCD 预览
-
-将 RAW8 通过 P4 ISP 转换为 RGB565/YUV，再交给独立预览 worker。
-
-**通过条件**：显示方向、色彩、亮度和帧率正常；无 DSI underrun、CSI overflow、
-长时间花屏或擕裂。
-
-### P5：Smart Home 业务接入
-
-在采集通路独立通过后再增加：
-
-- 摄像头预览页；
-- `capture_camera` 本地工具；
-- 单帧保存与上传；
-- 视觉模型调用；
-- 隐私授权、工具 policy 与采集指示状态。
-
-## 10. `csi_probe` 工程文件
-
-```text
-app/csi_probe/
-  Kconfig
-  Make.defs
-  CMakeLists.txt
-  Makefile
-  csi_probe_main.c
-  README.md
-
-board/esp32p4/esp32p4-function-ev-board/configs/csi_probe/
-  defconfig
-```
-
-新配置必须与 `dsi_probe`、`fb_probe` 和 `smart_home` 分开，不在首次 CSI
-验证中引入 LVGL、网络、cAGENT、MCP 或模型 API。现有 `configs/capture`
-是 MCPWM capture 配置，不是摄像头配置，不应复用其名称。
-
-## 11. 方案 A 向方案 B 的迁移
-
-推荐实施策略是“A 完成真机闭环，B 完成正式收敛”：
-
-1. 首先以 `esp32p4_sc2336.c/.h` 完成 P1～P3；
-2. 在板级私有版本中保持严格边界，不让它访问 CSI/ISP 寄存器；
-3. 将稳定的 sensor 源码移至 `drivers/nuttx/drivers/video/sc2336.c/.h`；
-4. 将 P4X 常量改为 `sc2336_config_s` 参数或 board callback；
-5. 保留 `esp32p4_camera.c` 作为板级装配，只替换 include 和 register API；
-6. 补齐 NuttX Kconfig/Make/CMake 补丁和驱动文档；
-7. 执行 P1～P4 全部回归，确认抽取没有改变寄存器序列和时序。
-
-迁移时不重写寄存器表，只调整文件归属、公共类型、实例生命周期与
-构建规则，从而降低回归风险。
-
-## 12. 建议的实施决策
-
-本项目当前处于 P4X 外设持续扩展阶段，建议选择：
-
-```text
-第一阶段：方案 A，板级私有 SC2336，快速建立硬件与 CSI 真机基线
-第二阶段：保持芯片层与 V4L2 接口不变，抽取为方案 B 通用 driver
-第三阶段：接入 ISP、LVGL 预览和 Smart Home 视觉工具
-```
-
-不推荐把 `sc2336.c` 放入 `chips/esp32p4/common/espressif`:
-这会将外置传感器错误地建模为 SoC 内部外设，并使后续 OV5647 或其他
-传感器接入变成芯片层修改。
-
-## 13. 参考资料
-
-- [ESP32-P4 Function EV Board 用户指南](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4-function-ev-board/user_guide.html)
-- [ESP-IDF MIPI CSI → ISP → DSI 示例](https://github.com/espressif/esp-idf/blob/master/examples/peripherals/camera/mipi_isp_dsi/README.md)
-- [ESP-IoT-Solution Camera LCD Display 示例](https://github.com/espressif/esp-iot-solution/blob/master/examples/camera/video_lcd_display/README.md)
-- [ESP Video Components 文档](https://docs.espressif.com/projects/esp-video-components/en/latest/esp32p4/Get_Started/index.html)
-- [NuttX `imgsensor_s`](https://github.com/apache/nuttx/blob/master/include/nuttx/video/imgsensor.h)
-- [NuttX `imgdata_s`](https://github.com/apache/nuttx/blob/master/include/nuttx/video/imgdata.h)
-- [NuttX V4L2 capture upper-half](https://github.com/apache/nuttx/blob/master/drivers/video/v4l2_cap.c)
+出现超时或错误时，先在 `video` 配置中读取 CSI 统计；再切换到独立
+`csi_probe` 配置执行 `csi_probe raw 10` 与 `csi_probe rawdiag`。先确认 RAW
+硬件基线，再定位 ISP、RGB565、队列或 V4L2 装配问题。
