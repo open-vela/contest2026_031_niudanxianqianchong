@@ -320,7 +320,7 @@ int esp_mipi_csi_video_initialize(FAR struct esp_mipi_csi_video_s *video,
   video->data.ops = &g_esp_mipi_csi_video_ops;
   video->config = *config;
   video->csi = csi;
-  video->lock = SP_UNLOCKED;
+  spin_lock_init(&video->lock);
   return OK;
 }
 
