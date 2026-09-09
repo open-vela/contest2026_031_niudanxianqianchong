@@ -16,12 +16,24 @@ enum esp_isp_output_e
   ESP_ISP_OUTPUT_RGB565
 };
 
+/* Keep these values aligned with ESP-IDF color_raw_element_order_t, while
+ * avoiding an ESP-IDF HAL header dependency in board-facing interfaces.
+ */
+
+enum esp_isp_bayer_order_e
+{
+  ESP_ISP_BAYER_ORDER_BGGR = 0,
+  ESP_ISP_BAYER_ORDER_GBRG,
+  ESP_ISP_BAYER_ORDER_GRBG,
+  ESP_ISP_BAYER_ORDER_RGGB
+};
+
 struct esp_isp_config_s
 {
   uint16_t width;
   uint16_t height;
   uint8_t input_bpp;
-  uint8_t bayer_order;
+  enum esp_isp_bayer_order_e bayer_order;
   bool line_start_packet;
   bool line_end_packet;
   bool byte_swap;

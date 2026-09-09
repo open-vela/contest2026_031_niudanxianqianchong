@@ -60,7 +60,7 @@ struct esp_mipi_csi_config_s
   uint32_t lane_bit_rate_mbps;
   bool     byte_swap;
   enum esp_isp_output_e output;
-  uint8_t  bayer_order;
+  enum esp_isp_bayer_order_e bayer_order;
   struct esp_ldo_config_s phy_ldo;
 };
 

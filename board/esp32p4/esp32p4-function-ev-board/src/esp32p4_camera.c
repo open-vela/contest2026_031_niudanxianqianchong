@@ -28,8 +28,6 @@
 #include <arch/chip/esp_mipi_csi.h>
 #include <arch/chip/esp_mipi_csi_video.h>
 
-#include "hal/color_types.h"
-
 #include "espressif/esp_i2c.h"
 
 #include "esp32p4_sc2336.h"
@@ -154,7 +152,7 @@ static int board_sc2336_video_init(FAR struct imgsensor_s *sensor)
     return ret;
 
   config.output = ESP_ISP_OUTPUT_RGB565;
-  config.bayer_order = COLOR_RAW_ELEMENT_ORDER_BGGR;
+  config.bayer_order = ESP_ISP_BAYER_ORDER_BGGR;
   ret = board_sc2336_csi_prepare(&product_id);
   if (ret >= 0)
     ret = board_sc2336_csi_initialize(g_video_csi, &config);
