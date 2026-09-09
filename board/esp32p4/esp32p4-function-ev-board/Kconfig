@@ -66,7 +66,7 @@ endif # ESP32P4_FUNCTION_EV_BOARD_GT911
 
 config ESP32P4_FUNCTION_EV_BOARD_CAMERA
 	bool "Enable P4X camera sensor control"
-	depends on ESPRESSIF_I2C0 && ESPRESSIF_I2C0_MASTER_MODE
+	select ESPRESSIF_I2C0
 	default n
 	help
 		Enable board-private camera sensor control support.  The P2 staged
@@ -89,6 +89,10 @@ config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
 	bool "Register SC2336 RGB565 capture device"
 	depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
 	depends on !LVX_USE_DEMO_CONTEST2026_031_CSI_PROBE
+	select I2C_RESET
+	select ESPRESSIF_MIPI_CSI
+	select ESPRESSIF_SPIRAM
+	select ESPRESSIF_SPIRAM_USER_HEAP
 	select DRIVERS_VIDEO
 	select VIDEO_STREAM
 	select ESPRESSIF_ISP
