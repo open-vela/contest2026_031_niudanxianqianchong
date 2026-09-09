@@ -166,6 +166,14 @@ int esp_bringup(void)
 {
   int ret = OK;
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+  ret = board_camera_initialize();
+  if (ret < 0)
+    {
+      _err("Failed to register /dev/video0: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 

@@ -85,4 +85,17 @@ config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
 		are initiated by the csi_probe application; this option does not
 		register /dev/video0 or enable ISP processing.
 
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+	bool "Register SC2336 RGB565 capture device"
+	depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336
+	depends on !LVX_USE_DEMO_CONTEST2026_031_CSI_PROBE
+	select DRIVERS_VIDEO
+	select VIDEO_STREAM
+	select ESPRESSIF_ISP
+	select ESPRESSIF_MIPI_CSI_VIDEO
+	default n
+	help
+		Register the P4X SC2336 camera as /dev/video0. The sensor sends
+		RAW8 while the P4 ISP converts it to RGB565 for V4L2.
+
 endif # ARCH_BOARD_CUSTOM

@@ -21,9 +21,14 @@
 #include <syslog.h>
 
 #include <nuttx/i2c/i2c_master.h>
+#include <nuttx/video/imgsensor.h>
+#include <nuttx/video/v4l2_cap.h>
 
 #include <arch/board/board.h>
 #include <arch/chip/esp_mipi_csi.h>
+#include <arch/chip/esp_mipi_csi_video.h>
+
+#include "hal/color_types.h"
 
 #include "espressif/esp_i2c.h"
 
@@ -49,6 +54,29 @@ static mutex_t g_sc2336_lock = NXMUTEX_INITIALIZER;
 static FAR struct i2c_master_s *g_sc2336_i2c;
 static bool g_sc2336_configured;
 static bool g_sc2336_streaming;
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+static FAR struct esp_mipi_csi_s *g_video_csi;
+static struct esp_mipi_csi_video_s g_video_data;
+static struct imgsensor_s g_video_sensor;
+
+static const struct v4l2_fmtdesc g_video_fmts[] =
+{
+  { .pixelformat = V4L2_PIX_FMT_RGB565, .description = "SC2336 RGB565" }
+};
+
+static const struct v4l2_frmsizeenum g_video_sizes[] =
+{
+  { .pixel_format = V4L2_PIX_FMT_RGB565, .type = V4L2_FRMSIZE_TYPE_DISCRETE,
+    .discrete = { SC2336_RAW8_WIDTH, SC2336_RAW8_HEIGHT } }
+};
+
+static const struct v4l2_frmivalenum g_video_intervals[] =
+{
+  { .pixel_format = V4L2_PIX_FMT_RGB565, .width = SC2336_RAW8_WIDTH,
+    .height = SC2336_RAW8_HEIGHT, .type = V4L2_FRMIVAL_TYPE_DISCRETE,
+    .discrete = { 1, SC2336_RAW8_FPS } }
+};
 
 /****************************************************************************
  * Private Functions
@@ -109,6 +137,92 @@ static int board_sc2336_csi_get_profile(
   config->phy_ldo.voltage_mv = ESP_MIPI_CSI_DPHY_VOLTAGE_MV;
   return OK;
 }
+
+static bool board_sc2336_video_available(FAR struct imgsensor_s *sensor)
+{
+  return true;
+}
+
+static int board_sc2336_video_init(FAR struct imgsensor_s *sensor)
+{
+  struct esp_mipi_csi_config_s config;
+  uint16_t product_id;
+  int ret;
+
+  ret = board_sc2336_csi_power_acquire(&config, &g_video_csi);
+  if (ret < 0)
+    return ret;
+
+  config.output = ESP_ISP_OUTPUT_RGB565;
+  config.bayer_order = COLOR_RAW_ELEMENT_ORDER_BGGR;
+  ret = board_sc2336_csi_prepare(&product_id);
+  if (ret >= 0)
+    ret = board_sc2336_csi_initialize(g_video_csi, &config);
+  if (ret < 0)
+    {
+      board_sc2336_csi_release();
+      board_sc2336_csi_power_release(g_video_csi);
+      g_video_csi = NULL;
+      return ret;
+    }
+
+  esp_mipi_csi_video_set_csi(&g_video_data, g_video_csi);
+  return OK;
+}
+
+static int board_sc2336_video_uninit(FAR struct imgsensor_s *sensor)
+{
+  if (g_video_csi != NULL)
+    {
+      board_sc2336_csi_set_stream(false);
+      board_sc2336_csi_deinitialize(g_video_csi);
+      board_sc2336_csi_release();
+      board_sc2336_csi_power_release(g_video_csi);
+      g_video_csi = NULL;
+    }
+
+  return OK;
+}
+
+static FAR const char *board_sc2336_video_name(FAR struct imgsensor_s *sensor)
+{
+  return "SC2336";
+}
+
+static int board_sc2336_video_validate(FAR struct imgsensor_s *sensor,
+  imgsensor_stream_type_t type, uint8_t nr, FAR imgsensor_format_t *formats,
+  FAR imgsensor_interval_t *interval)
+{
+  return nr == 1 && formats[0].pixelformat == IMGSENSOR_PIX_FMT_RGB565 &&
+         formats[0].width == SC2336_RAW8_WIDTH &&
+         formats[0].height == SC2336_RAW8_HEIGHT ? OK : -ENOTSUP;
+}
+
+static int board_sc2336_video_start(FAR struct imgsensor_s *sensor,
+  imgsensor_stream_type_t type, uint8_t nr, FAR imgsensor_format_t *formats,
+  FAR imgsensor_interval_t *interval)
+{
+  return board_sc2336_csi_set_stream(true);
+}
+
+static int board_sc2336_video_stop(FAR struct imgsensor_s *sensor,
+                                    imgsensor_stream_type_t type)
+{
+  return board_sc2336_csi_set_stream(false);
+}
+
+static const struct imgsensor_ops_s g_sc2336_video_ops =
+{
+  .is_available = board_sc2336_video_available,
+  .init = board_sc2336_video_init,
+  .uninit = board_sc2336_video_uninit,
+  .get_driver_name = board_sc2336_video_name,
+  .validate_frame_setting = board_sc2336_video_validate,
+  .start_capture = board_sc2336_video_start,
+  .stop_capture = board_sc2336_video_stop,
+};
+
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -693,3 +807,26 @@ int board_sc2336_csi_release(void)
   nxmutex_unlock(&g_sc2336_lock);
   return ret;
 }
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+int board_camera_initialize(void)
+{
+  FAR struct imgsensor_s *sensors[1];
+  int ret;
+
+  memset(&g_video_sensor, 0, sizeof(g_video_sensor));
+  g_video_sensor.ops = &g_sc2336_video_ops;
+  g_video_sensor.fmtdescs = g_video_fmts;
+  g_video_sensor.fmtdescs_num = 1;
+  g_video_sensor.frmsizes = g_video_sizes;
+  g_video_sensor.frmsizes_num = 1;
+  g_video_sensor.frmintervals = g_video_intervals;
+  g_video_sensor.frmintervals_num = 1;
+  ret = esp_mipi_csi_video_initialize(&g_video_data, NULL);
+  if (ret < 0)
+    return ret;
+
+  sensors[0] = &g_video_sensor;
+  return capture_register("/dev/video0", &g_video_data.data, sensors, 1);
+}
+#endif
