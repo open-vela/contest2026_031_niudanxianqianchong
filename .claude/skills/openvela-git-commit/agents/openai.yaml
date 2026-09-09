@@ -1,0 +1,3 @@
+interface:
+  display_name: "OpenVela Git 提交"
+  short_description: "整理工作区并生成可审阅的中文提交"
