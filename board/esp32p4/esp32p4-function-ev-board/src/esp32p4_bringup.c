@@ -516,6 +516,14 @@ int esp_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
+  ret = board_esp_hosted_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: ESP-Hosted C6 SDIO probe failed: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_DSI_FRAMEBUFFER
   ret = board_mipi_dsi_fb_initialize(0);
   if (ret < 0)

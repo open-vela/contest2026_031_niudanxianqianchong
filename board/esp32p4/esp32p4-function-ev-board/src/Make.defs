@@ -68,6 +68,11 @@ ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336),y)
   CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)risc-v$(DELIM)src$(DELIM)chip$(DELIM)common
 endif
 
+ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED),y)
+  CSRCS += esp32p4_hosted.c
+  CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)risc-v$(DELIM)src$(DELIM)chip$(DELIM)common
+endif
+
 DEPPATH += --dep-path board
 VPATH += :board
 CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board$(DELIM)board

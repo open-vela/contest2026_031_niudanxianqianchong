@@ -1,7 +1,8 @@
 # ESP32-P4X Smart Home 板载 C6 Wi-Fi 接入方案
 
-> 状态：方案阶段。当前 OpenVela P4X 工程未注册 `wlan0`，未实现 P4 到板载
-> ESP32-C6 的 ESP-Hosted 协议适配。
+> 状态（2026-09-13）：基础 SDIO 枚举已有一次实板成功记录，重复启动待验证。
+> 当前未注册 `wlan0`，未实现 CMD53 数据收发与 ESP-Hosted 协议握手，W1 尚未完成。
+> 阶段记录见[板载 C6 SDIO 基础枚举](../开发日志/ESP32-P4X-C6-SDIO基础枚举阶段记录.md)。
 >
 > 适用对象：ESP32-P4X-Function-EV-Board、板载 ESP32-C6-MINI-1、Smart Home。
 

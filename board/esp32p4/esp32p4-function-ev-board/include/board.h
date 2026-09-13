@@ -78,6 +78,23 @@
 #define BOARD_SC2336_I2C_ADDRESS              0x30
 #define BOARD_SC2336_I2C_FREQUENCY            100000
 
+/* ESP-Hosted C6 SDIO wiring.  These are the ESP32-P4-side GPIOs of the
+ * ESP32-P4X Function EV Board, not the GPIO numbers used by the C6.
+ * Slot 1 is routed through the P4 GPIO matrix.  Bring-up intentionally
+ * begins in one-bit mode; DAT3 remains driven high until the later protocol
+ * layer completes SDIO bus-width negotiation.
+ */
+
+#define BOARD_ESP_HOSTED_SDIO_SLOT             1
+#define BOARD_ESP_HOSTED_SDIO_CLK_GPIO         18
+#define BOARD_ESP_HOSTED_SDIO_CMD_GPIO         19
+#define BOARD_ESP_HOSTED_SDIO_D0_GPIO          14
+#define BOARD_ESP_HOSTED_SDIO_D1_GPIO          15
+#define BOARD_ESP_HOSTED_SDIO_D2_GPIO          16
+#define BOARD_ESP_HOSTED_SDIO_D3_GPIO          17
+#define BOARD_ESP_HOSTED_C6_RESET_GPIO         54
+#define BOARD_ESP_HOSTED_PROBING_CLOCK_KHZ     400
+
 /* Keep the board endpoint compatible with the stock LVGL NuttX input
  * adapter when an older external-board Kconfig refresh does not materialize
  * the optional max-points symbol in nuttx/config.h.
@@ -96,6 +113,7 @@
 
 struct mipi_dsi_host;
 struct esp_mipi_dsi_dpi_panel_config_s;
+struct esp_hosted_sdio_s;
 
 /****************************************************************************
  * Public Function Prototypes
@@ -383,5 +401,32 @@ int board_camera_initialize(void);
 #endif
 
 #endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336 */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
+
+/****************************************************************************
+ * Name: board_esp_hosted_initialize
+ *
+ * Description:
+ *   Reset the board-mounted ESP32-C6, route the ESP32-P4 SDMMC slot 1 GPIOs
+ *   and start the ESP-Hosted transport.  The board supplies only physical
+ *   wiring and reset control; SDIO enumeration is owned by the chip layer.
+ *
+ ****************************************************************************/
+
+int board_esp_hosted_initialize(void);
+
+/****************************************************************************
+ * Name: board_esp_hosted_sdio_get
+ *
+ * Description:
+ *   Return the SDIO host owned by the initialized ESP-Hosted transport.
+ *   CMD53 and function-interrupt support use this handle in a later phase.
+ *
+ ****************************************************************************/
+
+FAR struct esp_hosted_sdio_s *board_esp_hosted_sdio_get(void);
+
+#endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED */
 
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_INCLUDE_BOARD_H */

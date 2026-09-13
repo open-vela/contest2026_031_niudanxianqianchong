@@ -2171,6 +2171,30 @@ config ESPRESSIF_EMAC
 	---help---
 		Enable Ethernet MAC support.
 
+config ESPRESSIF_HOSTED_TRANSPORT
+	bool
+	depends on ARCH_CHIP_ESP32P4
+	select ESPRESSIF_HOSTED_SDIO
+	default n
+	---help---
+		Enable the ESP-Hosted SDIO control-plane transport.  It enumerates
+		the attached coprocessor through CMD0, CMD5, CMD3, CMD7 and CMD52
+		after the board has configured pins and released reset.
+
+config ESPRESSIF_HOSTED_SDIO
+	bool "ESP-Hosted SDIO host controller"
+	depends on ARCH_CHIP_ESP32P4
+	default n
+	---help---
+		Enable the ESP32-P4 SDMMC controller setup used by an external
+		ESP-Hosted coprocessor.  This option only supplies the P4-side
+		controller, clock and bus-width management.  A board must configure
+		the SDIO pins and coprocessor reset sequence before it initializes
+		the transport.
+
+		This option does not enable native ESP32 Wi-Fi, register wlan0, or
+		select a network application.
+
 config ESP_COEX_SW_COEXIST_ENABLE
 	bool "Software WiFi/Bluetooth/IEEE 802.15.4 coexistence"
 	depends on (ESPRESSIF_WIFI && ESPRESSIF_BLE) || \

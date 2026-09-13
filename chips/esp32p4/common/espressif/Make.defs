@@ -177,6 +177,14 @@ ifeq ($(CONFIG_ESPRESSIF_EMAC),y)
 	CHIP_CSRCS += esp_emac.c
 endif
 
+ifeq ($(CONFIG_ESPRESSIF_HOSTED_SDIO),y)
+	CHIP_CSRCS += esp_hosted_sdio.c
+endif
+
+ifeq ($(CONFIG_ESPRESSIF_HOSTED_TRANSPORT),y)
+	CHIP_CSRCS += esp_hosted_transport.c
+endif
+
 ifeq ($(CONFIG_SYSTEM_NXDIAG_ESPRESSIF_CHIP_WO_TOOL),y)
 	CHIP_CSRCS += esp_nxdiag.c
 endif

@@ -62,6 +62,12 @@ if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336)
     ${CMAKE_SOURCE_DIR}/arch/risc-v/src/chip/common)
 endif()
 
+if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED)
+  list(APPEND SRCS esp32p4_hosted.c)
+  target_include_directories(board PRIVATE
+    ${CMAKE_SOURCE_DIR}/arch/risc-v/src/chip/common)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

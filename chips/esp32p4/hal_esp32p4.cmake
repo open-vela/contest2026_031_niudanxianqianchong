@@ -67,6 +67,8 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_dma/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_emac/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_emac/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_sd/${CHIP_SERIES}/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_sd/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_gpio/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_gpio/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_gpspi/${CHIP_SERIES}/include
