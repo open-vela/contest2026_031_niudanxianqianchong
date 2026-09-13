@@ -45,6 +45,22 @@
 #define ESP_HOSTED_SDIO_RESET_TIMEOUT_US   10000
 #define ESP_HOSTED_SDIO_RESET_POLL_US         10
 #define ESP_HOSTED_SDIO_COMMAND_TIMEOUT_US 100000
+#define ESP_HOSTED_SDIO_DATA_TIMEOUT_US    200000
+#define ESP_HOSTED_SDIO_DATA_ERRORS (SDMMC_LL_EVENT_RESP_ERR | \
+                                    SDMMC_LL_EVENT_RCRC | \
+                                    SDMMC_LL_EVENT_RTO | \
+                                    SDMMC_LL_EVENT_DCRC | \
+                                    SDMMC_LL_EVENT_DTO | \
+                                    SDMMC_LL_EVENT_HTO | \
+                                    SDMMC_LL_EVENT_HLE | \
+                                    SDMMC_LL_EVENT_FRUN | \
+                                    SDMMC_LL_EVENT_SBE | \
+                                    SDMMC_LL_EVENT_EBE)
+#define ESP_HOSTED_SDIO_DATA_EVENTS (ESP_HOSTED_SDIO_DATA_ERRORS | \
+                                    SDMMC_LL_EVENT_CMD_DONE | \
+                                    SDMMC_LL_EVENT_DATA_OVER | \
+                                    SDMMC_LL_EVENT_RXDR | \
+                                    SDMMC_LL_EVENT_TXDR)
 
 #define ESP_HOSTED_SDIO_COMMAND_EVENTS (SDMMC_LL_EVENT_CMD_DONE | \
                                        SDMMC_LL_EVENT_RESP_ERR | \
@@ -65,6 +81,7 @@ struct esp_hosted_sdio_s
   uint8_t          slot;
   uint8_t          bus_width;
   bool             initialized;
+  bool             faulted;
 };
 
 /****************************************************************************
@@ -571,12 +588,156 @@ int esp_hosted_sdio_command(FAR struct esp_hosted_sdio_s *host,
     {
       ret = -EPIPE;
     }
+  else if (g_host.faulted)
+    {
+      ret = -EIO;
+    }
   else
     {
       ret = esp_hosted_sdio_do_command(&g_host, command, argument, response,
                                        check_crc, send_init, response_value);
     }
 
+  nxmutex_unlock(&g_host_lock);
+  return ret;
+}
+
+int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
+                            uint32_t argument, FAR void *buffer,
+                            size_t length, uint16_t block_size)
+{
+  FAR uint8_t *bytes = buffer;
+  sdmmc_hw_cmd_t command;
+  uint32_t elapsed = 0;
+  uint32_t raw = 0;
+  uint32_t events = 0;
+  uint32_t word;
+  size_t count = argument & 0x1ff;
+  size_t offset = 0;
+  size_t chunk;
+  bool write = (argument & (UINT32_C(1) << 31)) != 0;
+  bool blocks = (argument & (UINT32_C(1) << 27)) != 0;
+  int ret;
+
+  if (host != &g_host || buffer == NULL || length == 0 || length > 4096 ||
+      block_size == 0 || block_size > 512 ||
+      (blocks && (count == 0 || count * block_size != length)) ||
+      (!blocks && (count == 0 ? 512 : count) != length))
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&g_host_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (!host->initialized || host->faulted)
+    {
+      ret = -EIO;
+      goto out;
+    }
+
+  if (!sdmmc_ll_is_command_taken(host->hw))
+    {
+      ret = -EBUSY;
+      goto out;
+    }
+
+  /* At the initial single-bit clock the FIFO can be serviced by polling.
+   * No DMA can access the caller's buffer after this function returns.
+   */
+
+  sdmmc_ll_enable_dma(host->hw, false);
+  sdmmc_ll_reset_fifo(host->hw);
+  ret = esp_hosted_sdio_wait_reset(host);
+  if (ret < 0)
+    {
+      goto fault;
+    }
+
+  sdmmc_ll_clear_interrupt(host->hw, ESP_HOSTED_SDIO_DATA_EVENTS);
+  sdmmc_ll_set_block_size(host->hw, blocks ? block_size : length);
+  sdmmc_ll_set_data_transfer_len(host->hw, length);
+  memset(&command, 0, sizeof(command));
+  command.cmd_index = 53;
+  command.card_num = host->slot;
+  command.response_expect = 1;
+  command.check_response_crc = 1;
+  command.data_expected = 1;
+  command.rw = write;
+  command.wait_complete = 1;
+  command.use_hold_reg = 1;
+  command.start_command = 1;
+  sdmmc_ll_set_command_arg(host->hw, argument);
+  sdmmc_ll_set_command(host->hw, command);
+
+  for (elapsed = 0; elapsed < ESP_HOSTED_SDIO_DATA_TIMEOUT_US; elapsed++)
+    {
+      raw = sdmmc_ll_get_interrupt_raw(host->hw);
+      events |= raw & ESP_HOSTED_SDIO_DATA_EVENTS;
+      if ((events & ESP_HOSTED_SDIO_DATA_ERRORS) != 0)
+        {
+          ret = (events & (SDMMC_LL_EVENT_RTO | SDMMC_LL_EVENT_DTO |
+                           SDMMC_LL_EVENT_HTO)) != 0 ? -ETIMEDOUT : -EIO;
+          goto fault;
+        }
+
+      if ((events & SDMMC_LL_EVENT_CMD_DONE) != 0 &&
+          (host->hw->resp[0] & UINT32_C(0xcb00)) != 0)
+        {
+          ret = -EIO;
+          goto fault;
+        }
+
+      if (offset < length &&
+          (write ? !host->hw->status.fifo_full :
+                   host->hw->status.fifo_count != 0))
+        {
+          chunk = length - offset;
+          if (chunk > sizeof(word))
+            {
+              chunk = sizeof(word);
+            }
+
+          if (write)
+            {
+              word = 0;
+              memcpy(&word, bytes + offset, chunk);
+              host->hw->buffifo.val = word;
+            }
+          else
+            {
+              word = host->hw->buffifo.val;
+              memcpy(bytes + offset, &word, chunk);
+            }
+
+          offset += chunk;
+        }
+
+      sdmmc_ll_clear_interrupt(host->hw,
+                               raw & ESP_HOSTED_SDIO_DATA_EVENTS);
+      if ((events & (SDMMC_LL_EVENT_CMD_DONE | SDMMC_LL_EVENT_DATA_OVER)) ==
+          (SDMMC_LL_EVENT_CMD_DONE | SDMMC_LL_EVENT_DATA_OVER) &&
+          offset == length)
+        {
+          ret = OK;
+          goto out;
+        }
+
+      up_udelay(1);
+    }
+
+  ret = -ETIMEDOUT;
+fault:
+  esp_hosted_sdio_command_error(host, 53, argument, "data-transfer",
+                               raw, elapsed);
+  host->faulted = true;
+  sdmmc_ll_reset_controller(host->hw);
+  sdmmc_ll_reset_fifo(host->hw);
+  esp_hosted_sdio_wait_reset(host);
+out:
   nxmutex_unlock(&g_host_lock);
   return ret;
 }

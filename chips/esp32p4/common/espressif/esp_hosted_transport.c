@@ -19,9 +19,11 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <syslog.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/signal.h>
 
 #include <arch/chip/esp_hosted_transport.h>
 
@@ -40,6 +42,12 @@
 
 #define ESP_HOSTED_TRANSPORT_CMD52_FUNCTION_MAX  7
 #define ESP_HOSTED_TRANSPORT_CMD52_ADDRESS_MAX   0x1ffff
+
+#define ESP_HOSTED_TRANSPORT_CCCR_IO_ENABLE      0x02
+#define ESP_HOSTED_TRANSPORT_CCCR_IO_READY       0x03
+#define ESP_HOSTED_TRANSPORT_FUNCTION1_BIT       0x02
+#define ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_LO  0x110
+#define ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_HI  0x111
 
 #define ESP_HOSTED_TRANSPORT_R4_READY      UINT32_C(0x80000000)
 #define ESP_HOSTED_TRANSPORT_R4_VOLTAGE    UINT32_C(0x00ff8000)
@@ -62,6 +70,7 @@ struct esp_hosted_transport_s
 {
   FAR struct esp_hosted_sdio_s *sdio;
   bool initialized;
+  bool function_ready;
 };
 
 /****************************************************************************
@@ -282,6 +291,195 @@ FAR struct esp_hosted_sdio_s *esp_hosted_transport_get_sdio(
     }
 
   return transport->sdio;
+}
+
+int esp_hosted_transport_enable_function(
+  FAR struct esp_hosted_transport_s *transport)
+{
+  uint8_t value;
+  uint8_t low;
+  uint8_t high;
+  int attempt;
+  int ret;
+
+  if (transport != &g_transport || !transport->initialized)
+    {
+      return -EINVAL;
+    }
+
+  if (transport->function_ready)
+    {
+      return OK;
+    }
+
+  ret = esp_hosted_transport_cmd52(transport->sdio, false, 0,
+                                   ESP_HOSTED_TRANSPORT_CCCR_IO_ENABLE,
+                                   0, &value);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_hosted_transport_cmd52(
+    transport->sdio, true, 0, ESP_HOSTED_TRANSPORT_CCCR_IO_ENABLE,
+    value | ESP_HOSTED_TRANSPORT_FUNCTION1_BIT, &value);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  for (attempt = 0; attempt < 100; attempt++)
+    {
+      ret = esp_hosted_transport_cmd52(transport->sdio, false, 0,
+                                       ESP_HOSTED_TRANSPORT_CCCR_IO_READY,
+                                       0, &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((value & ESP_HOSTED_TRANSPORT_FUNCTION1_BIT) != 0)
+        {
+          break;
+        }
+
+      ret = nxsig_usleep(10000);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
+  if (attempt == 100)
+    {
+      return -ETIMEDOUT;
+    }
+
+  /* Function 1 FBR block size is 512 bytes.  Polling does not require
+   * enabling the DAT1 interrupt; no bus-width change is made here.
+   */
+
+  ret = esp_hosted_transport_cmd52(
+    transport->sdio, true, 0, ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_LO,
+    0, &value);
+  if (ret == OK)
+    {
+      ret = esp_hosted_transport_cmd52(
+        transport->sdio, true, 0, ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_HI,
+        2, &value);
+    }
+
+  if (ret == OK)
+    {
+      ret = esp_hosted_transport_cmd52(
+        transport->sdio, false, 0, ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_LO,
+        0, &low);
+    }
+
+  if (ret == OK)
+    {
+      ret = esp_hosted_transport_cmd52(
+        transport->sdio, false, 0, ESP_HOSTED_TRANSPORT_FUNCTION1_BLOCK_HI,
+        0, &high);
+    }
+
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (low != 0 || high != 2)
+    {
+      return -EIO;
+    }
+
+  transport->function_ready = true;
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted Function 1 ready: io_ready=0x%02x"
+         " block_size=%u\n", (unsigned int)value, 512);
+  return OK;
+}
+
+int esp_hosted_transport_deinitialize(
+  FAR struct esp_hosted_transport_s *transport)
+{
+  int ret;
+
+  if (transport != &g_transport || !transport->initialized)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_hosted_sdio_deinitialize(transport->sdio);
+  if (ret == OK)
+    {
+      memset(&g_transport, 0, sizeof(g_transport));
+    }
+
+  return ret;
+}
+
+int esp_hosted_transport_read_reg(
+  FAR struct esp_hosted_transport_s *transport, uint32_t address,
+  FAR uint8_t *value)
+{
+  if (transport != &g_transport || !transport->function_ready)
+    {
+      return -EPIPE;
+    }
+
+  return esp_hosted_transport_cmd52(transport->sdio, false, 1,
+                                    address, 0, value);
+}
+
+int esp_hosted_transport_write_reg(
+  FAR struct esp_hosted_transport_s *transport, uint32_t address,
+  uint8_t value)
+{
+  uint8_t response;
+
+  if (transport != &g_transport || !transport->function_ready)
+    {
+      return -EPIPE;
+    }
+
+  return esp_hosted_transport_cmd52(transport->sdio, true, 1,
+                                    address, value, &response);
+}
+
+int esp_hosted_transport_transfer(
+  FAR struct esp_hosted_transport_s *transport, bool write,
+  uint32_t address, FAR void *buffer, size_t length, bool blocks)
+{
+  uint32_t count;
+  uint32_t argument;
+
+  if (transport != &g_transport || !transport->function_ready)
+    {
+      return -EPIPE;
+    }
+
+  if (address > 0x1ffff || length == 0 || length > 4096 ||
+      (blocks && length % 512 != 0) || (!blocks && length > 512))
+    {
+      return -EINVAL;
+    }
+
+  count = blocks ? length / 512 : length % 512;
+  argument = (UINT32_C(1) << 28) | (UINT32_C(1) << 26) |
+             (address << 9) | count;
+  if (write)
+    {
+      argument |= UINT32_C(1) << 31;
+    }
+
+  if (blocks)
+    {
+      argument |= UINT32_C(1) << 27;
+    }
+
+  return esp_hosted_sdio_transfer(transport->sdio, argument, buffer,
+                                  length, 512);
 }
 
 #endif /* CONFIG_ESPRESSIF_HOSTED_TRANSPORT */

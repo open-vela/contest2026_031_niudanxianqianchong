@@ -16,6 +16,8 @@
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
 
 #include <errno.h>
+#include <inttypes.h>
+#include <stdint.h>
 #include <syslog.h>
 
 #include <nuttx/arch.h>
@@ -110,6 +112,17 @@ static int board_esp_hosted_reset_c6(void)
   return OK;
 }
 
+static void board_esp_hosted_stop(void)
+{
+  if (g_esp_hosted_transport != NULL)
+    {
+      esp_hosted_transport_deinitialize(g_esp_hosted_transport);
+      g_esp_hosted_transport = NULL;
+    }
+
+  esp_gpiowrite(BOARD_ESP_HOSTED_C6_RESET_GPIO, false);
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -118,6 +131,8 @@ int board_esp_hosted_initialize(void)
 {
   struct esp_hosted_transport_config_s config;
   FAR const char *stage;
+  uint8_t interrupt_raw[4];
+  uint32_t interrupts;
   int ret;
 
   if (g_esp_hosted_transport != NULL)
@@ -150,10 +165,40 @@ int board_esp_hosted_initialize(void)
   ret = esp_hosted_transport_initialize(&config, &g_esp_hosted_transport);
   if (ret < 0)
     {
-      esp_gpiowrite(BOARD_ESP_HOSTED_C6_RESET_GPIO, false);
+      board_esp_hosted_stop();
       goto fail;
     }
 
+  stage = "function1_enable";
+  ret = esp_hosted_transport_enable_function(g_esp_hosted_transport);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  /* ESP-Hosted exposes SLC interrupt status at Function 1 offset 0x050.
+   * Read it once through CMD53 to verify the data phase before the protocol
+   * layer starts writing host configuration or opening its data path.
+   */
+
+  stage = "cmd53_probe";
+  ret = esp_hosted_transport_transfer(g_esp_hosted_transport, false, 0x050,
+                                      interrupt_raw, sizeof(interrupt_raw),
+                                      false);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  interrupts = (uint32_t)interrupt_raw[0] |
+               ((uint32_t)interrupt_raw[1] << 8) |
+               ((uint32_t)interrupt_raw[2] << 16) |
+               ((uint32_t)interrupt_raw[3] << 24);
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 CMD53 probe: function=1 address=0x050"
+         " int_raw=0x%08" PRIx32 "\n", interrupts);
   return OK;
 
 fail:

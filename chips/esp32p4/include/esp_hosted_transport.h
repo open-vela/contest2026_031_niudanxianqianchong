@@ -50,6 +50,35 @@ int esp_hosted_transport_initialize(
   FAR struct esp_hosted_transport_s **transport);
 
 /****************************************************************************
+ * Name: esp_hosted_transport_deinitialize
+ *
+ * Description:
+ *   Release an initialized ESP-Hosted transport after a data-phase failure
+ *   or before the board resets the coprocessor.  The caller must discard its
+ *   transport pointer when this function returns OK.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_deinitialize(
+  FAR struct esp_hosted_transport_s *transport);
+
+/* Function-1 access for the private Hosted protocol layer.  Callers must
+ * serialize complete packet transactions, not only individual commands.
+ */
+
+int esp_hosted_transport_enable_function(
+  FAR struct esp_hosted_transport_s *transport);
+int esp_hosted_transport_read_reg(
+  FAR struct esp_hosted_transport_s *transport, uint32_t address,
+  FAR uint8_t *value);
+int esp_hosted_transport_write_reg(
+  FAR struct esp_hosted_transport_s *transport, uint32_t address,
+  uint8_t value);
+int esp_hosted_transport_transfer(
+  FAR struct esp_hosted_transport_s *transport, bool write,
+  uint32_t address, FAR void *buffer, size_t length, bool blocks);
+
+/****************************************************************************
  * Name: esp_hosted_transport_get_sdio
  *
  * Description:

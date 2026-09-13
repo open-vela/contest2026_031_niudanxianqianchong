@@ -17,6 +17,7 @@
 #include <nuttx/config.h>
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /****************************************************************************
@@ -132,6 +133,15 @@ int esp_hosted_sdio_command(FAR struct esp_hosted_sdio_s *host,
                              uint8_t command, uint32_t argument,
                              bool response, bool check_crc, bool send_init,
                              FAR uint32_t *response_value);
+
+/* Synchronous CMD53 with a programmed-I/O data phase.  Byte mode accepts
+ * 1..512 bytes; block mode accepts multiples of the negotiated block size.
+ * A failed data phase makes this host unusable until deinitialized/reset.
+ */
+
+int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
+                            uint32_t argument, FAR void *buffer,
+                            size_t length, uint16_t block_size);
 
 /****************************************************************************
  * Name: esp_hosted_sdio_get_status
