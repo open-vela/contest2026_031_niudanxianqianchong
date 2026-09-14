@@ -130,6 +130,7 @@ static void board_esp_hosted_stop(void)
 int board_esp_hosted_initialize(void)
 {
   struct esp_hosted_transport_config_s config;
+  struct esp_hosted_init_info_s info;
   FAR const char *stage;
   uint8_t interrupt_raw[4];
   uint32_t interrupts;
@@ -199,6 +200,15 @@ int board_esp_hosted_initialize(void)
   syslog(LOG_INFO,
          "INFO: ESP-Hosted C6 CMD53 probe: function=1 address=0x050"
          " int_raw=0x%08" PRIx32 "\n", interrupts);
+
+  stage = "transport_start";
+  ret = esp_hosted_transport_start(g_esp_hosted_transport, &info);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
   return OK;
 
 fail:

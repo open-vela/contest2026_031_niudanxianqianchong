@@ -27,6 +27,7 @@
 
 #include <arch/chip/esp_hosted_sdio.h>
 
+#include "esp_cache.h"
 #include "esp_clk_tree.h"
 #include "esp_err.h"
 #include "esp_gpio.h"
@@ -61,6 +62,9 @@
                                     SDMMC_LL_EVENT_DATA_OVER | \
                                     SDMMC_LL_EVENT_RXDR | \
                                     SDMMC_LL_EVENT_TXDR)
+#define ESP_HOSTED_SDIO_IDMAC_ERRORS (UINT32_C(1) << 2 | \
+                                      UINT32_C(1) << 4 | \
+                                      UINT32_C(1) << 5)
 
 #define ESP_HOSTED_SDIO_COMMAND_EVENTS (SDMMC_LL_EVENT_CMD_DONE | \
                                        SDMMC_LL_EVENT_RESP_ERR | \
@@ -82,6 +86,9 @@ struct esp_hosted_sdio_s
   uint8_t          bus_width;
   bool             initialized;
   bool             faulted;
+  bool             dma_validated;
+  sdmmc_desc_t     dma_descriptor __attribute__((aligned(64)));
+  uint8_t          dma_buffer[4096] __attribute__((aligned(64)));
 };
 
 /****************************************************************************
@@ -256,6 +263,7 @@ static void esp_hosted_sdio_command_error(
   uint32_t status = host->hw->status.val;
   uint32_t timeout = host->hw->tmout.val;
   uint32_t clkena = host->hw->clkena.val;
+  uint32_t idsts = sdmmc_ll_get_idsts_interrupt_raw(host->hw);
   uint32_t last_response = host->hw->resp[0];
 
   syslog(LOG_ERR,
@@ -265,9 +273,30 @@ static void esp_hosted_sdio_command_error(
   syslog(LOG_ERR,
          "ERROR: ESP-Hosted SDIO snapshot: cmd=0x%08" PRIx32
          " status=0x%08" PRIx32 " tmout=0x%08" PRIx32
-         " clkena=0x%08" PRIx32 " last_resp=0x%08" PRIx32
+         " clkena=0x%08" PRIx32 " idsts=0x%08" PRIx32
+         " last_resp=0x%08" PRIx32
          " clock_khz=%" PRIu32 "\n",
-         cmd, status, timeout, clkena, last_response, host->clock_khz);
+         cmd, status, timeout, clkena, idsts, last_response,
+         host->clock_khz);
+}
+
+static void esp_hosted_sdio_dma_snapshot(
+  FAR struct esp_hosted_sdio_s *host, FAR const char *stage)
+{
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted SDIO DMA: stage=%s ctrl=0x%08" PRIx32
+         " bmod=0x%08" PRIx32 " status=0x%08" PRIx32
+         " raw=0x%08" PRIx32 " idsts=0x%08" PRIx32
+         " bytcnt=%" PRIu32 " tcbcnt=%" PRIu32 " tbbcnt=%" PRIu32
+         " fifoth=0x%08" PRIx32 " own=%u error=%u size=%u\n",
+         stage, host->hw->ctrl.val, host->hw->bmod.val,
+         host->hw->status.val, sdmmc_ll_get_interrupt_raw(host->hw),
+         sdmmc_ll_get_idsts_interrupt_raw(host->hw),
+         host->hw->bytcnt.byte_count, host->hw->tcbcnt.tcbcnt_reg,
+         host->hw->tbbcnt.tbbcnt_reg, host->hw->fifoth.val,
+         (unsigned int)host->dma_descriptor.owned_by_idmac,
+         (unsigned int)host->dma_descriptor.card_error_summary,
+         (unsigned int)host->dma_descriptor.buffer1_size);
 }
 
 static int esp_hosted_sdio_do_command(FAR struct esp_hosted_sdio_s *host,
@@ -611,12 +640,14 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
   uint32_t elapsed = 0;
   uint32_t raw = 0;
   uint32_t events = 0;
+  uint32_t idsts = 0;
   uint32_t word;
   size_t count = argument & 0x1ff;
   size_t offset = 0;
   size_t chunk;
   bool write = (argument & (UINT32_C(1) << 31)) != 0;
   bool blocks = (argument & (UINT32_C(1) << 27)) != 0;
+  bool dma = length > sizeof(word);
   int ret;
 
   if (host != &g_host || buffer == NULL || length == 0 || length > 4096 ||
@@ -645,11 +676,18 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
       goto out;
     }
 
-  /* At the initial single-bit clock the FIFO can be serviced by polling.
-   * No DMA can access the caller's buffer after this function returns.
+  /* CMD52 and four-byte CMD53 register accesses use PIO, which is the
+   * verified control path.  Larger CMD53 payloads use the SDMMC IDMAC.  The
+   * static bounce buffer avoids imposing cache-line alignment restrictions
+   * on ESP-Hosted callers.
    */
 
   sdmmc_ll_enable_dma(host->hw, false);
+  if (dma)
+    {
+      sdmmc_ll_reset_dma(host->hw);
+    }
+
   sdmmc_ll_reset_fifo(host->hw);
   ret = esp_hosted_sdio_wait_reset(host);
   if (ret < 0)
@@ -657,9 +695,76 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
       goto fault;
     }
 
+  /* Program the new transfer before enabling IDMAC.  Otherwise it can
+   * service a request using the preceding PIO transaction's byte count.
+   */
+
   sdmmc_ll_clear_interrupt(host->hw, ESP_HOSTED_SDIO_DATA_EVENTS);
   sdmmc_ll_set_block_size(host->hw, blocks ? block_size : length);
   sdmmc_ll_set_data_transfer_len(host->hw, length);
+
+  if (dma)
+    {
+      /* A DMA reset clears the IDMAC bus mode and interrupt enables. */
+
+      sdmmc_ll_init_dma(host->hw);
+      sdmmc_ll_enable_dma(host->hw, false);
+      memset(&host->dma_descriptor, 0, sizeof(host->dma_descriptor));
+      if (write)
+        {
+          memcpy(host->dma_buffer, bytes, length);
+          ret = esp_cache_msync(host->dma_buffer,
+                                sizeof(host->dma_buffer),
+                                ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+          if (ret != ESP_OK)
+            {
+              ret = -EIO;
+              goto out;
+            }
+        }
+      else
+        {
+          /* Write back any previous contents before IDMAC overwrites this
+           * buffer, then invalidate it after DATA_OVER below.
+           */
+
+          ret = esp_cache_msync(host->dma_buffer, sizeof(host->dma_buffer),
+                                ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+          if (ret != ESP_OK)
+            {
+              ret = -EIO;
+              goto out;
+            }
+        }
+
+      host->dma_descriptor.first_descriptor = 1;
+      host->dma_descriptor.last_descriptor = 1;
+      host->dma_descriptor.second_address_chained = 1;
+      host->dma_descriptor.owned_by_idmac = 1;
+      host->dma_descriptor.buffer1_size = (length + 3) & ~3;
+      host->dma_descriptor.buffer1_ptr = host->dma_buffer;
+      host->dma_descriptor.next_desc_ptr = NULL;
+      ret = esp_cache_msync(&host->dma_descriptor,
+                            sizeof(host->dma_descriptor),
+                            ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+      if (ret != ESP_OK)
+        {
+          ret = -EIO;
+          goto out;
+        }
+
+      sdmmc_ll_clear_idsts_interrupt(host->hw, UINT32_MAX);
+      sdmmc_ll_set_desc_addr(host->hw,
+                             (uint32_t)(uintptr_t)&host->dma_descriptor);
+      if (!host->dma_validated)
+        {
+          esp_hosted_sdio_dma_snapshot(host, "prepared");
+        }
+
+      sdmmc_ll_enable_dma(host->hw, true);
+      sdmmc_ll_poll_demand(host->hw);
+    }
+
   memset(&command, 0, sizeof(command));
   command.cmd_index = 53;
   command.card_num = host->slot;
@@ -672,12 +777,18 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
   command.start_command = 1;
   sdmmc_ll_set_command_arg(host->hw, argument);
   sdmmc_ll_set_command(host->hw, command);
+  if (dma && !host->dma_validated)
+    {
+      esp_hosted_sdio_dma_snapshot(host, "started");
+    }
 
   for (elapsed = 0; elapsed < ESP_HOSTED_SDIO_DATA_TIMEOUT_US; elapsed++)
     {
       raw = sdmmc_ll_get_interrupt_raw(host->hw);
       events |= raw & ESP_HOSTED_SDIO_DATA_EVENTS;
-      if ((events & ESP_HOSTED_SDIO_DATA_ERRORS) != 0)
+      idsts = sdmmc_ll_get_idsts_interrupt_raw(host->hw);
+      if ((events & ESP_HOSTED_SDIO_DATA_ERRORS) != 0 ||
+          (dma && (idsts & ESP_HOSTED_SDIO_IDMAC_ERRORS) != 0))
         {
           ret = (events & (SDMMC_LL_EVENT_RTO | SDMMC_LL_EVENT_DTO |
                            SDMMC_LL_EVENT_HTO)) != 0 ? -ETIMEDOUT : -EIO;
@@ -691,7 +802,7 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
           goto fault;
         }
 
-      if (offset < length &&
+      if (!dma && offset < length &&
           (write ? !host->hw->status.fifo_full :
                    host->hw->status.fifo_count != 0))
         {
@@ -718,10 +829,62 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
 
       sdmmc_ll_clear_interrupt(host->hw,
                                raw & ESP_HOSTED_SDIO_DATA_EVENTS);
+
+      if (!dma && (events & SDMMC_LL_EVENT_DATA_OVER) != 0 &&
+          offset != length)
+        {
+          ret = -EIO;
+          goto fault;
+        }
+
       if ((events & (SDMMC_LL_EVENT_CMD_DONE | SDMMC_LL_EVENT_DATA_OVER)) ==
           (SDMMC_LL_EVENT_CMD_DONE | SDMMC_LL_EVENT_DATA_OVER) &&
-          offset == length)
+          (dma || offset == length))
         {
+          if (dma)
+            {
+              /* IDMAC writes OWN through memory, outside the CPU cache. */
+
+              ret = esp_cache_msync(&host->dma_descriptor,
+                                    sizeof(host->dma_descriptor),
+                                    ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+              if (ret != ESP_OK)
+                {
+                  ret = -EIO;
+                  goto fault;
+                }
+
+              if (host->dma_descriptor.owned_by_idmac)
+                {
+                  up_udelay(1);
+                  continue;
+                }
+
+              if (host->dma_descriptor.card_error_summary)
+                {
+                  ret = -EIO;
+                  goto fault;
+                }
+
+              sdmmc_ll_enable_dma(host->hw, false);
+              sdmmc_ll_clear_idsts_interrupt(host->hw, UINT32_MAX);
+              if (!write)
+                {
+                  ret = esp_cache_msync(host->dma_buffer,
+                                        sizeof(host->dma_buffer),
+                                        ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+                  if (ret != ESP_OK)
+                    {
+                      ret = -EIO;
+                      goto fault;
+                    }
+
+                  memcpy(bytes, host->dma_buffer, length);
+                }
+
+              host->dma_validated = true;
+            }
+
           ret = OK;
           goto out;
         }
@@ -731,10 +894,18 @@ int esp_hosted_sdio_transfer(FAR struct esp_hosted_sdio_s *host,
 
   ret = -ETIMEDOUT;
 fault:
+  if (dma && !host->dma_validated)
+    {
+      esp_hosted_sdio_dma_snapshot(host, "failed");
+    }
+
   esp_hosted_sdio_command_error(host, 53, argument, "data-transfer",
-                               raw, elapsed);
+                                raw, elapsed);
   host->faulted = true;
+  sdmmc_ll_enable_dma(host->hw, false);
+  sdmmc_ll_clear_idsts_interrupt(host->hw, UINT32_MAX);
   sdmmc_ll_reset_controller(host->hw);
+  sdmmc_ll_reset_dma(host->hw);
   sdmmc_ll_reset_fifo(host->hw);
   esp_hosted_sdio_wait_reset(host);
 out:

@@ -134,8 +134,10 @@ int esp_hosted_sdio_command(FAR struct esp_hosted_sdio_s *host,
                              bool response, bool check_crc, bool send_init,
                              FAR uint32_t *response_value);
 
-/* Synchronous CMD53 with a programmed-I/O data phase.  Byte mode accepts
- * 1..512 bytes; block mode accepts multiples of the negotiated block size.
+/* Synchronous CMD53.  Transfers up to four bytes use programmed I/O; larger
+ * transfers use the ESP32-P4 SDMMC IDMAC.  Byte mode accepts 1..512 bytes;
+ * block mode accepts multiples of the negotiated block size.  Callers split
+ * byte-mode lengths that are not a multiple of four before calling this API.
  * A failed data phase makes this host unusable until deinitialized/reset.
  */
 

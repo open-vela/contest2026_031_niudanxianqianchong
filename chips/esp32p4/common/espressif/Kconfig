@@ -2178,8 +2178,9 @@ config ESPRESSIF_HOSTED_TRANSPORT
 	default n
 	---help---
 		Enable the ESP-Hosted SDIO control-plane transport.  It enumerates
-		the attached coprocessor through CMD0, CMD5, CMD3, CMD7 and CMD52
-		after the board has configured pins and released reset.
+		the attached coprocessor through CMD0, CMD5, CMD3, CMD7 and CMD52,
+		then exchanges the private ESP-Hosted initialization events after the
+		board has configured pins and released reset.
 
 config ESPRESSIF_HOSTED_SDIO
 	bool "ESP-Hosted SDIO host controller"

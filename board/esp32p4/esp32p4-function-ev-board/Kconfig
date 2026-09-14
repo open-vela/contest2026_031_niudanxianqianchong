@@ -110,8 +110,8 @@ config ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
 		Reset the ESP32-C6 fitted to the ESP32-P4X Function EV Board, route
 		the ESP32-P4 SDMMC slot 1 pins during board bring-up.  The P4
 		ESP-Hosted transport then runs its 400 kHz, one-bit control-plane
-		probe and verifies C6 SDIO function 0 CCCR.  This does not register
-		wlan0 or exchange ESP-Hosted packets.
+		probe, verifies C6 SDIO function 0 CCCR and exchanges the private
+		initialization events.  This does not register wlan0.
 
 		The board requires the documented external pull-ups on CMD and DAT0
 		through DAT3.  The GPIO pull-ups configured by this option only keep

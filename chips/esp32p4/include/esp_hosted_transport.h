@@ -29,6 +29,17 @@ struct esp_hosted_transport_config_s
   struct esp_hosted_sdio_config_s sdio;
 };
 
+/* Information advertised by the ESP-Hosted private initialization event. */
+
+struct esp_hosted_init_info_s
+{
+  uint32_t firmware_version;
+  uint8_t  capabilities;
+  uint8_t  chip_id;
+  uint8_t  rx_queue_size;
+  uint8_t  tx_queue_size;
+};
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -60,6 +71,35 @@ int esp_hosted_transport_initialize(
  ****************************************************************************/
 
 int esp_hosted_transport_deinitialize(
+  FAR struct esp_hosted_transport_s *transport);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_start
+ *
+ * Description:
+ *   Open the ESP-Hosted SDIO data path and wait for one private
+ *   initialization event.  The transport validates the Function-1 FIFO
+ *   packet format, returns the C6 firmware capabilities and sends the
+ *   matching host configuration event.  It does not register wlan0 or issue
+ *   Wi-Fi RPC commands.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_start(FAR struct esp_hosted_transport_s *transport,
+                               FAR struct esp_hosted_init_info_s *info);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_diagnose
+ *
+ * Description:
+ *   Sample Function-1 status registers without writing a slave register,
+ *   clearing an interrupt, opening the Hosted data path, or reading FIFO
+ *   data.  It cross-checks individual CMD53 reads against CMD52 byte reads
+ *   while diagnosing an unknown C6 firmware image.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_diagnose(
   FAR struct esp_hosted_transport_s *transport);
 
 /* Function-1 access for the private Hosted protocol layer.  Callers must
