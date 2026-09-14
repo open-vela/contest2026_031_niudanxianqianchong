@@ -23,7 +23,11 @@
 #include <syslog.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
+#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/signal.h>
+#include <nuttx/wqueue.h>
 
 #include <arch/chip/esp_hosted_transport.h>
 
@@ -61,17 +65,33 @@
 #define ESP_HOSTED_TRANSPORT_LEN_OFFSET   16
 #define ESP_HOSTED_TRANSPORT_SLC_REGISTER_BYTES   20
 #define ESP_HOSTED_TRANSPORT_INIT_PACKET_MAX      256
+#define ESP_HOSTED_TRANSPORT_RX_PACKET_MAX       1600
 #define ESP_HOSTED_TRANSPORT_INIT_WAIT_RETRIES    100
 #define ESP_HOSTED_TRANSPORT_INIT_WAIT_US       10000
 #define ESP_HOSTED_TRANSPORT_TX_WAIT_RETRIES       10
 #define ESP_HOSTED_TRANSPORT_TX_WAIT_US           400
 #define ESP_HOSTED_TRANSPORT_DIAG_SAMPLES           3
 #define ESP_HOSTED_TRANSPORT_DIAG_INTERVAL_US  100000
+#define ESP_HOSTED_TRANSPORT_RX_WORK_DELAY_MS      10
+#define ESP_HOSTED_TRANSPORT_RX_PACKETS_PER_WORK    4
+#define ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS      1000
 
 #define ESP_HOSTED_TRANSPORT_IF_PRIVATE           5
+#define ESP_HOSTED_TRANSPORT_IF_SERIAL            3
 #define ESP_HOSTED_TRANSPORT_PACKET_EVENT      0x33
 #define ESP_HOSTED_TRANSPORT_EVENT_INIT        0x22
 #define ESP_HOSTED_TRANSPORT_HEADER_BYTES        12
+
+#define ESP_HOSTED_TRANSPORT_TLV_EPNAME           1
+#define ESP_HOSTED_TRANSPORT_TLV_DATA             2
+#define ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES   6
+
+#define ESP_HOSTED_TRANSPORT_RPC_TYPE_REQ         1
+#define ESP_HOSTED_TRANSPORT_RPC_TYPE_RESP        2
+#define ESP_HOSTED_TRANSPORT_RPC_TYPE_EVENT       3
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_GET_MODE   259
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE  515
+#define ESP_HOSTED_TRANSPORT_RPC_EVENT_ESPINIT  769
 
 #define ESP_HOSTED_TRANSPORT_TAG_CAPABILITY    0x11
 #define ESP_HOSTED_TRANSPORT_TAG_CHIP_ID       0x12
@@ -120,11 +140,23 @@
 struct esp_hosted_transport_s
 {
   FAR struct esp_hosted_sdio_s *sdio;
+  struct work_s rx_work;
+  mutex_t bus_lock;
+  mutex_t rpc_lock;
+  sem_t rpc_sem;
   bool initialized;
   bool function_ready;
   bool data_path_open;
+  bool rx_active;
+  bool checksum_enabled;
+  bool rpc_pending;
   uint32_t rx_packet_count;
   uint16_t tx_buffer_count;
+  uint16_t tx_sequence;
+  uint32_t rpc_uid;
+  uint32_t rpc_wifi_mode;
+  int rpc_result;
+  uint8_t rx_packet[ESP_HOSTED_TRANSPORT_RX_PACKET_MAX];
 };
 
 /****************************************************************************
@@ -132,6 +164,8 @@ struct esp_hosted_transport_s
  ****************************************************************************/
 
 static struct esp_hosted_transport_s g_transport;
+
+static void esp_hosted_transport_rx_worker(FAR void *arg);
 
 /****************************************************************************
  * Private Functions
@@ -350,6 +384,45 @@ static int esp_hosted_transport_wait_tx_buffers(
   return -EAGAIN;
 }
 
+static int esp_hosted_transport_send_packet(
+  FAR struct esp_hosted_transport_s *transport, FAR uint8_t *packet,
+  size_t packet_length)
+{
+  unsigned int buffers;
+  int ret;
+
+  if (packet_length == 0 ||
+      packet_length > ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES)
+    {
+      return -EMSGSIZE;
+    }
+
+  ret = nxmutex_lock(&transport->bus_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  buffers = (packet_length + ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES - 1) /
+            ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES;
+  ret = esp_hosted_transport_wait_tx_buffers(transport, buffers);
+  if (ret == OK)
+    {
+      ret = esp_hosted_transport_transfer(
+        transport, true, ESP_HOSTED_TRANSPORT_SLC_FIFO_END - packet_length,
+        packet, packet_length, false);
+      if (ret == OK)
+        {
+          transport->tx_buffer_count =
+            (transport->tx_buffer_count + buffers) %
+            ESP_HOSTED_TRANSPORT_TX_TOKEN_MAX;
+        }
+    }
+
+  nxmutex_unlock(&transport->bus_lock);
+  return ret;
+}
+
 static int esp_hosted_transport_send_init_config(
   FAR struct esp_hosted_transport_s *transport,
   FAR const struct esp_hosted_init_info_s *info)
@@ -357,16 +430,7 @@ static int esp_hosted_transport_send_init_config(
   uint8_t packet[ESP_HOSTED_TRANSPORT_CONFIG_PACKET_BYTES];
   uint8_t *event;
   uint8_t *tlv;
-  unsigned int buffers;
   int ret;
-
-  buffers = (sizeof(packet) + ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES - 1) /
-            ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES;
-  ret = esp_hosted_transport_wait_tx_buffers(transport, buffers);
-  if (ret < 0)
-    {
-      return ret;
-    }
 
   memset(packet, 0, sizeof(packet));
   packet[0] = ESP_HOSTED_TRANSPORT_IF_PRIVATE;
@@ -401,29 +465,23 @@ static int esp_hosted_transport_send_init_config(
   tlv[1] = 1;
   tlv[2] = 0;
 
-  if ((info->capabilities & ESP_HOSTED_TRANSPORT_CAP_CHECKSUM) != 0)
+  if (transport->checksum_enabled)
     {
       esp_hosted_transport_put_le16(packet + 6,
                                     esp_hosted_transport_checksum(
                                       packet, sizeof(packet)));
     }
 
-  ret = esp_hosted_transport_transfer(transport, true,
-                                      ESP_HOSTED_TRANSPORT_SLC_FIFO_END -
-                                      sizeof(packet), packet, sizeof(packet),
-                                      false);
+  ret = esp_hosted_transport_send_packet(transport, packet, sizeof(packet));
   if (ret < 0)
     {
       return ret;
     }
 
-  transport->tx_buffer_count =
-    (transport->tx_buffer_count + buffers) %
-    ESP_HOSTED_TRANSPORT_TX_TOKEN_MAX;
   syslog(LOG_INFO,
          "INFO: ESP-Hosted C6 config sent: bytes=%u checksum=%s\n",
          (unsigned int)sizeof(packet),
-         (info->capabilities & ESP_HOSTED_TRANSPORT_CAP_CHECKSUM) != 0 ?
+         transport->checksum_enabled ?
          "enabled" : "disabled");
   return OK;
 }
@@ -539,6 +597,574 @@ static int esp_hosted_transport_parse_init_event(
   return OK;
 }
 
+static int esp_hosted_transport_get_varint(FAR const uint8_t *data,
+                                           size_t length,
+                                           FAR size_t *offset,
+                                           FAR uint64_t *value)
+{
+  uint64_t result = 0;
+  uint8_t byte;
+  unsigned int shift;
+
+  for (shift = 0; shift < 64; shift += 7)
+    {
+      if (*offset >= length)
+        {
+          return -EMSGSIZE;
+        }
+
+      byte = data[(*offset)++];
+      result |= (uint64_t)(byte & 0x7f) << shift;
+      if ((byte & 0x80) == 0)
+        {
+          *value = result;
+          return OK;
+        }
+    }
+
+  return -EPROTO;
+}
+
+static int esp_hosted_transport_skip_field(FAR const uint8_t *data,
+                                           size_t length,
+                                           FAR size_t *offset,
+                                           uint32_t wire_type)
+{
+  uint64_t field_length;
+
+  switch (wire_type)
+    {
+      case 0:
+        return esp_hosted_transport_get_varint(data, length, offset,
+                                               &field_length);
+
+      case 1:
+        field_length = 8;
+        break;
+
+      case 2:
+        if (esp_hosted_transport_get_varint(data, length, offset,
+                                            &field_length) < 0)
+          {
+            return -EMSGSIZE;
+          }
+        break;
+
+      case 5:
+        field_length = 4;
+        break;
+
+      default:
+        return -EPROTO;
+    }
+
+  if (field_length > length - *offset)
+    {
+      return -EMSGSIZE;
+    }
+
+  *offset += field_length;
+  return OK;
+}
+
+static int esp_hosted_transport_parse_serial_tlv(
+  FAR const uint8_t *payload, size_t payload_length,
+  FAR const uint8_t **rpc, FAR size_t *rpc_length)
+{
+  static const uint8_t response_endpoint[] = "RPCRsp";
+  static const uint8_t event_endpoint[] = "RPCEvt";
+  uint16_t endpoint_length;
+  uint16_t data_length;
+  size_t offset;
+
+  if (payload_length < 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES + 3 ||
+      payload[0] != ESP_HOSTED_TRANSPORT_TLV_EPNAME)
+    {
+      return -EPROTO;
+    }
+
+  endpoint_length = esp_hosted_transport_get_le16(payload + 1);
+  offset = 3;
+  if (endpoint_length != ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES ||
+      endpoint_length > payload_length - offset ||
+      (memcmp(payload + offset, response_endpoint, endpoint_length) != 0 &&
+       memcmp(payload + offset, event_endpoint, endpoint_length) != 0))
+    {
+      return -EPROTO;
+    }
+
+  offset += endpoint_length;
+  if (offset + 3 > payload_length ||
+      payload[offset] != ESP_HOSTED_TRANSPORT_TLV_DATA)
+    {
+      return -EPROTO;
+    }
+
+  data_length = esp_hosted_transport_get_le16(payload + offset + 1);
+  offset += 3;
+  if (data_length == 0 || data_length != payload_length - offset)
+    {
+      return -EMSGSIZE;
+    }
+
+  *rpc = payload + offset;
+  *rpc_length = data_length;
+  return OK;
+}
+
+static int esp_hosted_transport_handle_get_mode_response(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *payload,
+  size_t payload_length, uint32_t uid)
+{
+  uint64_t key;
+  uint64_t value;
+  size_t offset = 0;
+  uint32_t mode = 0;
+  int result = OK;
+  int ret;
+
+  while (offset < payload_length)
+    {
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key & 7) != 0)
+        {
+          ret = esp_hosted_transport_skip_field(payload, payload_length,
+                                                &offset, key & 7);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          continue;
+        }
+
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 1)
+        {
+          mode = (uint32_t)value;
+        }
+      else if ((key >> 3) == 2)
+        {
+          result = (int32_t)value;
+        }
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending && transport->rpc_uid == uid)
+    {
+      transport->rpc_wifi_mode = mode;
+      transport->rpc_result = result;
+      transport->rpc_pending = false;
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: GetWifiMode response uid=%" PRIu32
+             " mode=%" PRIu32 " result=%d\n", uid, mode, result);
+      nxsem_post(&transport->rpc_sem);
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return OK;
+}
+
+static int esp_hosted_transport_handle_rpc(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *rpc,
+  size_t rpc_length)
+{
+  FAR const uint8_t *response = NULL;
+  uint64_t key;
+  uint64_t value;
+  uint64_t payload_length = 0;
+  size_t offset = 0;
+  uint32_t message_type = 0;
+  uint32_t message_id = 0;
+  uint32_t uid = 0;
+  int ret;
+
+  while (offset < rpc_length)
+    {
+      ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset, &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE &&
+          (key & 7) == 2)
+        {
+          ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
+                                                &payload_length);
+          if (ret < 0 || payload_length > rpc_length - offset)
+            {
+              return -EMSGSIZE;
+            }
+
+          response = rpc + offset;
+          offset += payload_length;
+          continue;
+        }
+
+      if ((key & 7) != 0)
+        {
+          ret = esp_hosted_transport_skip_field(rpc, rpc_length, &offset,
+                                                key & 7);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          continue;
+        }
+
+      ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
+                                            &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      switch (key >> 3)
+        {
+          case 1:
+            message_type = (uint32_t)value;
+            break;
+
+          case 2:
+            message_id = (uint32_t)value;
+            break;
+
+          case 3:
+            uid = (uint32_t)value;
+            break;
+
+          default:
+            break;
+        }
+    }
+
+  if (message_type == ESP_HOSTED_TRANSPORT_RPC_TYPE_EVENT)
+    {
+      if (message_id == ESP_HOSTED_TRANSPORT_RPC_EVENT_ESPINIT)
+        {
+          syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: ESPInit event\n");
+        }
+      else
+        {
+          syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: event=%" PRIu32 "\n",
+                 message_id);
+        }
+
+      return OK;
+    }
+
+  if (message_type != ESP_HOSTED_TRANSPORT_RPC_TYPE_RESP ||
+      message_id != ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE ||
+      response == NULL)
+    {
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RX: control type=%" PRIu32
+             " id=%" PRIu32 " ignored\n", message_type, message_id);
+      return OK;
+    }
+
+  return esp_hosted_transport_handle_get_mode_response(transport, response,
+                                                        payload_length, uid);
+}
+
+static int esp_hosted_transport_handle_packet(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *packet,
+  size_t packet_length)
+{
+  FAR const uint8_t *rpc;
+  uint16_t payload_length;
+  uint16_t payload_offset;
+  size_t rpc_length;
+  int ret;
+
+  if (packet_length < ESP_HOSTED_TRANSPORT_HEADER_BYTES)
+    {
+      return -EMSGSIZE;
+    }
+
+  payload_length = esp_hosted_transport_get_le16(packet + 2);
+  payload_offset = esp_hosted_transport_get_le16(packet + 4);
+  if (payload_offset != ESP_HOSTED_TRANSPORT_HEADER_BYTES ||
+      payload_length != packet_length - payload_offset)
+    {
+      return -EPROTO;
+    }
+
+  if ((packet[0] & 0x0f) != ESP_HOSTED_TRANSPORT_IF_SERIAL)
+    {
+      syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: interface=%u ignored\n",
+             (unsigned int)(packet[0] & 0x0f));
+      return OK;
+    }
+
+  ret = esp_hosted_transport_parse_serial_tlv(packet + payload_offset,
+                                               payload_length, &rpc,
+                                               &rpc_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  return esp_hosted_transport_handle_rpc(transport, rpc, rpc_length);
+}
+
+static int esp_hosted_transport_handle_packets(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *packets,
+  size_t packets_length)
+{
+  uint16_t payload_length;
+  size_t packet_length;
+  size_t offset = 0;
+  int ret;
+
+  while (offset < packets_length)
+    {
+      if (packets_length - offset < ESP_HOSTED_TRANSPORT_HEADER_BYTES)
+        {
+          return -EMSGSIZE;
+        }
+
+      payload_length = esp_hosted_transport_get_le16(packets + offset + 2);
+      packet_length = ESP_HOSTED_TRANSPORT_HEADER_BYTES + payload_length;
+      if (packet_length > packets_length - offset)
+        {
+          return -EMSGSIZE;
+        }
+
+      ret = esp_hosted_transport_handle_packet(transport, packets + offset,
+                                               packet_length);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      offset += packet_length;
+    }
+
+  return OK;
+}
+
+static int esp_hosted_transport_receive_one(
+  FAR struct esp_hosted_transport_s *transport, FAR bool *received,
+  FAR size_t *received_length)
+{
+  uint8_t registers[ESP_HOSTED_TRANSPORT_SLC_REGISTER_BYTES];
+  uint32_t interrupts;
+  uint32_t packet_count;
+  size_t packet_length;
+  int ret;
+
+  *received = false;
+  *received_length = 0;
+  ret = nxmutex_lock(&transport->bus_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_hosted_transport_read_registers(transport, registers);
+  if (ret < 0)
+    {
+      goto out;
+    }
+
+  interrupts = esp_hosted_transport_get_le32(registers);
+  if (interrupts == 0)
+    {
+      goto out;
+    }
+
+  ret = esp_hosted_transport_clear_interrupts(transport, interrupts);
+  if (ret < 0)
+    {
+      goto out;
+    }
+
+  if ((interrupts & ESP_HOSTED_TRANSPORT_SLC_NEW_PACKET) == 0)
+    {
+      goto out;
+    }
+
+  packet_count = esp_hosted_transport_get_le32(
+    registers + ESP_HOSTED_TRANSPORT_LEN_OFFSET) &
+    ESP_HOSTED_TRANSPORT_SLC_PACKET_MASK;
+  packet_length = (packet_count - transport->rx_packet_count) &
+                  ESP_HOSTED_TRANSPORT_SLC_PACKET_MASK;
+  if (packet_length == 0 ||
+      packet_length > ESP_HOSTED_TRANSPORT_RX_PACKET_MAX)
+    {
+      ret = -EMSGSIZE;
+      goto out;
+    }
+
+  ret = esp_hosted_transport_read_fifo(transport, transport->rx_packet,
+                                       packet_length);
+  if (ret == OK)
+    {
+      transport->rx_packet_count = packet_count;
+      *received = true;
+      *received_length = packet_length;
+    }
+
+out:
+  nxmutex_unlock(&transport->bus_lock);
+  return ret;
+}
+
+static void esp_hosted_transport_rx_worker(FAR void *arg)
+{
+  FAR struct esp_hosted_transport_s *transport = arg;
+  bool received;
+  size_t received_length;
+  unsigned int packet;
+  int ret;
+
+  for (packet = 0; transport->rx_active &&
+       packet < ESP_HOSTED_TRANSPORT_RX_PACKETS_PER_WORK; packet++)
+    {
+      ret = esp_hosted_transport_receive_one(transport, &received,
+                                              &received_length);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: ESP-Hosted C6 RX: receive result=%d\n",
+                 ret);
+          transport->rx_active = false;
+          break;
+        }
+
+      if (!received)
+        {
+          break;
+        }
+
+      ret = esp_hosted_transport_handle_packets(transport,
+                                                transport->rx_packet,
+                                                received_length);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: ESP-Hosted C6 RX: packet result=%d\n",
+                 ret);
+        }
+    }
+
+  if (transport->rx_active)
+    {
+      ret = work_queue(LPWORK, &transport->rx_work,
+                       esp_hosted_transport_rx_worker, transport,
+                       MSEC2TICK(ESP_HOSTED_TRANSPORT_RX_WORK_DELAY_MS));
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: ESP-Hosted C6 RX: schedule result=%d\n",
+                 ret);
+          transport->rx_active = false;
+        }
+    }
+}
+
+static size_t esp_hosted_transport_put_varint(FAR uint8_t *data,
+                                              uint32_t value)
+{
+  size_t length = 0;
+
+  do
+    {
+      data[length] = value & 0x7f;
+      value >>= 7;
+      if (value != 0)
+        {
+          data[length] |= 0x80;
+        }
+
+      length++;
+    }
+  while (value != 0);
+
+  return length;
+}
+
+static int esp_hosted_transport_send_get_mode(
+  FAR struct esp_hosted_transport_s *transport, uint32_t uid)
+{
+  static const uint8_t endpoint[] = "RPCRsp";
+  uint8_t packet[64];
+  FAR uint8_t *payload;
+  FAR uint8_t *rpc;
+  size_t rpc_length;
+  size_t payload_length;
+  int ret;
+
+  memset(packet, 0, sizeof(packet));
+  packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
+  esp_hosted_transport_put_le16(packet + 4,
+                                ESP_HOSTED_TRANSPORT_HEADER_BYTES);
+  esp_hosted_transport_put_le16(packet + 8, transport->tx_sequence++);
+
+  payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
+  esp_hosted_transport_put_le16(
+    payload + 1, ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES);
+  memcpy(payload + 3, endpoint, sizeof(endpoint) - 1);
+  payload += 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_DATA;
+  rpc = payload + 3;
+
+  rpc[0] = 0x08;
+  rpc[1] = ESP_HOSTED_TRANSPORT_RPC_TYPE_REQ;
+  rpc[2] = 0x10;
+  rpc[3] = 0x83;
+  rpc[4] = 0x02;
+  rpc[5] = 0x18;
+  rpc_length = 6 + esp_hosted_transport_put_varint(rpc + 6, uid);
+  rpc[rpc_length++] = 0x9a;
+  rpc[rpc_length++] = 0x10;
+  rpc[rpc_length++] = 0x00;
+
+  esp_hosted_transport_put_le16(payload + 1, rpc_length);
+  payload_length = 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES + 3 +
+                   rpc_length;
+  esp_hosted_transport_put_le16(packet + 2, payload_length);
+
+  if (transport->checksum_enabled)
+    {
+      esp_hosted_transport_put_le16(packet + 6, 0);
+      esp_hosted_transport_put_le16(
+        packet + 6, esp_hosted_transport_checksum(
+                      packet, ESP_HOSTED_TRANSPORT_HEADER_BYTES +
+                      payload_length));
+    }
+
+  payload_length += ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  ret = esp_hosted_transport_send_packet(transport, packet, payload_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: GetWifiMode sent uid=%" PRIu32
+         " bytes=%u\n", uid, (unsigned int)payload_length);
+  return OK;
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -643,7 +1269,32 @@ int esp_hosted_transport_initialize(
       goto deinitialize;
     }
 
+  memset(&g_transport, 0, sizeof(g_transport));
   g_transport.sdio = sdio;
+  ret = nxmutex_init(&g_transport.bus_lock);
+  if (ret < 0)
+    {
+      goto deinitialize;
+    }
+
+  ret = nxmutex_init(&g_transport.rpc_lock);
+  if (ret < 0)
+    {
+      goto destroy_bus_lock;
+    }
+
+  ret = nxsem_init(&g_transport.rpc_sem, 0, 0);
+  if (ret < 0)
+    {
+      goto destroy_rpc_lock;
+    }
+
+  ret = nxsem_set_protocol(&g_transport.rpc_sem, SEM_PRIO_NONE);
+  if (ret < 0)
+    {
+      goto destroy_rpc_sem;
+    }
+
   g_transport.initialized = true;
   *transport = &g_transport;
   syslog(LOG_INFO,
@@ -657,6 +1308,12 @@ int esp_hosted_transport_initialize(
          rca_argument >> 16, (unsigned int)cccr_revision);
   return OK;
 
+destroy_rpc_sem:
+  nxsem_destroy(&g_transport.rpc_sem);
+destroy_rpc_lock:
+  nxmutex_destroy(&g_transport.rpc_lock);
+destroy_bus_lock:
+  nxmutex_destroy(&g_transport.bus_lock);
 deinitialize:
   esp_hosted_sdio_deinitialize(sdio);
 fail:
@@ -793,9 +1450,14 @@ int esp_hosted_transport_deinitialize(
       return -EINVAL;
     }
 
+  transport->rx_active = false;
+  work_cancel_sync(LPWORK, &transport->rx_work);
   ret = esp_hosted_sdio_deinitialize(transport->sdio);
   if (ret == OK)
     {
+      nxsem_destroy(&transport->rpc_sem);
+      nxmutex_destroy(&transport->rpc_lock);
+      nxmutex_destroy(&transport->bus_lock);
       memset(&g_transport, 0, sizeof(g_transport));
     }
 
@@ -924,6 +1586,8 @@ int esp_hosted_transport_start(FAR struct esp_hosted_transport_s *transport,
           return ret;
         }
 
+      transport->checksum_enabled =
+        (info->capabilities & ESP_HOSTED_TRANSPORT_CAP_CHECKSUM) != 0;
       ret = esp_hosted_transport_send_init_config(transport, info);
       if (ret < 0)
         {
@@ -947,6 +1611,105 @@ int esp_hosted_transport_start(FAR struct esp_hosted_transport_s *transport,
          PRIx32 " packet_count=0x%05" PRIx32 "\n", interrupts,
          packet_count);
   return -ETIMEDOUT;
+}
+
+int esp_hosted_transport_start_rx(
+  FAR struct esp_hosted_transport_s *transport)
+{
+  int ret;
+
+  if (transport != &g_transport || !transport->data_path_open)
+    {
+      return -EPIPE;
+    }
+
+  if (transport->rx_active)
+    {
+      return -EALREADY;
+    }
+
+  transport->rx_active = true;
+  ret = work_queue(LPWORK, &transport->rx_work,
+                   esp_hosted_transport_rx_worker, transport, 0);
+  if (ret < 0)
+    {
+      transport->rx_active = false;
+    }
+
+  return ret;
+}
+
+int esp_hosted_transport_get_wifi_mode(
+  FAR struct esp_hosted_transport_s *transport, FAR uint32_t *mode,
+  FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || mode == NULL || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_get_mode(transport, uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
+      *mode = transport->rpc_wifi_mode;
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
 }
 
 int esp_hosted_transport_read_reg(

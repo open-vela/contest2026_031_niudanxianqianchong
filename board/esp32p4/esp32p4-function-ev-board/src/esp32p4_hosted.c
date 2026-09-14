@@ -134,6 +134,8 @@ int board_esp_hosted_initialize(void)
   FAR const char *stage;
   uint8_t interrupt_raw[4];
   uint32_t interrupts;
+  uint32_t wifi_mode;
+  int wifi_result;
   int ret;
 
   if (g_esp_hosted_transport != NULL)
@@ -209,6 +211,31 @@ int board_esp_hosted_initialize(void)
       goto fail;
     }
 
+  stage = "transport_start_rx";
+  ret = esp_hosted_transport_start_rx(g_esp_hosted_transport);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  /* Req_GetWifiMode only queries the C6 state.  Keep this as the acceptance
+   * gate for the persistent SDIO receive path before adding Wi-Fi lifecycle
+   * RPCs or registering a NuttX network interface.
+   */
+
+  stage = "rpc_get_wifi_mode";
+  ret = esp_hosted_transport_get_wifi_mode(g_esp_hosted_transport,
+                                           &wifi_mode, &wifi_result);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: wifi_mode=%" PRIu32
+         " remote_result=%d\n", wifi_mode, wifi_result);
   return OK;
 
 fail:

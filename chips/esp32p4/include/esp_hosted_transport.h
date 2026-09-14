@@ -89,6 +89,37 @@ int esp_hosted_transport_start(FAR struct esp_hosted_transport_s *transport,
                                FAR struct esp_hosted_init_info_s *info);
 
 /****************************************************************************
+ * Name: esp_hosted_transport_start_rx
+ *
+ * Description:
+ *   Start the persistent Function-1 receive path.  The initial implementation
+ *   polls the C6 status registers from LPWORK, keeps FIFO and command traffic
+ *   out of interrupt context, and dispatches ESP-Hosted serial control
+ *   responses.  The caller must have completed esp_hosted_transport_start().
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_start_rx(
+  FAR struct esp_hosted_transport_s *transport);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_get_wifi_mode
+ *
+ * Description:
+ *   Send the ESP-Hosted Req_GetWifiMode RPC and wait for its matching
+ *   Resp_GetWifiMode response.  Return transport or protocol failures through
+ *   the function result and return the C6 service result separately through
+ *   remote_result.  This is a read-only control-plane request and is used to
+ *   validate the SDIO receive path before Wi-Fi state changes or a network
+ *   device are introduced.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_get_wifi_mode(
+  FAR struct esp_hosted_transport_s *transport, FAR uint32_t *mode,
+  FAR int *remote_result);
+
+/****************************************************************************
  * Name: esp_hosted_transport_diagnose
  *
  * Description:
