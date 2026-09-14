@@ -91,7 +91,12 @@
 #define ESP_HOSTED_TRANSPORT_RPC_TYPE_EVENT       3
 #define ESP_HOSTED_TRANSPORT_RPC_REQ_GET_MODE   259
 #define ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE  515
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_INIT  278
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT 534
 #define ESP_HOSTED_TRANSPORT_RPC_EVENT_ESPINIT  769
+
+#define ESP_HOSTED_TRANSPORT_RPC_PACKET_MAX      128
+#define ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX      96
 
 #define ESP_HOSTED_TRANSPORT_TAG_CAPABILITY    0x11
 #define ESP_HOSTED_TRANSPORT_TAG_CHIP_ID       0x12
@@ -137,6 +142,12 @@
  * Private Types
  ****************************************************************************/
 
+struct esp_hosted_wifi_config_field_s
+{
+  uint8_t field;
+  uint64_t value;
+};
+
 struct esp_hosted_transport_s
 {
   FAR struct esp_hosted_sdio_s *sdio;
@@ -154,6 +165,7 @@ struct esp_hosted_transport_s
   uint16_t tx_buffer_count;
   uint16_t tx_sequence;
   uint32_t rpc_uid;
+  uint32_t rpc_response_id;
   uint32_t rpc_wifi_mode;
   int rpc_result;
   uint8_t rx_packet[ESP_HOSTED_TRANSPORT_RX_PACKET_MAX];
@@ -767,7 +779,8 @@ static int esp_hosted_transport_handle_get_mode_response(
       return ret;
     }
 
-  if (transport->rpc_pending && transport->rpc_uid == uid)
+  if (transport->rpc_pending && transport->rpc_uid == uid &&
+      transport->rpc_response_id == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE)
     {
       transport->rpc_wifi_mode = mode;
       transport->rpc_result = result;
@@ -775,6 +788,71 @@ static int esp_hosted_transport_handle_get_mode_response(
       syslog(LOG_INFO,
              "INFO: ESP-Hosted C6 RPC: GetWifiMode response uid=%" PRIu32
              " mode=%" PRIu32 " result=%d\n", uid, mode, result);
+      nxsem_post(&transport->rpc_sem);
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return OK;
+}
+
+static int esp_hosted_transport_handle_wifi_init_response(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *payload,
+  size_t payload_length, uint32_t uid)
+{
+  uint64_t key;
+  uint64_t value;
+  size_t offset = 0;
+  int result = OK;
+  int ret;
+
+  while (offset < payload_length)
+    {
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key & 7) != 0)
+        {
+          ret = esp_hosted_transport_skip_field(payload, payload_length,
+                                                &offset, key & 7);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          continue;
+        }
+
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 1)
+        {
+          result = (int32_t)value;
+        }
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending && transport->rpc_uid == uid &&
+      transport->rpc_response_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT)
+    {
+      transport->rpc_result = result;
+      transport->rpc_pending = false;
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: WifiInit response uid=%" PRIu32
+             " result=%d\n", uid, result);
       nxsem_post(&transport->rpc_sem);
     }
 
@@ -790,6 +868,7 @@ static int esp_hosted_transport_handle_rpc(
   uint64_t key;
   uint64_t value;
   uint64_t payload_length = 0;
+  uint32_t response_id = 0;
   size_t offset = 0;
   uint32_t message_type = 0;
   uint32_t message_id = 0;
@@ -804,7 +883,8 @@ static int esp_hosted_transport_handle_rpc(
           return ret;
         }
 
-      if ((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE &&
+      if (((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT) &&
           (key & 7) == 2)
         {
           ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
@@ -815,6 +895,7 @@ static int esp_hosted_transport_handle_rpc(
             }
 
           response = rpc + offset;
+          response_id = key >> 3;
           offset += payload_length;
           continue;
         }
@@ -873,8 +954,7 @@ static int esp_hosted_transport_handle_rpc(
     }
 
   if (message_type != ESP_HOSTED_TRANSPORT_RPC_TYPE_RESP ||
-      message_id != ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE ||
-      response == NULL)
+      message_id != response_id || response == NULL)
     {
       syslog(LOG_INFO,
              "INFO: ESP-Hosted C6 RX: control type=%" PRIu32
@@ -882,8 +962,21 @@ static int esp_hosted_transport_handle_rpc(
       return OK;
     }
 
-  return esp_hosted_transport_handle_get_mode_response(transport, response,
-                                                        payload_length, uid);
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE)
+    {
+      return esp_hosted_transport_handle_get_mode_response(
+        transport, response, payload_length, uid);
+    }
+
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT)
+    {
+      return esp_hosted_transport_handle_wifi_init_response(
+        transport, response, payload_length, uid);
+    }
+
+  syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: response=%" PRIu32
+         " ignored\n", message_id);
+  return OK;
 }
 
 static int esp_hosted_transport_handle_packet(
@@ -1101,6 +1194,55 @@ static size_t esp_hosted_transport_put_varint(FAR uint8_t *data,
   return length;
 }
 
+static int esp_hosted_transport_append_varint(FAR uint8_t *data,
+                                              size_t capacity,
+                                              FAR size_t *offset,
+                                              uint64_t value)
+{
+  do
+    {
+      if (*offset >= capacity)
+        {
+          return -EMSGSIZE;
+        }
+
+      data[*offset] = value & 0x7f;
+      value >>= 7;
+      if (value != 0)
+        {
+          data[*offset] |= 0x80;
+        }
+
+      (*offset)++;
+    }
+  while (value != 0);
+
+  return OK;
+}
+
+static int esp_hosted_transport_append_field(FAR uint8_t *data,
+                                             size_t capacity,
+                                             FAR size_t *offset,
+                                             uint32_t field,
+                                             uint64_t value)
+{
+  int ret;
+
+  if (value == 0)
+    {
+      return OK;
+    }
+
+  ret = esp_hosted_transport_append_varint(data, capacity, offset,
+                                           (uint64_t)field << 3);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  return esp_hosted_transport_append_varint(data, capacity, offset, value);
+}
+
 static int esp_hosted_transport_send_get_mode(
   FAR struct esp_hosted_transport_s *transport, uint32_t uid)
 {
@@ -1162,6 +1304,163 @@ static int esp_hosted_transport_send_get_mode(
   syslog(LOG_INFO,
          "INFO: ESP-Hosted C6 RPC: GetWifiMode sent uid=%" PRIu32
          " bytes=%u\n", uid, (unsigned int)payload_length);
+  return OK;
+}
+
+static int esp_hosted_transport_send_wifi_init(
+  FAR struct esp_hosted_transport_s *transport,
+  FAR const struct esp_hosted_wifi_init_config_s *config, uint32_t uid)
+{
+  static const uint8_t endpoint[] = "RPCRsp";
+  uint8_t packet[ESP_HOSTED_TRANSPORT_RPC_PACKET_MAX];
+  uint8_t wifi_config[ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX];
+  uint8_t wifi_request[ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX + 8];
+  FAR uint8_t *payload;
+  FAR uint8_t *rpc;
+  size_t config_length = 0;
+  size_t request_length = 0;
+  size_t rpc_length = 0;
+  size_t packet_length;
+  int ret;
+
+  const struct esp_hosted_wifi_config_field_s fields[] =
+  {
+    { 1, (uint32_t)config->static_rx_buf_num },
+    { 2, (uint32_t)config->dynamic_rx_buf_num },
+    { 3, (uint32_t)config->tx_buf_type },
+    { 4, (uint32_t)config->static_tx_buf_num },
+    { 5, (uint32_t)config->dynamic_tx_buf_num },
+    { 6, (uint32_t)config->cache_tx_buf_num },
+    { 7, (uint32_t)config->csi_enable },
+    { 8, (uint32_t)config->ampdu_rx_enable },
+    { 9, (uint32_t)config->ampdu_tx_enable },
+    { 10, (uint32_t)config->amsdu_tx_enable },
+    { 11, (uint32_t)config->nvs_enable },
+    { 12, (uint32_t)config->nano_enable },
+    { 13, (uint32_t)config->rx_ba_win },
+    { 14, (uint32_t)config->wifi_task_core_id },
+    { 15, (uint32_t)config->beacon_max_len },
+    { 16, (uint32_t)config->mgmt_sbuf_num },
+    { 17, config->feature_caps },
+    { 18, config->sta_disconnected_pm },
+    { 19, (uint32_t)config->espnow_max_encrypt_num },
+    { 20, (uint32_t)config->magic },
+    { 21, (uint32_t)config->rx_mgmt_buf_type },
+    { 22, (uint32_t)config->rx_mgmt_buf_num },
+    { 23, (uint32_t)config->tx_hetb_queue_num },
+    { 24, (uint32_t)config->dump_hesigb_enable },
+  };
+  size_t index;
+
+  for (index = 0; index < sizeof(fields) / sizeof(fields[0]); index++)
+    {
+      ret = esp_hosted_transport_append_field(
+        wifi_config, sizeof(wifi_config), &config_length, fields[index].field,
+        fields[index].value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
+  /* Rpc.req_wifi_init is an RpcReqWifiInit message, whose cfg member is
+   * another length-delimited WifiInitConfig message.  GetWifiMode has an
+   * empty request body, so this wrapper was not needed by that first RPC.
+   */
+
+  ret = esp_hosted_transport_append_varint(
+    wifi_request, sizeof(wifi_request), &request_length, (1 << 3) | 2);
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        wifi_request, sizeof(wifi_request), &request_length, config_length);
+    }
+
+  if (ret < 0 || config_length > sizeof(wifi_request) - request_length)
+    {
+      return ret < 0 ? ret : -EMSGSIZE;
+    }
+
+  memcpy(wifi_request + request_length, wifi_config, config_length);
+  request_length += config_length;
+
+  memset(packet, 0, sizeof(packet));
+  packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
+  esp_hosted_transport_put_le16(packet + 4,
+                                ESP_HOSTED_TRANSPORT_HEADER_BYTES);
+  esp_hosted_transport_put_le16(packet + 8, transport->tx_sequence++);
+
+  payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
+  esp_hosted_transport_put_le16(
+    payload + 1, ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES);
+  memcpy(payload + 3, endpoint, sizeof(endpoint) - 1);
+  payload += 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_DATA;
+  rpc = payload + 3;
+
+  ret = esp_hosted_transport_append_field(
+    rpc, sizeof(packet) - (rpc - packet), &rpc_length, 1,
+    ESP_HOSTED_TRANSPORT_RPC_TYPE_REQ);
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 2,
+        ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_INIT);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 3, uid);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length,
+        ((uint64_t)ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_INIT << 3) | 2);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, request_length);
+    }
+
+  if (ret < 0 || request_length > sizeof(packet) - (rpc - packet) -
+                                    rpc_length)
+    {
+      return ret < 0 ? ret : -EMSGSIZE;
+    }
+
+  memcpy(rpc + rpc_length, wifi_request, request_length);
+  rpc_length += request_length;
+  esp_hosted_transport_put_le16(payload + 1, rpc_length);
+  packet_length = 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES + 3 +
+                  rpc_length;
+  esp_hosted_transport_put_le16(packet + 2, packet_length);
+
+  if (transport->checksum_enabled)
+    {
+      esp_hosted_transport_put_le16(packet + 6, 0);
+      esp_hosted_transport_put_le16(
+        packet + 6, esp_hosted_transport_checksum(
+                      packet, ESP_HOSTED_TRANSPORT_HEADER_BYTES +
+                      packet_length));
+    }
+
+  packet_length += ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  ret = esp_hosted_transport_send_packet(transport, packet, packet_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: WifiInit sent uid=%" PRIu32
+         " bytes=%u config_bytes=%u\n", uid, (unsigned int)packet_length,
+         (unsigned int)config_length);
   return OK;
 }
 
@@ -1675,6 +1974,7 @@ int esp_hosted_transport_get_wifi_mode(
     }
 
   transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE;
   transport->rpc_result = -ETIMEDOUT;
   transport->rpc_pending = true;
   ret = esp_hosted_transport_send_get_mode(transport, uid);
@@ -1705,6 +2005,80 @@ int esp_hosted_transport_get_wifi_mode(
   else if (ret == OK)
     {
       *mode = transport->rpc_wifi_mode;
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
+int esp_hosted_transport_wifi_initialize(
+  FAR struct esp_hosted_transport_s *transport,
+  FAR const struct esp_hosted_wifi_init_config_s *config,
+  FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || config == NULL || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_wifi_init(transport, config, uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
       *remote_result = transport->rpc_result;
     }
 

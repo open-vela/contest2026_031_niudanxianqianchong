@@ -16,6 +16,8 @@
 
 #include <nuttx/config.h>
 
+#include <stdint.h>
+
 #include <arch/chip/esp_hosted_sdio.h>
 
 /****************************************************************************
@@ -27,6 +29,39 @@ struct esp_hosted_transport_s;
 struct esp_hosted_transport_config_s
 {
   struct esp_hosted_sdio_config_s sdio;
+};
+
+/* The Wi-Fi configuration is owned by the board because it must match the
+ * ESP-Hosted coprocessor firmware.  The transport only serializes it into a
+ * Req_WifiInit RPC.
+ */
+
+struct esp_hosted_wifi_init_config_s
+{
+  int32_t static_rx_buf_num;
+  int32_t dynamic_rx_buf_num;
+  int32_t tx_buf_type;
+  int32_t static_tx_buf_num;
+  int32_t dynamic_tx_buf_num;
+  int32_t cache_tx_buf_num;
+  int32_t csi_enable;
+  int32_t ampdu_rx_enable;
+  int32_t ampdu_tx_enable;
+  int32_t amsdu_tx_enable;
+  int32_t nvs_enable;
+  int32_t nano_enable;
+  int32_t rx_ba_win;
+  int32_t wifi_task_core_id;
+  int32_t beacon_max_len;
+  int32_t mgmt_sbuf_num;
+  uint64_t feature_caps;
+  uint8_t sta_disconnected_pm;
+  int32_t espnow_max_encrypt_num;
+  int32_t magic;
+  int32_t rx_mgmt_buf_type;
+  int32_t rx_mgmt_buf_num;
+  int32_t tx_hetb_queue_num;
+  int32_t dump_hesigb_enable;
 };
 
 /* Information advertised by the ESP-Hosted private initialization event. */
@@ -117,6 +152,22 @@ int esp_hosted_transport_start_rx(
 
 int esp_hosted_transport_get_wifi_mode(
   FAR struct esp_hosted_transport_s *transport, FAR uint32_t *mode,
+  FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_wifi_initialize
+ *
+ * Description:
+ *   Send Req_WifiInit with the board-selected ESP32-C6 Wi-Fi configuration
+ *   and wait for Resp_WifiInit.  The return value reports local transport or
+ *   protocol failures.  The C6 esp_wifi_init() result is returned through
+ *   remote_result.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_wifi_initialize(
+  FAR struct esp_hosted_transport_s *transport,
+  FAR const struct esp_hosted_wifi_init_config_s *config,
   FAR int *remote_result);
 
 /****************************************************************************

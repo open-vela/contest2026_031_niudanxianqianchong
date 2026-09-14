@@ -51,6 +51,40 @@
 
 static FAR struct esp_hosted_transport_s *g_esp_hosted_transport;
 
+/* These values match the ESP32-C6 defaults in ESP-Hosted 2.9.1.  This
+ * configuration is a property of the C6 firmware image on this board; it is
+ * intentionally supplied to the generic chip transport by the board.
+ */
+
+static const struct esp_hosted_wifi_init_config_s
+  g_esp_hosted_wifi_init_config =
+{
+  .static_rx_buf_num = 10,
+  .dynamic_rx_buf_num = 32,
+  .tx_buf_type = 1,
+  .static_tx_buf_num = 0,
+  .dynamic_tx_buf_num = 32,
+  .cache_tx_buf_num = 0,
+  .csi_enable = 0,
+  .ampdu_rx_enable = 1,
+  .ampdu_tx_enable = 1,
+  .amsdu_tx_enable = 0,
+  .nvs_enable = 1,
+  .nano_enable = 0,
+  .rx_ba_win = 6,
+  .wifi_task_core_id = 0,
+  .beacon_max_len = 752,
+  .mgmt_sbuf_num = 32,
+  .feature_caps = 0,
+  .sta_disconnected_pm = 0,
+  .espnow_max_encrypt_num = 0,
+  .magic = 0x1f2f3f4f,
+  .rx_mgmt_buf_type = 0,
+  .rx_mgmt_buf_num = 0,
+  .tx_hetb_queue_num = 0,
+  .dump_hesigb_enable = 0,
+};
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -134,7 +168,6 @@ int board_esp_hosted_initialize(void)
   FAR const char *stage;
   uint8_t interrupt_raw[4];
   uint32_t interrupts;
-  uint32_t wifi_mode;
   int wifi_result;
   int ret;
 
@@ -219,14 +252,14 @@ int board_esp_hosted_initialize(void)
       goto fail;
     }
 
-  /* Req_GetWifiMode only queries the C6 state.  Keep this as the acceptance
-   * gate for the persistent SDIO receive path before adding Wi-Fi lifecycle
-   * RPCs or registering a NuttX network interface.
+  /* WiFiInit is the first state-changing control RPC.  It is kept separate
+   * from selecting STA mode, starting Wi-Fi, and registering a network
+   * interface so its request/response can be accepted independently.
    */
 
-  stage = "rpc_get_wifi_mode";
-  ret = esp_hosted_transport_get_wifi_mode(g_esp_hosted_transport,
-                                           &wifi_mode, &wifi_result);
+  stage = "rpc_wifi_init";
+  ret = esp_hosted_transport_wifi_initialize(
+    g_esp_hosted_transport, &g_esp_hosted_wifi_init_config, &wifi_result);
   if (ret < 0)
     {
       board_esp_hosted_stop();
@@ -234,8 +267,15 @@ int board_esp_hosted_initialize(void)
     }
 
   syslog(LOG_INFO,
-         "INFO: ESP-Hosted C6 RPC: wifi_mode=%" PRIu32
-         " remote_result=%d\n", wifi_mode, wifi_result);
+         "INFO: ESP-Hosted C6 RPC: wifi_init remote_result=%d\n",
+         wifi_result);
+  if (wifi_result != OK)
+    {
+      ret = -EIO;
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
   return OK;
 
 fail:
