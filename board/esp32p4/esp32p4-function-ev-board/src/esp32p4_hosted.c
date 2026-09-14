@@ -41,6 +41,10 @@
 
 #define ESP_HOSTED_C6_BOOT_DELAY_MS       1000
 
+/* ESP-Hosted serializes ESP-IDF's WIFI_MODE_STA enum value. */
+
+#define ESP_HOSTED_C6_WIFI_MODE_STA          1
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -268,6 +272,30 @@ int board_esp_hosted_initialize(void)
 
   syslog(LOG_INFO,
          "INFO: ESP-Hosted C6 RPC: wifi_init remote_result=%d\n",
+         wifi_result);
+  if (wifi_result != OK)
+    {
+      ret = -EIO;
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  /* Select the C6 station role.  WiFiStart, Wi-Fi events and the NuttX
+   * network device remain separate stages so this RPC is independently
+   * observable on the serial log.
+   */
+
+  stage = "rpc_set_sta_mode";
+  ret = esp_hosted_transport_set_wifi_mode(
+    g_esp_hosted_transport, ESP_HOSTED_C6_WIFI_MODE_STA, &wifi_result);
+  if (ret < 0)
+    {
+      board_esp_hosted_stop();
+      goto fail;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: set_sta_mode remote_result=%d\n",
          wifi_result);
   if (wifi_result != OK)
     {

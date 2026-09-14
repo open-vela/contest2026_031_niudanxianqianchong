@@ -171,6 +171,21 @@ int esp_hosted_transport_wifi_initialize(
   FAR int *remote_result);
 
 /****************************************************************************
+ * Name: esp_hosted_transport_set_wifi_mode
+ *
+ * Description:
+ *   Send Req_SetWifiMode and wait for its matching response.  The caller
+ *   supplies an ESP-Hosted Wi-Fi mode value.  The return value reports local
+ *   transport or protocol failures; the C6 service result is returned
+ *   through remote_result.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_set_wifi_mode(
+  FAR struct esp_hosted_transport_s *transport, uint32_t mode,
+  FAR int *remote_result);
+
+/****************************************************************************
  * Name: esp_hosted_transport_diagnose
  *
  * Description:
