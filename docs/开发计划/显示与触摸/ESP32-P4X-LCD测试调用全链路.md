@@ -16,7 +16,7 @@ DW-GDMA 和 P4 DSI Bridge 的最小显示通路。它不启动 LVGL，也尚未�
 当前实板状态为：`dsi_probe pattern 10` 与 `dsi_probe video 10` 均已在
 同一块 P4X、EK79007 面板和 FPC 上显示色条。本文保留此前的诊断边界，便于
 后续 framebuffer/LVGL 回归时区分 Host 路径和视觉结果；黑屏根因及修复见
-[P4X DSI 黑屏 DBI 配置排障闭环](../开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md)。
+[P4X DSI 黑屏 DBI 配置排障闭环](../../开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md)。
 
 显示验收仍区分以下两个层次：
 

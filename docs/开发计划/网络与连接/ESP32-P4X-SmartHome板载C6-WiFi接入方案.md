@@ -2,7 +2,7 @@
 
 > 状态（2026-09-13）：基础 SDIO 枚举已有一次实板成功记录，重复启动待验证。
 > 当前未注册 `wlan0`，未实现 CMD53 数据收发与 ESP-Hosted 协议握手，W1 尚未完成。
-> 阶段记录见[板载 C6 SDIO 基础枚举](../开发日志/ESP32-P4X-C6-SDIO基础枚举阶段记录.md)。
+> 阶段记录见[板载 C6 SDIO 基础枚举](../../开发日志/ESP32-P4X-C6-SDIO基础枚举阶段记录.md)。
 >
 > 适用对象：ESP32-P4X-Function-EV-Board、板载 ESP32-C6-MINI-1、Smart Home。
 
@@ -116,6 +116,12 @@ P4 GPIO 编号。
 
 应用不得保存或打印明文密码。模型 Tool 不应读取、修改或回显 Wi-Fi 凭据。
 
+若后续接入 QuickApp，QuickApp 也不是 `wlan0` 的所有者：它不得直接调用 socket、
+ESP-Hosted、Wi-Fi 配网接口或读取 `/data/wifi.conf`。原生 `SmartHome Native Service`
+经标准网络栈访问网关、Home Assistant 或云端服务，再通过 `system.smarthome` Feature
+向页面发布脱敏的网络健康状态、设备状态和命令结果。C6 在此方案中仅提供网络链路，
+不承载快应用、cAGENT 或设备协议的 UI 语义。
+
 ## 5. 配置与凭据
 
 以下名称是本项目拟新增的配置方向，不是当前已经存在的 Kconfig 符号：
@@ -210,6 +216,8 @@ DHCP 超时必须产生不同的错误码或可区分日志。
 - UI 显示 Wi-Fi 已关联、IP 和 DNS 状态；
 - DNS 解析模型 endpoint 成功；
 - 一条脱敏模型 Tool 调用成功；
+- 若启用 QuickApp，只验证原生服务经 `wlan0` 获得真实设备/网络状态，再由
+  `system.smarthome` Feature 发布脱敏事件；不允许页面直接配置 C6 或发起设备协议请求；
 - 缺少 `/data/wifi.conf` 时仍可启动本地 UI，并明确显示网络未配置。
 
 ### W4：与摄像头和 Ethernet 共存

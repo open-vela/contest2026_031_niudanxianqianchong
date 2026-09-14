@@ -26,7 +26,7 @@
 | MCP / Node / App Bridge | 未上 P4X | 在本地 UI、网络和模型链路稳定后再启用。 |
 
 当前 DSI 已从“Host PASS、视觉待确认”提升为真机视觉 PASS。详细根因与复测证据见
-[P4X DSI 黑屏 DBI 配置排障闭环](../开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md)。
+[P4X DSI 黑屏 DBI 配置排障闭环](../../开发日志/编译/2026-08-24-ESP32-P4X-DSI黑屏DBI配置排障闭环.md)。
 
 ## 3. 总体策略
 
@@ -163,7 +163,7 @@ nsh> fb
 `1024x600`、`stride=2048`、`fblen=1228800`，映射地址为 `0x48000200`，并完成六次
 矩形绘制后输出 `FB test finished`。这证明 framebuffer 注册、应用映射和
 `FBIO_UPDATE` cache clean 已打通；详细串口证据见
-[framebuffer 真机验收记录](../开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md)。
+[framebuffer 真机验收记录](../../开发日志/编译/2026-08-24-ESP32-P4X-framebuffer真机验收.md)。
 
 **双缓冲增强（代码完成，真机待验收）**：P4X framebuffer 现分配两页连续 RGB565
 PSRAM，报告 `fblen=2457600`、`yres_virtual=1200` 并实现 `pandisplay()`。页面更新先
@@ -266,7 +266,7 @@ starting local dashboard without network, cAGENT, or touch
 该结果确认 P2 的 LVGL 初始化、1024×600 framebuffer 绑定和首帧刷新链路可用；连续
 10 分钟运行、`ps/free` 基线及重启回归仍作为保留回归项，不将本次首屏验收扩大解释为
 长期稳定性结论。详细记录见
-[P4X LVGL 静态首页真机验收](../开发日志/编译/2026-08-24-ESP32-P4X-LVGL静态首页真机验收.md)。
+[P4X LVGL 静态首页真机验收](../../开发日志/编译/2026-08-24-ESP32-P4X-LVGL静态首页真机验收.md)。
 
 **失败隔离**：
 
@@ -382,6 +382,35 @@ nsh> smart_home "打开客厅灯，亮度35%"
 **通过条件**：连续 20 次对话 / 工具调用后，UI 始终响应，无互斥锁 assert、任务泄漏、
 堆持续增长或 DSI underrun。
 
+### P5.5：QuickApp Feature 真实数据闭环（候选路线，不阻塞 LVGL 首版）
+
+**目的**：单独验证“QuickApp UI → Native Feature → 真实服务”的接入方式，不修改既有
+LVGL `smart_home` 固件的首版验收结论。
+
+**前置条件**：P3 本地设备状态、P4 网络或 C6 链路中至少一条真实数据源已通过；另建
+`configs/smart_home_quickapp/`，在 `SMART_HOME_DEMO_UI_BACKEND` 中选择
+`SMART_HOME_DEMO_UI_QUICKAPP`，并启用 `QUICKAPP` 与 `QUICKAPP_VAPP`。该配置不与
+LVGL 主应用并行争用 framebuffer；现有 `configs/smart_home/` 始终保留
+`SMART_HOME_DEMO_UI_LVGL=y` 作为对照与回退。
+
+**实施要点**：
+
+- 部署最小 rpk，在 `manifest.json` 声明 `system.smarthome`；验证启动、GT911、重启和
+  资源包异常时的降级提示；
+- 确认最终 `.config` 仅选择一个产品 UI 后端，且 QuickApp 模式不启动
+  `smart_home_lvgl` 的 `lv_init()` / UI 主循环；
+- 先实现 `getCapabilities()`、`getSnapshot()`、`subscribeState()` 与一项真实传感器或
+  设备状态，禁止使用 Mock 作为通过证据；
+- 验证一次 `controlDevice()`：QuickApp 命令 → Native Service → 真实设备或本地工具
+  → 状态回写；再验证一次 `askAgent()` 经 cAGENT 返回进度和最终状态，不允许 JS 直接
+  访问 `wlan0`、MQTT、C6 或设备驱动；
+- 测量空闲、连续状态事件、应用重启时的 RAM、PSRAM、CPU、触摸 P95 与 UI 帧率；耗时
+  操作由 worker 执行，Feature/JS 主循环只接收异步回调。
+
+**通过条件**：真实状态可在应用重启后重新收敛；命令无重复执行；cAGENT、网络或设备超时
+不冻结页面；系统仍有摄像头和 Agent 所需的资源余量。任一项不满足时停止快应用迁移，保持
+LVGL 路线，不以降低真实数据要求换取演示效果。
+
 ### P6：远程扩展能力分项测试
 
 远程能力必须逐项开启、逐项验收，不能在 P5 首次成功后同时打开。
@@ -418,6 +447,7 @@ flash size 必须复用当前 P4X 已验证固件的产物规则，不在本计�
 | framebuffer cache 不一致 | `/dev/fb0` 写色后不刷新或局部花屏 | 回到 P1，以 `FBIO_UPDATE` 和 cache clean 单独验证。 |
 | LVGL 资源过重 | 启动失败、PSRAM 紧张、字体加载失败 | 关闭 TinyTTF/运行时 PNG，保留内置字体与图标。 |
 | UI 与网络相互影响 | P4 控制台模型成功而 LVGL 对话失败 | 先运行 P5 的 worker/栈诊断，禁止同时调试 MCP。 |
+| Feature 阻塞 JS 事件循环 | QuickApp 连续事件时触摸迟滞、页面不刷新 | 网络、设备和 cAGENT 工作转入 worker，经异步回调回主循环；限流并合并状态事件。 |
 | TLS/熵源不可用 | `tls_probe` 失败 | 停留在 P4，先修复网络或 entropy，不改 UI。 |
 | 触摸影响显示 | 触摸后花屏或 DSI 停止 | 回到 P3，隔离 I2C/IRQ 与 display 任务。 |
 | 外部配置缺失 | `/data` 文件不存在导致桥接禁用 | 本地 UI 继续运行；只在相应 P6 阶段部署最小无密钥配置。 |
@@ -432,10 +462,12 @@ flash size 必须复用当前 P4X 已验证固件的产物规则，不在本计�
 | 触摸与本地控制 | 点击导航 / 控制卡片 | UI 和本地状态一致。 |
 | 控制台 AI | `smart_home "..."` | 模型回复与本地工具调用完成。 |
 | LVGL AI | 屏幕发送两类指令 | UI 保持响应，结果正确回填。 |
+| QuickApp Feature（候选） | rpk 获取真实状态、控制一次设备、调用一次 cAGENT | `system.smarthome` 异步闭环、状态重连和资源基线均通过；不直接访问网络或驱动。 |
 | MCP / Node / App | 分项操作 | 远程能力独立成功、独立失败可恢复。 |
 
 ## 9. 完成定义
 
 P4X Smart Home Demo 的“首版完成”定义为：P2、P3、P4、P5 全部通过，即真机 LCD 上可
 触摸操作本地设备面板，并可通过 LVGL 异步对话触发本地工具。MCP、Node 和 App Bridge
-属于后续扩展验收，不阻塞首版完成，但必须保持接口与配置兼容。
+以及 P5.5 QuickApp Feature 均属于后续扩展验收，不阻塞首版完成，但必须保持接口与配置
+兼容。
