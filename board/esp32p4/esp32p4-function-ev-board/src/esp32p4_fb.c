@@ -407,8 +407,8 @@ int board_mipi_dsi_fb_initialize(int display)
 
   syslog(LOG_INFO, "INFO: P4X MIPI-DSI framebuffer registered: "
          "/dev/fb%d %ux%u RGB565 buffers=%u base=%p bytes=%zu\n", display,
-         fb->videoinfo.xres, fb->videoinfo.yres, fb->planeinfo.fbmem,
-         fb->frame_buffer_count, fb->planeinfo.fblen);
+         fb->videoinfo.xres, fb->videoinfo.yres, fb->frame_buffer_count,
+         fb->planeinfo.fbmem, fb->planeinfo.fblen);
   return OK;
 
 errout:
