@@ -105,17 +105,39 @@ config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
 config ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
 	bool "Probe onboard ESP32-C6 through ESP-Hosted SDIO"
 	select ESPRESSIF_HOSTED_TRANSPORT
+	select ESPRESSIF_HOSTED_WLAN
 	default n
 	help
 		Reset the ESP32-C6 fitted to the ESP32-P4X Function EV Board, route
 		the ESP32-P4 SDMMC slot 1 pins during board bring-up.  The P4
 		ESP-Hosted transport then runs its 400 kHz, one-bit control-plane
 		probe, verifies C6 SDIO function 0 CCCR and exchanges the private
-		initialization events.  This does not register wlan0.
+		initialization events, starts the C6 station service and registers
+		its NuttX wlan0 data path.
 
 		The board requires the documented external pull-ups on CMD and DAT0
 		through DAT3.  The GPIO pull-ups configured by this option only keep
 		the lines in a defined state during reset; they do not replace those
 		external resistors.
+
+if ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
+
+config ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID
+	string "ESP-Hosted station SSID"
+	default ""
+	help
+		SSID used for the optional ESP32-C6 station connection request.  Keep
+		this empty to initialize wlan0 without associating an access point.
+		Do not save site-specific credentials in a tracked defconfig.
+
+config ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD
+	string "ESP-Hosted station password"
+	default ""
+	help
+		Password used with ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID.
+		An empty password is permitted for an open access point.  Set this in
+		the local build configuration; do not save it in a tracked defconfig.
+
+endif # ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
 
 endif # ARCH_BOARD_CUSTOM

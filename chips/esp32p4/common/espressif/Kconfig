@@ -2182,6 +2182,21 @@ config ESPRESSIF_HOSTED_TRANSPORT
 		then exchanges the private ESP-Hosted initialization events after the
 		board has configured pins and released reset.
 
+config ESPRESSIF_HOSTED_WLAN
+	bool
+	depends on ESPRESSIF_HOSTED_TRANSPORT
+	select NET
+	select NETDEVICES
+	select NET_ETHERNET
+	select DRIVERS_WIRELESS
+	select DRIVERS_IEEE80211
+	default n
+	---help---
+		Enable the ESP-Hosted station data adapter.  It registers the C6
+		station interface as a NuttX wlan netdev after board code has
+		completed WiFiInit, selected STA mode and received STA_START.
+		This does not enable the ESP32-P4 native Wi-Fi driver.
+
 config ESPRESSIF_HOSTED_SDIO
 	bool "ESP-Hosted SDIO host controller"
 	depends on ARCH_CHIP_ESP32P4

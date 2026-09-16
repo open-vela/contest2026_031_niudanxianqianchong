@@ -17,6 +17,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <syslog.h>
 
@@ -26,6 +27,7 @@
 #include <arch/board/board.h>
 #include <arch/chip/esp_hosted_sdio.h>
 #include <arch/chip/esp_hosted_transport.h>
+#include <arch/chip/esp_hosted_wlan.h>
 
 #include "espressif/esp_gpio.h"
 
@@ -41,9 +43,28 @@
 
 #define ESP_HOSTED_C6_BOOT_DELAY_MS       1000
 
+/* A CMD53 timeout marks the host driver faulted.  Reset the C6 and
+ * re-enumerate the host before retrying, after successful cleanup.
+ */
+
+#define ESP_HOSTED_C6_INIT_ATTEMPTS          2
+
 /* ESP-Hosted serializes ESP-IDF's WIFI_MODE_STA enum value. */
 
 #define ESP_HOSTED_C6_WIFI_MODE_STA          1
+
+/* Kconfig omits symbols whose string value is the empty default.  Keep the
+ * no-credentials bring-up path buildable while allowing a local configuration
+ * to provide either string.
+ */
+
+#ifndef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID
+#  define CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID ""
+#endif
+
+#ifndef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD
+#  define CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD ""
+#endif
 
 /****************************************************************************
  * Private Data
@@ -54,6 +75,7 @@
  */
 
 static FAR struct esp_hosted_transport_s *g_esp_hosted_transport;
+static bool g_esp_hosted_ready;
 
 /* These values match the ESP32-C6 defaults in ESP-Hosted 2.9.1.  This
  * configuration is a property of the C6 firmware image on this board; it is
@@ -150,15 +172,35 @@ static int board_esp_hosted_reset_c6(void)
   return OK;
 }
 
-static void board_esp_hosted_stop(void)
+static int board_esp_hosted_stop(void)
 {
+  int ret;
+
+  g_esp_hosted_ready = false;
   if (g_esp_hosted_transport != NULL)
     {
-      esp_hosted_transport_deinitialize(g_esp_hosted_transport);
+      ret = esp_hosted_wlan_deinitialize();
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: ESP-Hosted C6 WLAN cleanup failed: %d\n", ret);
+          return ret;
+        }
+
+      ret = esp_hosted_transport_deinitialize(g_esp_hosted_transport);
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: ESP-Hosted C6 transport cleanup failed: %d\n",
+                 ret);
+          return ret;
+        }
+
       g_esp_hosted_transport = NULL;
     }
 
   esp_gpiowrite(BOARD_ESP_HOSTED_C6_RESET_GPIO, false);
+  return OK;
 }
 
 /****************************************************************************
@@ -172,13 +214,21 @@ int board_esp_hosted_initialize(void)
   FAR const char *stage;
   uint8_t interrupt_raw[4];
   uint32_t interrupts;
+  unsigned int attempt;
+  int cleanup_result;
   int wifi_result;
   int ret;
 
   if (g_esp_hosted_transport != NULL)
     {
-      return OK;
+      return g_esp_hosted_ready ? OK : -EBUSY;
     }
+
+  attempt = 0;
+
+retry:
+  syslog(LOG_INFO, "INFO: ESP-Hosted C6 initialize: attempt=%u/%u\n",
+         attempt + 1, (unsigned int)ESP_HOSTED_C6_INIT_ATTEMPTS);
 
   stage = "route_sdio";
   ret = board_esp_hosted_route_sdio();
@@ -205,7 +255,6 @@ int board_esp_hosted_initialize(void)
   ret = esp_hosted_transport_initialize(&config, &g_esp_hosted_transport);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -213,7 +262,6 @@ int board_esp_hosted_initialize(void)
   ret = esp_hosted_transport_enable_function(g_esp_hosted_transport);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -228,7 +276,6 @@ int board_esp_hosted_initialize(void)
                                       false);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -244,7 +291,6 @@ int board_esp_hosted_initialize(void)
   ret = esp_hosted_transport_start(g_esp_hosted_transport, &info);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -252,7 +298,6 @@ int board_esp_hosted_initialize(void)
   ret = esp_hosted_transport_start_rx(g_esp_hosted_transport);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -266,7 +311,6 @@ int board_esp_hosted_initialize(void)
     g_esp_hosted_transport, &g_esp_hosted_wifi_init_config, &wifi_result);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -276,13 +320,11 @@ int board_esp_hosted_initialize(void)
   if (wifi_result != OK)
     {
       ret = -EIO;
-      board_esp_hosted_stop();
       goto fail;
     }
 
-  /* Select the C6 station role.  WiFiStart, Wi-Fi events and the NuttX
-   * network device remain separate stages so this RPC is independently
-   * observable on the serial log.
+  /* Select the C6 station role.  WiFiStart and its start event are accepted
+   * before the chip-layer adapter registers the NuttX wlan0 interface.
    */
 
   stage = "rpc_set_sta_mode";
@@ -290,7 +332,6 @@ int board_esp_hosted_initialize(void)
     g_esp_hosted_transport, ESP_HOSTED_C6_WIFI_MODE_STA, &wifi_result);
   if (ret < 0)
     {
-      board_esp_hosted_stop();
       goto fail;
     }
 
@@ -300,15 +341,140 @@ int board_esp_hosted_initialize(void)
   if (wifi_result != OK)
     {
       ret = -EIO;
-      board_esp_hosted_stop();
       goto fail;
     }
 
+  stage = "rpc_wifi_start";
+  ret = esp_hosted_transport_wifi_start(g_esp_hosted_transport,
+                                        &wifi_result);
+  if (ret < 0)
+    {
+      goto fail;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: wifi_start remote_result=%d\n",
+         wifi_result);
+  if (wifi_result != OK)
+    {
+      ret = -EIO;
+      goto fail;
+    }
+
+  stage = "event_sta_start";
+  ret = esp_hosted_transport_wait_sta_start(g_esp_hosted_transport);
+  if (ret < 0)
+    {
+      goto fail;
+    }
+
+  syslog(LOG_INFO, "INFO: ESP-Hosted C6 event: STA_START observed\n");
+
+  stage = "wlan_register";
+  ret = esp_hosted_wlan_initialize(g_esp_hosted_transport);
+  if (ret < 0)
+    {
+      goto fail;
+    }
+
+  /* Credentials are deliberately local Kconfig values rather than board
+   * defaults.  This lets the same image initialize wlan0 without exposing a
+   * network secret or attempting association when no site configuration is
+   * available.
+   */
+
+  if (CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID[0] != '\0')
+    {
+      /* The P4 owns credentials and supplies them on every C6 reset.
+       * Avoid persisting each bring-up configuration to the C6 NVS while
+       * the host is polling SDIO.  This stage also isolates storage errors
+       * from the following configuration RPC.
+       */
+
+      stage = "rpc_set_storage_ram";
+      ret = esp_hosted_transport_set_wifi_storage_ram(
+        g_esp_hosted_transport, &wifi_result);
+      if (ret < 0)
+        {
+          goto fail;
+        }
+
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: storage=RAM remote_result=%d\n",
+             wifi_result);
+      if (wifi_result != OK)
+        {
+          ret = -EIO;
+          goto fail;
+        }
+
+      stage = "rpc_set_sta_config";
+      ret = esp_hosted_transport_set_sta_config(
+        g_esp_hosted_transport,
+        CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID,
+        CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD,
+        &wifi_result);
+      if (ret < 0)
+        {
+          goto fail;
+        }
+
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: set_sta_config remote_result=%d\n",
+             wifi_result);
+      if (wifi_result != OK)
+        {
+          ret = -EIO;
+          goto fail;
+        }
+
+      stage = "rpc_wifi_connect";
+      ret = esp_hosted_transport_wifi_connect(g_esp_hosted_transport,
+                                              &wifi_result);
+      if (ret < 0)
+        {
+          goto fail;
+        }
+
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: wifi_connect remote_result=%d\n",
+             wifi_result);
+      if (wifi_result != OK)
+        {
+          ret = -EIO;
+          goto fail;
+        }
+    }
+  else
+    {
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6: STA credentials unset; "
+             "connect skipped\n");
+    }
+
+  g_esp_hosted_ready = true;
   return OK;
 
 fail:
-  syslog(LOG_ERR, "ERROR: ESP-Hosted C6 initialize: stage=%s result=%d\n",
-         stage, ret);
+  cleanup_result = board_esp_hosted_stop();
+  syslog(LOG_ERR,
+         "ERROR: ESP-Hosted C6 initialize: attempt=%u/%u stage=%s "
+         "result=%d\n", attempt + 1,
+         (unsigned int)ESP_HOSTED_C6_INIT_ATTEMPTS, stage, ret);
+  if (cleanup_result < 0)
+    {
+      return cleanup_result;
+    }
+
+  if (ret == -ETIMEDOUT && attempt + 1 < ESP_HOSTED_C6_INIT_ATTEMPTS)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: ESP-Hosted C6: initialization timeout; resetting and "
+             "retrying complete initialization\n");
+      attempt++;
+      goto retry;
+    }
+
   return ret;
 }
 

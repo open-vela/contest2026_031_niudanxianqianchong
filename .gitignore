@@ -30,3 +30,6 @@ packages/*/.built
 packages/*/.depend
 packages/*/Make.dep
 docs/开发计划/ESP32-P4竞赛参考差异对照.md
+
+# Local ESP-Hosted station credentials; never commit this configuration.
+board/esp32p4/esp32p4-function-ev-board/configs/smart_home_local/

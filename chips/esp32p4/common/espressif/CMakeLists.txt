@@ -178,6 +178,10 @@ if(CONFIG_ESPRESSIF_HOSTED_TRANSPORT)
   list(APPEND SRCS esp_hosted_transport.c)
 endif()
 
+if(CONFIG_ESPRESSIF_HOSTED_WLAN)
+  list(APPEND SRCS esp_hosted_wlan.c)
+endif()
+
 if(CONFIG_SYSTEM_NXDIAG_ESPRESSIF_CHIP_WO_TOOL)
   list(APPEND SRCS esp_nxdiag.c)
 endif()

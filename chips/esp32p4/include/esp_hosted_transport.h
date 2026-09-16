@@ -16,6 +16,7 @@
 
 #include <nuttx/config.h>
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <arch/chip/esp_hosted_sdio.h>
@@ -25,6 +26,10 @@
  ****************************************************************************/
 
 struct esp_hosted_transport_s;
+
+typedef int (*esp_hosted_transport_wlan_rx_t)(FAR void *arg,
+                                               FAR const uint8_t *data,
+                                               size_t length);
 
 struct esp_hosted_transport_config_s
 {
@@ -184,6 +189,114 @@ int esp_hosted_transport_wifi_initialize(
 int esp_hosted_transport_set_wifi_mode(
   FAR struct esp_hosted_transport_s *transport, uint32_t mode,
   FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_wifi_start
+ *
+ * Description:
+ *   Send Req_WifiStart and wait for its matching Resp_WifiStart.  The return
+ *   value reports local transport or protocol failures; the C6 esp_wifi_start
+ *   result is returned through remote_result.  A successful response does not
+ *   by itself prove that the selected Wi-Fi role started; callers must also
+ *   wait for the corresponding event.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_wifi_start(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_set_sta_config
+ *
+ * Description:
+ *   Send Req_WifiSetConfig for ESP_WIFI_STA with the supplied SSID and
+ *   password.  The byte strings are serialized without NUL terminators.  An
+ *   empty password is valid for an open network; an empty SSID is rejected.
+ *   The return value reports local transport or protocol failures and the C6
+ *   service result is returned through remote_result.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_set_sta_config(
+  FAR struct esp_hosted_transport_s *transport, FAR const char *ssid,
+  FAR const char *password, FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_wifi_connect
+ *
+ * Description:
+ *   Send Req_WifiConnect after Wi-Fi has started and a station configuration
+ *   has been accepted.  A successful response only accepts the association
+ *   attempt; connection and disconnection events are handled separately.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_wifi_connect(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_wait_sta_start
+ *
+ * Description:
+ *   Wait for Event_WifiEventNoArgs carrying WIFI_EVENT_STA_START after a
+ *   successful station-mode WiFiStart request.  The event latch is cleared
+ *   before each WiFiStart request, so a successful return proves the C6
+ *   emitted a start event for that request.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_wait_sta_start(
+  FAR struct esp_hosted_transport_s *transport);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_get_sta_mac
+ *
+ * Description:
+ *   Query the C6 station MAC address through Req_GetMACAddress.  A wireless
+ *   netdevice must use this address as its link-layer address before it sends
+ *   frames through the C6 station interface.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_get_sta_mac(
+  FAR struct esp_hosted_transport_s *transport, FAR uint8_t mac[6],
+  FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_register_wlan_rx
+ *
+ * Description:
+ *   Register or remove the consumer of received ESP-Hosted station frames.
+ *   The callback runs in the persistent LPWORK receive path and must copy or
+ *   queue the data before it returns.  A NULL callback removes the consumer
+ *   even after RX stops, provided the transport is still initialized.  The
+ *   caller must remove it before freeing the consumer or the transport.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_register_wlan_rx(
+  FAR struct esp_hosted_transport_s *transport,
+  esp_hosted_transport_wlan_rx_t callback, FAR void *arg);
+
+/* Select volatile C6 credential storage after WifiInit and before setting
+ * the station configuration.  The host must supply credentials each boot.
+ */
+
+int esp_hosted_transport_set_wifi_storage_ram(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result);
+
+/****************************************************************************
+ * Name: esp_hosted_transport_send_wlan
+ *
+ * Description:
+ *   Wrap an Ethernet frame in an ESP-Hosted station-interface packet and
+ *   synchronously write it through Function 1.
+ *
+ ****************************************************************************/
+
+int esp_hosted_transport_send_wlan(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *data,
+  size_t length);
 
 /****************************************************************************
  * Name: esp_hosted_transport_diagnose

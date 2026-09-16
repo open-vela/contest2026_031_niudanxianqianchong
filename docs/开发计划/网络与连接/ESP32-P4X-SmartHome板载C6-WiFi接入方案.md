@@ -1,8 +1,8 @@
 # ESP32-P4X Smart Home 板载 C6 Wi-Fi 接入方案
 
-> 状态（2026-09-13）：基础 SDIO 枚举已有一次实板成功记录，重复启动待验证。
-> 当前未注册 `wlan0`，未实现 CMD53 数据收发与 ESP-Hosted 协议握手，W1 尚未完成。
-> 阶段记录见[板载 C6 SDIO 基础枚举](../../开发日志/ESP32-P4X-C6-SDIO基础枚举阶段记录.md)。
+> 状态（2026-09-16）：已实板完成 SDIO 枚举、ESP-Hosted 控制面、`wlan0` 注册、
+> STA 配置和 AP 关联；尚未映射关联事件至 NuttX carrier，也未完成 DHCP、DNS、TLS。
+> 阶段记录见[ESP-Hosted 控制面与 WLAN 数据面开发记录](../../开发日志/ESP32-P4X-C6-ESP-Hosted控制面与WLAN数据面开发记录.md)。
 >
 > 适用对象：ESP32-P4X-Function-EV-Board、板载 ESP32-C6-MINI-1、Smart Home。
 
@@ -64,8 +64,8 @@ flowchart LR
 - ESP-Hosted 数据面：收发以太网帧并注册 NuttX `wlan0`；
 - WPA2-PSK 为首个实板验收目标，后续按 C6 固件能力扩展 WPA3；
 - DHCP、DNS、TLS 与 Smart Home 云端模型闭环；
-- 凭据从 `/data/wifi.conf` 或等价的 LittleFS 私有配置读取，不编入 defconfig、
-  源码或串口日志。
+- 长期凭据从 `/data/wifi.conf` 或等价的 LittleFS 私有配置读取，不编入 defconfig、
+  源码或串口日志；在该服务完成前，板级仅提供一次性实板验证用的本地构建配置。
 
 本期不包含：
 
@@ -124,12 +124,15 @@ ESP-Hosted、Wi-Fi 配网接口或读取 `/data/wifi.conf`。原生 `SmartHome N
 
 ## 5. 配置与凭据
 
-以下名称是本项目拟新增的配置方向，不是当前已经存在的 Kconfig 符号：
+以下为当前已实现的板级开关和本地实板验证配置：
 
 ```ini
 # 板级 C6 / ESP-Hosted 开关
 CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED=y
-CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA=y
+
+# 仅用于首个 WifiSetConfig/WifiConnect 闭环；不得写入受跟踪 defconfig
+CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID="<ssid>"
+CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD="<password>"
 
 # P4 私有 SDIO 传输
 CONFIG_ESPRESSIF_HOSTED_SDIO=y
@@ -142,6 +145,20 @@ CONFIG_NET_UDP=y
 CONFIG_NETUTILS_DHCPC=y
 CONFIG_NETDB_DNSCLIENT=y
 ```
+
+首个连接 RPC 使用受 Git 忽略的同级配置目录，避免 `build.sh` 的 `savedefconfig`
+回写真实凭据。用户在本地创建
+`board/esp32p4/esp32p4-function-ev-board/configs/smart_home_local/defconfig`：
+
+```ini
+#include "../smart_home/defconfig"
+CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID="<ssid>"
+CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_PASSWORD="<password>"
+```
+
+该目录被 `.gitignore` 排除；使用 `smart_home_local` 构建时，`build.sh` 会检测到
+`#include` 并跳过 `savedefconfig` 回写。它只用于验证 C6 接收配置和发起关联。生产凭据
+仍应在存储挂载后由专用原生服务从私有文件读取，不能由 UI、模型 Tool 或串口日志访问。
 
 首期不要求 `wapi` 命令。待 `wlan0` 的 Wireless Extensions ioctl 映射经过实板验证后，
 再按需开启：

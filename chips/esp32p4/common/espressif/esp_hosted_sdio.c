@@ -270,6 +270,32 @@ static void esp_hosted_sdio_command_error(
          "ERROR: ESP-Hosted SDIO: cmd=%u arg=0x%08" PRIx32
          " reason=%s elapsed_us=%" PRIu32 " raw=0x%08" PRIx32 "\n",
          (unsigned int)command, argument, reason, elapsed, raw);
+
+  if (command == 53)
+    {
+      uint32_t function = (argument >> 28) & 0x7;
+      uint32_t address = (argument >> 9) & 0x1ffff;
+      uint32_t count = argument & 0x1ff;
+
+      /* CMD53 count zero denotes 512 bytes in byte mode. */
+
+      if (count == 0 && (argument & (UINT32_C(1) << 27)) == 0)
+        {
+          count = 512;
+        }
+
+      syslog(LOG_ERR,
+             "ERROR: ESP-Hosted SDIO CMD53: %s fn=%" PRIu32
+             " addr=0x%05" PRIx32 " mode=%s count=%" PRIu32
+             " rto=%u dto=%u hto=%u\n",
+             (argument & (UINT32_C(1) << 31)) != 0 ? "write" : "read",
+             function, address,
+             (argument & (UINT32_C(1) << 27)) != 0 ? "block" : "byte",
+             count, (unsigned int)((raw & SDMMC_LL_EVENT_RTO) != 0),
+             (unsigned int)((raw & SDMMC_LL_EVENT_DTO) != 0),
+             (unsigned int)((raw & SDMMC_LL_EVENT_HTO) != 0));
+    }
+
   syslog(LOG_ERR,
          "ERROR: ESP-Hosted SDIO snapshot: cmd=0x%08" PRIx32
          " status=0x%08" PRIx32 " tmout=0x%08" PRIx32

@@ -27,6 +27,7 @@
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/signal.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/wqueue.h>
 
 #include <arch/chip/esp_hosted_transport.h>
@@ -77,6 +78,7 @@
 #define ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS      1000
 
 #define ESP_HOSTED_TRANSPORT_IF_PRIVATE           5
+#define ESP_HOSTED_TRANSPORT_IF_STA               1
 #define ESP_HOSTED_TRANSPORT_IF_SERIAL            3
 #define ESP_HOSTED_TRANSPORT_PACKET_EVENT      0x33
 #define ESP_HOSTED_TRANSPORT_EVENT_INIT        0x22
@@ -91,14 +93,29 @@
 #define ESP_HOSTED_TRANSPORT_RPC_TYPE_EVENT       3
 #define ESP_HOSTED_TRANSPORT_RPC_REQ_GET_MODE   259
 #define ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE  515
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_GET_MAC    257
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MAC   513
 #define ESP_HOSTED_TRANSPORT_RPC_REQ_SET_MODE   260
 #define ESP_HOSTED_TRANSPORT_RPC_RESP_SET_MODE  516
 #define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_INIT  278
 #define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT 534
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_START 280
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_START 536
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_CONNECT 282
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_CONNECT 538
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_SET_CONFIG 284
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_CONFIG 540
+#define ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_SET_STORAGE 313
+#define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE 569
 #define ESP_HOSTED_TRANSPORT_RPC_EVENT_ESPINIT  769
+#define ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS 773
 
-#define ESP_HOSTED_TRANSPORT_RPC_PACKET_MAX      128
-#define ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX      96
+#define ESP_HOSTED_TRANSPORT_WIFI_EVENT_STA_START 2
+
+#define ESP_HOSTED_TRANSPORT_RPC_PACKET_MAX      256
+#define ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX     104
+#define ESP_HOSTED_TRANSPORT_STA_SSID_MAX          32
+#define ESP_HOSTED_TRANSPORT_STA_PASSWORD_MAX      64
 
 #define ESP_HOSTED_TRANSPORT_TAG_CAPABILITY    0x11
 #define ESP_HOSTED_TRANSPORT_TAG_CHIP_ID       0x12
@@ -156,21 +173,28 @@ struct esp_hosted_transport_s
   struct work_s rx_work;
   mutex_t bus_lock;
   mutex_t rpc_lock;
+  spinlock_t tx_lock;
   sem_t rpc_sem;
+  sem_t sta_start_sem;
   bool initialized;
   bool function_ready;
   bool data_path_open;
   bool rx_active;
   bool checksum_enabled;
   bool rpc_pending;
+  bool sta_started;
   uint32_t rx_packet_count;
   uint16_t tx_buffer_count;
   uint16_t tx_sequence;
   uint32_t rpc_uid;
   uint32_t rpc_response_id;
   uint32_t rpc_wifi_mode;
+  uint8_t rpc_mac[6];
   int rpc_result;
+  esp_hosted_transport_wlan_rx_t wlan_rx;
+  FAR void *wlan_rx_arg;
   uint8_t rx_packet[ESP_HOSTED_TRANSPORT_RX_PACKET_MAX];
+  uint8_t tx_packet[ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES];
 };
 
 /****************************************************************************
@@ -314,6 +338,8 @@ static int esp_hosted_transport_read_registers(
     sizeof(uint32_t), false);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "ERROR: ESP-Hosted RX: read INT_RAW failed: %d\n",
+             ret);
       return ret;
     }
 
@@ -322,12 +348,21 @@ static int esp_hosted_transport_read_registers(
     sizeof(uint32_t), false);
   if (ret < 0)
     {
+      syslog(LOG_ERR, "ERROR: ESP-Hosted RX: read INT_ST failed: %d\n",
+             ret);
       return ret;
     }
 
-  return esp_hosted_transport_transfer(
+  ret = esp_hosted_transport_transfer(
     transport, false, ESP_HOSTED_TRANSPORT_SLC_PACKET_LEN, registers +
     ESP_HOSTED_TRANSPORT_LEN_OFFSET, sizeof(uint32_t), false);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: ESP-Hosted RX: read PACKET_LEN failed: %d\n", ret);
+    }
+
+  return ret;
 }
 
 static int esp_hosted_transport_read_fifo(
@@ -353,6 +388,18 @@ static uint16_t esp_hosted_transport_checksum(FAR const uint8_t *packet,
     }
 
   return checksum;
+}
+
+static uint16_t esp_hosted_transport_next_tx_sequence(
+  FAR struct esp_hosted_transport_s *transport)
+{
+  irqstate_t flags;
+  uint16_t sequence;
+
+  flags = spin_lock_irqsave(&transport->tx_lock);
+  sequence = transport->tx_sequence++;
+  spin_unlock_irqrestore(&transport->tx_lock, flags);
+  return sequence;
 }
 
 static int esp_hosted_transport_wait_tx_buffers(
@@ -398,7 +445,7 @@ static int esp_hosted_transport_wait_tx_buffers(
   return -EAGAIN;
 }
 
-static int esp_hosted_transport_send_packet(
+static int esp_hosted_transport_send_packet_locked(
   FAR struct esp_hosted_transport_s *transport, FAR uint8_t *packet,
   size_t packet_length)
 {
@@ -409,12 +456,6 @@ static int esp_hosted_transport_send_packet(
       packet_length > ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES)
     {
       return -EMSGSIZE;
-    }
-
-  ret = nxmutex_lock(&transport->bus_lock);
-  if (ret < 0)
-    {
-      return ret;
     }
 
   buffers = (packet_length + ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES - 1) /
@@ -433,6 +474,23 @@ static int esp_hosted_transport_send_packet(
         }
     }
 
+  return ret;
+}
+
+static int esp_hosted_transport_send_packet(
+  FAR struct esp_hosted_transport_s *transport, FAR uint8_t *packet,
+  size_t packet_length)
+{
+  int ret;
+
+  ret = nxmutex_lock(&transport->bus_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_hosted_transport_send_packet_locked(transport, packet,
+                                                 packet_length);
   nxmutex_unlock(&transport->bus_lock);
   return ret;
 }
@@ -862,13 +920,174 @@ static int esp_hosted_transport_handle_result_response(
   return OK;
 }
 
+static int esp_hosted_transport_handle_get_mac_response(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *payload,
+  size_t payload_length, uint32_t uid)
+{
+  uint64_t key;
+  uint64_t value;
+  uint64_t length;
+  uint8_t mac[6];
+  size_t offset = 0;
+  int result = OK;
+  int ret;
+
+  memset(mac, 0, sizeof(mac));
+
+  while (offset < payload_length)
+    {
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 1 && (key & 7) == 2)
+        {
+          ret = esp_hosted_transport_get_varint(payload, payload_length,
+                                                &offset, &length);
+          if (ret < 0 || length != sizeof(mac) ||
+              length > payload_length - offset)
+            {
+              return -EPROTO;
+            }
+
+          memcpy(mac, payload + offset, sizeof(mac));
+          offset += length;
+          continue;
+        }
+
+      if ((key & 7) != 0)
+        {
+          ret = esp_hosted_transport_skip_field(payload, payload_length,
+                                                &offset, key & 7);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          continue;
+        }
+
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 2)
+        {
+          result = (int32_t)value;
+        }
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending && transport->rpc_uid == uid &&
+      transport->rpc_response_id == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MAC)
+    {
+      memcpy(transport->rpc_mac, mac, sizeof(mac));
+      transport->rpc_result = result;
+      transport->rpc_pending = false;
+      syslog(LOG_INFO,
+             "INFO: ESP-Hosted C6 RPC: GetMACAddress response uid=%" PRIu32
+             " result=%d mac=%02x:%02x:%02x:%02x:%02x:%02x\n", uid,
+             result, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+      nxsem_post(&transport->rpc_sem);
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return OK;
+}
+
+static int esp_hosted_transport_handle_wifi_event_no_args(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *payload,
+  size_t payload_length)
+{
+  uint64_t key;
+  uint64_t value;
+  size_t offset = 0;
+  int event_id = -1;
+  int result = OK;
+  int ret;
+
+  while (offset < payload_length)
+    {
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key & 7) != 0)
+        {
+          ret = esp_hosted_transport_skip_field(payload, payload_length,
+                                                &offset, key & 7);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          continue;
+        }
+
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &value);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 1)
+        {
+          result = (int32_t)value;
+        }
+      else if ((key >> 3) == 2)
+        {
+          event_id = (int32_t)value;
+        }
+    }
+
+  syslog(LOG_INFO, "INFO: ESP-Hosted C6 event: wifi_event=%d result=%d\n",
+         event_id, result);
+
+  if (event_id != ESP_HOSTED_TRANSPORT_WIFI_EVENT_STA_START)
+    {
+      return OK;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (!transport->sta_started)
+    {
+      transport->sta_started = true;
+      nxsem_post(&transport->sta_start_sem);
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return OK;
+}
+
 static int esp_hosted_transport_handle_rpc(
   FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *rpc,
   size_t rpc_length)
 {
+  FAR const uint8_t *event = NULL;
   FAR const uint8_t *response = NULL;
   uint64_t key;
   uint64_t value;
+  uint64_t event_length = 0;
   uint64_t payload_length = 0;
   uint32_t response_id = 0;
   size_t offset = 0;
@@ -885,9 +1104,14 @@ static int esp_hosted_transport_handle_rpc(
           return ret;
         }
 
-      if (((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE ||
+      if (((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MAC ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MODE ||
            (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_SET_MODE ||
-           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT) &&
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_START ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_CONNECT ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_CONFIG) &&
           (key & 7) == 2)
         {
           ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
@@ -900,6 +1124,21 @@ static int esp_hosted_transport_handle_rpc(
           response = rpc + offset;
           response_id = key >> 3;
           offset += payload_length;
+          continue;
+        }
+
+      if ((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS &&
+          (key & 7) == 2)
+        {
+          ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
+                                                &event_length);
+          if (ret < 0 || event_length > rpc_length - offset)
+            {
+              return -EMSGSIZE;
+            }
+
+          event = rpc + offset;
+          offset += event_length;
           continue;
         }
 
@@ -947,6 +1186,12 @@ static int esp_hosted_transport_handle_rpc(
         {
           syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: ESPInit event\n");
         }
+      else if (message_id == ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS &&
+               event != NULL)
+        {
+          return esp_hosted_transport_handle_wifi_event_no_args(
+            transport, event, event_length);
+        }
       else
         {
           syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: event=%" PRIu32 "\n",
@@ -971,6 +1216,12 @@ static int esp_hosted_transport_handle_rpc(
         transport, response, payload_length, uid);
     }
 
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MAC)
+    {
+      return esp_hosted_transport_handle_get_mac_response(
+        transport, response, payload_length, uid);
+    }
+
   if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_INIT)
     {
       return esp_hosted_transport_handle_result_response(
@@ -985,9 +1236,69 @@ static int esp_hosted_transport_handle_rpc(
         ESP_HOSTED_TRANSPORT_RPC_RESP_SET_MODE, "SetWifiMode");
     }
 
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_START)
+    {
+      return esp_hosted_transport_handle_result_response(
+        transport, response, payload_length, uid,
+        ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_START, "WifiStart");
+    }
+
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_CONFIG)
+    {
+      return esp_hosted_transport_handle_result_response(
+        transport, response, payload_length, uid,
+        ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_CONFIG, "WifiSetConfig");
+    }
+
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE)
+    {
+      return esp_hosted_transport_handle_result_response(
+        transport, response, payload_length, uid,
+        ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE, "WifiSetStorage");
+    }
+
+  if (message_id == ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_CONNECT)
+    {
+      return esp_hosted_transport_handle_result_response(
+        transport, response, payload_length, uid,
+        ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_CONNECT, "WifiConnect");
+    }
+
   syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: response=%" PRIu32
          " ignored\n", message_id);
   return OK;
+}
+
+static int esp_hosted_transport_handle_wlan_packet(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *data,
+  size_t length)
+{
+  esp_hosted_transport_wlan_rx_t callback;
+  FAR void *arg;
+  int ret;
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  callback = transport->wlan_rx;
+  arg = transport->wlan_rx_arg;
+  if (callback == NULL)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      syslog(LOG_INFO, "INFO: ESP-Hosted C6 RX: station frame dropped\n");
+      return OK;
+    }
+
+  /* Keep the callback registration stable until the adapter copies this
+   * frame.  Deinitialization clears the callback through the same lock.
+   */
+
+  ret = callback(arg, data, length);
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
 }
 
 static int esp_hosted_transport_handle_packet(
@@ -1011,6 +1322,17 @@ static int esp_hosted_transport_handle_packet(
       payload_length != packet_length - payload_offset)
     {
       return -EPROTO;
+    }
+
+  if ((packet[0] & 0x0f) == ESP_HOSTED_TRANSPORT_IF_STA)
+    {
+      if ((packet[0] >> 4) != 0)
+        {
+          return -EPROTO;
+        }
+
+      return esp_hosted_transport_handle_wlan_packet(
+        transport, packet + payload_offset, payload_length);
     }
 
   if ((packet[0] & 0x0f) != ESP_HOSTED_TRANSPORT_IF_SERIAL)
@@ -1254,6 +1576,71 @@ static int esp_hosted_transport_append_field(FAR uint8_t *data,
   return esp_hosted_transport_append_varint(data, capacity, offset, value);
 }
 
+static int esp_hosted_transport_append_bytes(FAR uint8_t *data,
+                                             size_t capacity,
+                                             FAR size_t *offset,
+                                             uint32_t field,
+                                             FAR const uint8_t *value,
+                                             size_t value_length)
+{
+  int ret;
+
+  if (value_length == 0)
+    {
+      return OK;
+    }
+
+  if (value == NULL)
+    {
+      return -EINVAL;
+    }
+
+  ret = esp_hosted_transport_append_varint(data, capacity, offset,
+                                           ((uint64_t)field << 3) | 2);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_hosted_transport_append_varint(data, capacity, offset,
+                                           value_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (*offset > capacity || value_length > capacity - *offset)
+    {
+      return -EMSGSIZE;
+    }
+
+  memcpy(data + *offset, value, value_length);
+  *offset += value_length;
+  return OK;
+}
+
+static int esp_hosted_transport_append_empty_message(FAR uint8_t *data,
+                                                     size_t capacity,
+                                                     FAR size_t *offset,
+                                                     uint32_t field)
+{
+  int ret;
+
+  /* Unlike empty byte strings, an empty message must retain its field key
+   * and zero length.  protobuf-c then allocates the default-valued nested
+   * object instead of leaving its pointer NULL.
+   */
+
+  ret = esp_hosted_transport_append_varint(data, capacity, offset,
+                                           ((uint64_t)field << 3) | 2);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  return esp_hosted_transport_append_varint(data, capacity, offset, 0);
+}
+
 static int esp_hosted_transport_send_get_mode(
   FAR struct esp_hosted_transport_s *transport, uint32_t uid)
 {
@@ -1269,7 +1656,8 @@ static int esp_hosted_transport_send_get_mode(
   packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
   esp_hosted_transport_put_le16(packet + 4,
                                 ESP_HOSTED_TRANSPORT_HEADER_BYTES);
-  esp_hosted_transport_put_le16(packet + 8, transport->tx_sequence++);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
 
   payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
   payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
@@ -1318,8 +1706,9 @@ static int esp_hosted_transport_send_get_mode(
   return OK;
 }
 
-static int esp_hosted_transport_send_set_mode(
-  FAR struct esp_hosted_transport_s *transport, uint32_t mode, uint32_t uid)
+static int esp_hosted_transport_send_scalar_request(
+  FAR struct esp_hosted_transport_s *transport, uint32_t request_id,
+  FAR const char *name, uint32_t value, uint32_t uid)
 {
   static const uint8_t endpoint[] = "RPCRsp";
   uint8_t packet[64];
@@ -1332,7 +1721,7 @@ static int esp_hosted_transport_send_set_mode(
   int ret;
 
   ret = esp_hosted_transport_append_field(request, sizeof(request),
-                                          &request_length, 1, mode);
+                                          &request_length, 1, value);
   if (ret < 0)
     {
       return ret;
@@ -1342,7 +1731,8 @@ static int esp_hosted_transport_send_set_mode(
   packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
   esp_hosted_transport_put_le16(packet + 4,
                                 ESP_HOSTED_TRANSPORT_HEADER_BYTES);
-  esp_hosted_transport_put_le16(packet + 8, transport->tx_sequence++);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
 
   payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
   payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
@@ -1360,7 +1750,7 @@ static int esp_hosted_transport_send_set_mode(
     {
       ret = esp_hosted_transport_append_field(
         rpc, sizeof(packet) - (rpc - packet), &rpc_length, 2,
-        ESP_HOSTED_TRANSPORT_RPC_REQ_SET_MODE);
+        request_id);
     }
 
   if (ret >= 0)
@@ -1373,7 +1763,7 @@ static int esp_hosted_transport_send_set_mode(
     {
       ret = esp_hosted_transport_append_varint(
         rpc, sizeof(packet) - (rpc - packet), &rpc_length,
-        ((uint64_t)ESP_HOSTED_TRANSPORT_RPC_REQ_SET_MODE << 3) | 2);
+        ((uint64_t)request_id << 3) | 2);
     }
 
   if (ret >= 0)
@@ -1412,9 +1802,98 @@ static int esp_hosted_transport_send_set_mode(
     }
 
   syslog(LOG_INFO,
-         "INFO: ESP-Hosted C6 RPC: SetWifiMode sent uid=%" PRIu32
-         " mode=%" PRIu32 " bytes=%u\n", uid, mode,
+         "INFO: ESP-Hosted C6 RPC: %s sent uid=%" PRIu32
+         " value=%" PRIu32 " bytes=%u\n", name, uid, value,
          (unsigned int)packet_length);
+  return OK;
+}
+
+static int esp_hosted_transport_send_empty_request(
+  FAR struct esp_hosted_transport_s *transport, uint32_t request_id,
+  FAR const char *name, uint32_t uid)
+{
+  static const uint8_t endpoint[] = "RPCRsp";
+  uint8_t packet[64];
+  FAR uint8_t *payload;
+  FAR uint8_t *rpc;
+  size_t rpc_length = 0;
+  size_t packet_length;
+  int ret;
+
+  memset(packet, 0, sizeof(packet));
+  packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
+  esp_hosted_transport_put_le16(packet + 4,
+                                ESP_HOSTED_TRANSPORT_HEADER_BYTES);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
+
+  payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
+  esp_hosted_transport_put_le16(
+    payload + 1, ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES);
+  memcpy(payload + 3, endpoint, sizeof(endpoint) - 1);
+  payload += 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_DATA;
+  rpc = payload + 3;
+
+  ret = esp_hosted_transport_append_field(
+    rpc, sizeof(packet) - (rpc - packet), &rpc_length, 1,
+    ESP_HOSTED_TRANSPORT_RPC_TYPE_REQ);
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 2,
+        request_id);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 3, uid);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length,
+        ((uint64_t)request_id << 3) | 2);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 0);
+    }
+
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  esp_hosted_transport_put_le16(payload + 1, rpc_length);
+  packet_length = 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES + 3 +
+                  rpc_length;
+  esp_hosted_transport_put_le16(packet + 2, packet_length);
+
+  if (transport->checksum_enabled)
+    {
+      esp_hosted_transport_put_le16(packet + 6, 0);
+      esp_hosted_transport_put_le16(
+        packet + 6, esp_hosted_transport_checksum(
+                      packet, ESP_HOSTED_TRANSPORT_HEADER_BYTES +
+                      packet_length));
+    }
+
+  packet_length += ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  ret = esp_hosted_transport_send_packet(transport, packet, packet_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: %s sent uid=%" PRIu32 " bytes=%u\n",
+         name, uid, (unsigned int)packet_length);
   return OK;
 }
 
@@ -1499,7 +1978,8 @@ static int esp_hosted_transport_send_wifi_init(
   packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
   esp_hosted_transport_put_le16(packet + 4,
                                 ESP_HOSTED_TRANSPORT_HEADER_BYTES);
-  esp_hosted_transport_put_le16(packet + 8, transport->tx_sequence++);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
 
   payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
   payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
@@ -1572,6 +2052,177 @@ static int esp_hosted_transport_send_wifi_init(
          "INFO: ESP-Hosted C6 RPC: WifiInit sent uid=%" PRIu32
          " bytes=%u config_bytes=%u\n", uid, (unsigned int)packet_length,
          (unsigned int)config_length);
+  return OK;
+}
+
+static int esp_hosted_transport_send_sta_config(
+  FAR struct esp_hosted_transport_s *transport, FAR const char *ssid,
+  FAR const char *password, uint32_t uid)
+{
+  static const uint8_t endpoint[] = "RPCRsp";
+  uint8_t packet[ESP_HOSTED_TRANSPORT_RPC_PACKET_MAX];
+  uint8_t sta_config[ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX];
+  uint8_t wifi_config[ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX + 8];
+  uint8_t request[ESP_HOSTED_TRANSPORT_WIFI_CONFIG_MAX + 16];
+  FAR uint8_t *payload;
+  FAR uint8_t *rpc;
+  size_t ssid_length;
+  size_t password_length;
+  size_t sta_length = 0;
+  size_t config_length = 0;
+  size_t request_length = 0;
+  size_t rpc_length = 0;
+  size_t packet_length;
+  int ret;
+
+  if (ssid == NULL || password == NULL)
+    {
+      return -EINVAL;
+    }
+
+  ssid_length = strlen(ssid);
+  password_length = strlen(password);
+  if (ssid_length == 0 || ssid_length > ESP_HOSTED_TRANSPORT_STA_SSID_MAX ||
+      password_length > ESP_HOSTED_TRANSPORT_STA_PASSWORD_MAX)
+    {
+      return -EINVAL;
+    }
+
+  /* Rpc_Req_WifiSetConfig.cfg is a wifi_config oneof.  Its STA branch
+   * contains byte strings, so neither value has a terminating NUL in the
+   * serialized request.
+   */
+
+  ret = esp_hosted_transport_append_bytes(
+    sta_config, sizeof(sta_config), &sta_length, 1,
+    (FAR const uint8_t *)ssid, ssid_length);
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_bytes(
+        sta_config, sizeof(sta_config), &sta_length, 2,
+        (FAR const uint8_t *)password, password_length);
+    }
+
+  /* Match the official host's message presence even when all nested
+   * values are zero.  Older coprocessor handlers dereference threshold
+   * and pmf_cfg without NULL checks.  append_bytes() deliberately omits
+   * empty strings, so it cannot encode these default-valued messages.
+   */
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_empty_message(
+        sta_config, sizeof(sta_config), &sta_length, 9);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_empty_message(
+        sta_config, sizeof(sta_config), &sta_length, 10);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_bytes(
+        wifi_config, sizeof(wifi_config), &config_length, 2,
+        sta_config, sta_length);
+    }
+
+  /* ESP_WIFI_STA is zero.  Protobuf omits its default-valued iface field,
+   * and the coprocessor therefore receives the documented STA default.
+   */
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_bytes(
+        request, sizeof(request), &request_length, 2,
+        wifi_config, config_length);
+    }
+
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  memset(packet, 0, sizeof(packet));
+  packet[0] = ESP_HOSTED_TRANSPORT_IF_SERIAL;
+  esp_hosted_transport_put_le16(packet + 4,
+                                ESP_HOSTED_TRANSPORT_HEADER_BYTES);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
+
+  payload = packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_EPNAME;
+  esp_hosted_transport_put_le16(
+    payload + 1, ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES);
+  memcpy(payload + 3, endpoint, sizeof(endpoint) - 1);
+  payload += 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES;
+  payload[0] = ESP_HOSTED_TRANSPORT_TLV_DATA;
+  rpc = payload + 3;
+
+  ret = esp_hosted_transport_append_field(
+    rpc, sizeof(packet) - (rpc - packet), &rpc_length, 1,
+    ESP_HOSTED_TRANSPORT_RPC_TYPE_REQ);
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 2,
+        ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_SET_CONFIG);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_field(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, 3, uid);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length,
+        ((uint64_t)ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_SET_CONFIG << 3) | 2);
+    }
+
+  if (ret >= 0)
+    {
+      ret = esp_hosted_transport_append_varint(
+        rpc, sizeof(packet) - (rpc - packet), &rpc_length, request_length);
+    }
+
+  if (ret < 0 || request_length > sizeof(packet) - (rpc - packet) -
+                                    rpc_length)
+    {
+      return ret < 0 ? ret : -EMSGSIZE;
+    }
+
+  memcpy(rpc + rpc_length, request, request_length);
+  rpc_length += request_length;
+  esp_hosted_transport_put_le16(payload + 1, rpc_length);
+  packet_length = 3 + ESP_HOSTED_TRANSPORT_RPC_ENDPOINT_BYTES + 3 +
+                  rpc_length;
+  esp_hosted_transport_put_le16(packet + 2, packet_length);
+
+  if (transport->checksum_enabled)
+    {
+      esp_hosted_transport_put_le16(packet + 6, 0);
+      esp_hosted_transport_put_le16(
+        packet + 6, esp_hosted_transport_checksum(
+                      packet, ESP_HOSTED_TRANSPORT_HEADER_BYTES +
+                      packet_length));
+    }
+
+  packet_length += ESP_HOSTED_TRANSPORT_HEADER_BYTES;
+  ret = esp_hosted_transport_send_packet(transport, packet, packet_length);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  syslog(LOG_INFO,
+         "INFO: ESP-Hosted C6 RPC: WifiSetConfig sent uid=%" PRIu32
+         " bytes=%u ssid_bytes=%u password_bytes=%u\n", uid,
+         (unsigned int)packet_length, (unsigned int)ssid_length,
+         (unsigned int)password_length);
   return OK;
 }
 
@@ -1681,6 +2332,7 @@ int esp_hosted_transport_initialize(
 
   memset(&g_transport, 0, sizeof(g_transport));
   g_transport.sdio = sdio;
+  spin_lock_init(&g_transport.tx_lock);
   ret = nxmutex_init(&g_transport.bus_lock);
   if (ret < 0)
     {
@@ -1705,6 +2357,18 @@ int esp_hosted_transport_initialize(
       goto destroy_rpc_sem;
     }
 
+  ret = nxsem_init(&g_transport.sta_start_sem, 0, 0);
+  if (ret < 0)
+    {
+      goto destroy_rpc_sem;
+    }
+
+  ret = nxsem_set_protocol(&g_transport.sta_start_sem, SEM_PRIO_NONE);
+  if (ret < 0)
+    {
+      goto destroy_sta_start_sem;
+    }
+
   g_transport.initialized = true;
   *transport = &g_transport;
   syslog(LOG_INFO,
@@ -1718,6 +2382,8 @@ int esp_hosted_transport_initialize(
          rca_argument >> 16, (unsigned int)cccr_revision);
   return OK;
 
+destroy_sta_start_sem:
+  nxsem_destroy(&g_transport.sta_start_sem);
 destroy_rpc_sem:
   nxsem_destroy(&g_transport.rpc_sem);
 destroy_rpc_lock:
@@ -1865,6 +2531,7 @@ int esp_hosted_transport_deinitialize(
   ret = esp_hosted_sdio_deinitialize(transport->sdio);
   if (ret == OK)
     {
+      nxsem_destroy(&transport->sta_start_sem);
       nxsem_destroy(&transport->rpc_sem);
       nxmutex_destroy(&transport->rpc_lock);
       nxmutex_destroy(&transport->bus_lock);
@@ -2123,6 +2790,81 @@ int esp_hosted_transport_get_wifi_mode(
   return ret;
 }
 
+int esp_hosted_transport_get_sta_mac(
+  FAR struct esp_hosted_transport_s *transport, FAR uint8_t mac[6],
+  FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || mac == NULL || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_GET_MAC;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_empty_request(
+    transport, ESP_HOSTED_TRANSPORT_RPC_REQ_GET_MAC, "GetMACAddress", uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
+      memcpy(mac, transport->rpc_mac, sizeof(transport->rpc_mac));
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
 int esp_hosted_transport_wifi_initialize(
   FAR struct esp_hosted_transport_s *transport,
   FAR const struct esp_hosted_wifi_init_config_s *config,
@@ -2197,8 +2939,9 @@ int esp_hosted_transport_wifi_initialize(
   return ret;
 }
 
-int esp_hosted_transport_set_wifi_mode(
-  FAR struct esp_hosted_transport_s *transport, uint32_t mode,
+static int esp_hosted_transport_scalar_rpc(
+  FAR struct esp_hosted_transport_s *transport, uint32_t request_id,
+  uint32_t response_id, FAR const char *name, uint32_t value,
   FAR int *remote_result)
 {
   uint32_t uid;
@@ -2233,10 +2976,11 @@ int esp_hosted_transport_set_wifi_mode(
     }
 
   transport->rpc_uid = uid;
-  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_SET_MODE;
+  transport->rpc_response_id = response_id;
   transport->rpc_result = -ETIMEDOUT;
   transport->rpc_pending = true;
-  ret = esp_hosted_transport_send_set_mode(transport, mode, uid);
+  ret = esp_hosted_transport_send_scalar_request(transport, request_id,
+                                                 name, value, uid);
   if (ret < 0)
     {
       transport->rpc_pending = false;
@@ -2267,6 +3011,377 @@ int esp_hosted_transport_set_wifi_mode(
     }
 
   nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
+int esp_hosted_transport_set_wifi_mode(
+  FAR struct esp_hosted_transport_s *transport, uint32_t mode,
+  FAR int *remote_result)
+{
+  return esp_hosted_transport_scalar_rpc(
+    transport, ESP_HOSTED_TRANSPORT_RPC_REQ_SET_MODE,
+    ESP_HOSTED_TRANSPORT_RPC_RESP_SET_MODE, "SetWifiMode", mode,
+    remote_result);
+}
+
+int esp_hosted_transport_set_wifi_storage_ram(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result)
+{
+  /* ESP-IDF wifi_storage_t: WIFI_STORAGE_RAM = 1. */
+
+  return esp_hosted_transport_scalar_rpc(
+    transport, ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_SET_STORAGE,
+    ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE, "WifiSetStorage", 1,
+    remote_result);
+}
+
+int esp_hosted_transport_wifi_start(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  while (nxsem_trywait(&transport->sta_start_sem) == OK)
+    {
+    }
+
+  transport->sta_started = false;
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_START;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_empty_request(
+    transport, ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_START, "WifiStart", uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
+int esp_hosted_transport_set_sta_config(
+  FAR struct esp_hosted_transport_s *transport, FAR const char *ssid,
+  FAR const char *password, FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  if (ssid == NULL || password == NULL)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_CONFIG;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_sta_config(transport, ssid, password, uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
+int esp_hosted_transport_wifi_connect(
+  FAR struct esp_hosted_transport_s *transport, FAR int *remote_result)
+{
+  uint32_t uid;
+  int ret;
+
+  if (transport != &g_transport || remote_result == NULL ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->rpc_pending)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  while (nxsem_trywait(&transport->rpc_sem) == OK)
+    {
+    }
+
+  uid = ++transport->rpc_uid;
+  if (uid == 0)
+    {
+      uid = ++transport->rpc_uid;
+    }
+
+  transport->rpc_uid = uid;
+  transport->rpc_response_id = ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_CONNECT;
+  transport->rpc_result = -ETIMEDOUT;
+  transport->rpc_pending = true;
+  ret = esp_hosted_transport_send_empty_request(
+    transport, ESP_HOSTED_TRANSPORT_RPC_REQ_WIFI_CONNECT, "WifiConnect",
+    uid);
+  if (ret < 0)
+    {
+      transport->rpc_pending = false;
+      nxmutex_unlock(&transport->rpc_lock);
+      return ret;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  ret = nxsem_tickwait_uninterruptible(
+    &transport->rpc_sem, MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+
+  if (nxmutex_lock(&transport->rpc_lock) < 0)
+    {
+      return ret < 0 ? ret : -EIO;
+    }
+
+  if (transport->rpc_pending)
+    {
+      transport->rpc_pending = false;
+      if (ret == OK)
+        {
+          ret = -EIO;
+        }
+    }
+  else if (ret == OK)
+    {
+      *remote_result = transport->rpc_result;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return ret;
+}
+
+int esp_hosted_transport_wait_sta_start(
+  FAR struct esp_hosted_transport_s *transport)
+{
+  int ret;
+
+  if (transport != &g_transport || !transport->data_path_open ||
+      !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (transport->sta_started)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return OK;
+    }
+
+  nxmutex_unlock(&transport->rpc_lock);
+  return nxsem_tickwait_uninterruptible(
+    &transport->sta_start_sem,
+    MSEC2TICK(ESP_HOSTED_TRANSPORT_RPC_TIMEOUT_MS));
+}
+
+int esp_hosted_transport_register_wlan_rx(
+  FAR struct esp_hosted_transport_s *transport,
+  esp_hosted_transport_wlan_rx_t callback, FAR void *arg)
+{
+  int ret;
+
+  if (transport != &g_transport || !transport->initialized)
+    {
+      return -EPIPE;
+    }
+
+  /* Removal must remain possible after RX faults.  The same rpc_lock is
+   * held while invoking the callback, so clearing it waits for any current
+   * consumer before the WLAN adapter is freed.
+   */
+
+  if (callback != NULL &&
+      (!transport->data_path_open || !transport->rx_active))
+    {
+      return -EPIPE;
+    }
+
+  ret = nxmutex_lock(&transport->rpc_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (callback != NULL && transport->wlan_rx != NULL &&
+      transport->wlan_rx != callback)
+    {
+      nxmutex_unlock(&transport->rpc_lock);
+      return -EBUSY;
+    }
+
+  transport->wlan_rx = callback;
+  transport->wlan_rx_arg = arg;
+  nxmutex_unlock(&transport->rpc_lock);
+  return OK;
+}
+
+int esp_hosted_transport_send_wlan(
+  FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *data,
+  size_t length)
+{
+  FAR uint8_t *packet;
+  size_t packet_length;
+  int ret;
+
+  if (transport != &g_transport || data == NULL || length == 0 ||
+      !transport->data_path_open || !transport->rx_active)
+    {
+      return -EPIPE;
+    }
+
+  if (length > ESP_HOSTED_TRANSPORT_TX_BUFFER_BYTES -
+               ESP_HOSTED_TRANSPORT_HEADER_BYTES)
+    {
+      return -EMSGSIZE;
+    }
+
+  ret = nxmutex_lock(&transport->bus_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  packet = transport->tx_packet;
+  memset(packet, 0, sizeof(transport->tx_packet));
+  packet[0] = ESP_HOSTED_TRANSPORT_IF_STA;
+  esp_hosted_transport_put_le16(packet + 2, length);
+  esp_hosted_transport_put_le16(packet + 4,
+                                ESP_HOSTED_TRANSPORT_HEADER_BYTES);
+  esp_hosted_transport_put_le16(
+    packet + 8, esp_hosted_transport_next_tx_sequence(transport));
+  memcpy(packet + ESP_HOSTED_TRANSPORT_HEADER_BYTES, data, length);
+  packet_length = ESP_HOSTED_TRANSPORT_HEADER_BYTES + length;
+
+  if (transport->checksum_enabled)
+    {
+      esp_hosted_transport_put_le16(packet + 6, 0);
+      esp_hosted_transport_put_le16(
+        packet + 6, esp_hosted_transport_checksum(packet, packet_length));
+    }
+
+  ret = esp_hosted_transport_send_packet_locked(transport, packet,
+                                                 packet_length);
+  nxmutex_unlock(&transport->bus_lock);
   return ret;
 }
 
