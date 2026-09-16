@@ -32,6 +32,10 @@
 
 #include <arch/chip/esp_hosted_transport.h>
 
+#ifdef CONFIG_ESPRESSIF_HOSTED_WLAN
+#  include <arch/chip/esp_hosted_wlan.h>
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -109,6 +113,8 @@
 #define ESP_HOSTED_TRANSPORT_RPC_RESP_WIFI_SET_STORAGE 569
 #define ESP_HOSTED_TRANSPORT_RPC_EVENT_ESPINIT  769
 #define ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS 773
+#define ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_CONNECTED 775
+#define ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_DISCONNECTED 776
 
 #define ESP_HOSTED_TRANSPORT_WIFI_EVENT_STA_START 2
 
@@ -1079,6 +1085,73 @@ static int esp_hosted_transport_handle_wifi_event_no_args(
   return OK;
 }
 
+static int esp_hosted_transport_handle_sta_link_event(
+  FAR const uint8_t *payload, size_t payload_length, bool up)
+{
+  uint64_t key;
+  uint64_t value;
+  size_t offset = 0;
+  int result = OK;
+  int ret;
+
+  /* Rpc_Event_StaConnected and Rpc_Event_StaDisconnected both carry the
+   * operation result in protobuf field 1.  The connected/disconnected
+   * detail is field 2 and is intentionally skipped: only the association
+   * state belongs to the NuttX data-plane adapter.
+   */
+
+  while (offset < payload_length)
+    {
+      ret = esp_hosted_transport_get_varint(payload, payload_length, &offset,
+                                            &key);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      if ((key >> 3) == 1)
+        {
+          if ((key & 7) != 0)
+            {
+              return -EPROTO;
+            }
+
+          ret = esp_hosted_transport_get_varint(payload, payload_length,
+                                                &offset, &value);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          result = (int32_t)value;
+          continue;
+        }
+
+      ret = esp_hosted_transport_skip_field(payload, payload_length, &offset,
+                                            key & 7);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
+  if (result != OK)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: ESP-Hosted C6 STA %s event result=%d ignored\n",
+             up ? "connected" : "disconnected", result);
+      return OK;
+    }
+
+#ifdef CONFIG_ESPRESSIF_HOSTED_WLAN
+  esp_hosted_wlan_set_link(up);
+#endif
+
+  syslog(LOG_INFO, "INFO: ESP-Hosted C6 STA %s; wlan0 carrier %s\n",
+         up ? "connected" : "disconnected", up ? "on" : "off");
+  return OK;
+}
+
 static int esp_hosted_transport_handle_rpc(
   FAR struct esp_hosted_transport_s *transport, FAR const uint8_t *rpc,
   size_t rpc_length)
@@ -1127,7 +1200,9 @@ static int esp_hosted_transport_handle_rpc(
           continue;
         }
 
-      if ((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS &&
+      if (((key >> 3) == ESP_HOSTED_TRANSPORT_RPC_EVENT_WIFI_NO_ARGS ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_CONNECTED ||
+           (key >> 3) == ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_DISCONNECTED) &&
           (key & 7) == 2)
         {
           ret = esp_hosted_transport_get_varint(rpc, rpc_length, &offset,
@@ -1191,6 +1266,18 @@ static int esp_hosted_transport_handle_rpc(
         {
           return esp_hosted_transport_handle_wifi_event_no_args(
             transport, event, event_length);
+        }
+      else if (message_id == ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_CONNECTED &&
+               event != NULL)
+        {
+          return esp_hosted_transport_handle_sta_link_event(
+            event, event_length, true);
+        }
+      else if (message_id == ESP_HOSTED_TRANSPORT_RPC_EVENT_STA_DISCONNECTED &&
+               event != NULL)
+        {
+          return esp_hosted_transport_handle_sta_link_event(
+            event, event_length, false);
         }
       else
         {

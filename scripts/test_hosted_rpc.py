@@ -36,6 +36,7 @@ FIXTURE = r'''
 #include <stdint.h>
 #include <string.h>
 #include <syslog.h>
+#define CONFIG_ESPRESSIF_HOSTED_WLAN 1
 #define FAR
 #define OK 0
 #define MSEC2TICK(x) (x)
@@ -52,6 +53,8 @@ static uint8_t captured[256];
 static size_t captured_length;
 static int send_result, wait_result, remote_result;
 static uint32_t expected_response;
+static bool link_up;
+static unsigned int link_changes;
 static int nxmutex_lock(int *lock) { assert(!*lock); *lock = 1; return 0; }
 static void nxmutex_unlock(int *lock) { assert(*lock); *lock = 0; }
 static int nxsem_trywait(int *sem) { (void)sem; return -EAGAIN; }
@@ -76,6 +79,10 @@ static int esp_hosted_transport_send_packet(
 }
 static int callback(void *a, const uint8_t *d, size_t n) {
   (void)a; (void)d; (void)n; return 0;
+}
+static void esp_hosted_wlan_set_link(bool up) {
+  link_up = up;
+  link_changes++;
 }
 static void dump(void) {
   for (size_t i = 0; i < captured_length; i++) printf("%02x", captured[i]);
@@ -141,6 +148,23 @@ int main(void) {
   assert(!g_transport.wlan_rx && !g_transport.wlan_rx_arg);
   assert(esp_hosted_transport_register_wlan_rx(&g_transport, callback, NULL)
          == -EPIPE);
+  {
+    const uint8_t connected[] = {0x10, 0x00};
+    const uint8_t disconnected[] = {0x10, 0x00};
+    const uint8_t failed[] = {0x08, 0x01};
+    const uint8_t malformed[] = {0x0a, 0x00};
+    assert(esp_hosted_transport_handle_sta_link_event(connected,
+           sizeof(connected), true) == 0);
+    assert(link_up && link_changes == 1);
+    assert(esp_hosted_transport_handle_sta_link_event(disconnected,
+           sizeof(disconnected), false) == 0);
+    assert(!link_up && link_changes == 2);
+    assert(esp_hosted_transport_handle_sta_link_event(failed,
+           sizeof(failed), true) == 0);
+    assert(!link_up && link_changes == 2);
+    assert(esp_hosted_transport_handle_sta_link_event(malformed,
+           sizeof(malformed), true) == -EPROTO);
+  }
   g_transport.initialized = false;
   assert(esp_hosted_transport_register_wlan_rx(&g_transport, NULL, NULL)
          == -EPIPE);
@@ -252,6 +276,7 @@ def main():
         "append_empty_message",
         "send_scalar_request", "send_sta_config", "scalar_rpc",
         "set_wifi_mode", "set_wifi_storage_ram", "register_wlan_rx",
+        "get_varint", "skip_field", "handle_sta_link_event",
     ]
     constants = "\n".join(re.findall(
         r"^#define ESP_HOSTED_TRANSPORT_\w+[^\n]*", source, re.M))
@@ -292,7 +317,7 @@ def main():
         check_legacy_decoder(sta_messages, args.decoder_dir)
     print("PASS: storage/mode wire format, RPC errors/timeouts, STA credential "
           "boundaries, required nested messages and encoder bounds, "
-          "callback removal after RX fault")
+          "callback removal after RX fault, STA carrier event handling")
 
 
 if __name__ == "__main__":
