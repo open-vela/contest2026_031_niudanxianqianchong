@@ -108,12 +108,31 @@ int llm_parse_response_text(const char *text, agent_llm_parse_result_t *result)
             content_buf[i] = content[i];
             i++;
         }
-        /* UTF-8 字符边界回退：末字节为非 ASCII 即回退——续字节
-         * (10xxxxxx) 说明切在序列中间，首字节(11xxxxxx) 说明该
-         * 多字节字符的续字节已被截掉，两者都必须整体丢弃。 */
-        while (i > 0 &&
-               ((unsigned char)content_buf[i - 1] & 0x80) != 0u) {
-            i--;
+        /* UTF-8 字符边界回退（4096 截断可能切半个汉字）：
+          * 先退到续字节序列的开头，再看首字节的期望长度是否被截断。
+          * 判据 (b & 0xC0)==0x80 仅匹配续字节(10xxxxxx)——
+          * 曾误写 (b & 0x80)!=0 导致纯中文被整句删空。 */
+        if (i > 0 && ((unsigned char)content_buf[i - 1] & 0x80) != 0u) {
+            size_t s = i;
+
+            /* 退掉尾部的续字节 */
+            while (s > 0 &&
+                   ((unsigned char)content_buf[s - 1] & 0xC0) == 0x80u) {
+                s--;
+            }
+            /* s 指向首字节（或 0）：判断该字符是否完整 */
+            if (s > 0) {
+                unsigned char lead = (unsigned char)content_buf[s - 1];
+                size_t need = (lead >= 0xF0u) ? 4u :
+                             (lead >= 0xE0u) ? 3u :
+                             (lead >= 0xC0u) ? 2u : 1u;
+
+                if (s - 1 + need > i) {
+                    i = s - 1;   /* 该字符不完整，整体丢弃 */
+                }
+            } else {
+                i = 0;   /* 整串都是非 ASCII 且无法定位首字节 */
+            }
         }
         content_buf[i] = '\0';
         result->content = content_buf;

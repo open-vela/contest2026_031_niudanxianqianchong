@@ -87,11 +87,11 @@ static int copy_final_output(agent_response_t *response, const char *content)
     }
 
     memcpy(response->output, content, len);
-    /* UTF-8 字符边界回退：末字节非 ASCII 即整体丢弃该（不完整）
-     * 多字节字符，避免非法序列随会话历史进入后续请求。 */
-    while (len > 0 && ((unsigned char)response->output[len - 1] & 0x80) != 0u) {
-        len--;
-    }
+    /* 不做 UTF-8 尾部回退：入参是 NUL 结尾的完整 JSON 字符串
+     * （extract_content_string 在闭合引号截断），不存在不完整尾
+     * 字符。曾用 (b & 0x80)!=0 做回退——该判据匹配所有非 ASCII
+     * 字节（含汉字首字节），纯中文回复被整句删空，"hi"→兜底文案
+     * 的真凶。超长在上方已 AGENT_ERROR_LIMIT 拒绝。 */
     response->output[len] = '\0';
     return AGENT_OK;
 }
