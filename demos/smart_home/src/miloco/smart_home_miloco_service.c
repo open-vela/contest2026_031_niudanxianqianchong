@@ -839,6 +839,9 @@ static void poll_weather(smart_home_miloco_t *service,
         return;
     }
 
+    syslog(LOG_INFO, "[milo] weather http date=%ld cur=%ld\n",
+           (long)server_date, (long)time(NULL));
+
     /* 响应头 Date 即时间源（砍掉独立 SNTP 后的对时途径）：仅当
      * 本地时钟明显落后时前拨，避免正常走时被反复回写。 */
     if (server_date > (time_t)1000000000L) {
