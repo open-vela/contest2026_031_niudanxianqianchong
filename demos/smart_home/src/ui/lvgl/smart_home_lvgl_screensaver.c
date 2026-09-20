@@ -52,6 +52,8 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
 
         clock_gettime(CLOCK_REALTIME, &ts);
         if (ts.tv_sec > 1000000000L) {
+            /* HTTP Date 为 UTC，加 8 小时偏移显示北京时间。 */
+            ts.tv_sec += 8 * 3600L;
             gmtime_r(&ts.tv_sec, &tm_now);
             snprintf(buf, sizeof(buf), "%d 月 %d 日 · 周%s",
                      tm_now.tm_mon + 1, tm_now.tm_mday, wd[tm_now.tm_wday % 7]);

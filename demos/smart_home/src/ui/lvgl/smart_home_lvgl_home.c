@@ -663,6 +663,8 @@ static void home_time_update(smart_home_lvgl_t *ui)
         }
         return;
     }
+    /* HTTP Date 为 UTC，加 8 小时偏移显示北京时间（东八区）。 */
+    ts.tv_sec += 8 * 3600L;
     gmtime_r(&ts.tv_sec, &tm_now);
     static const char *const weekdays[] = {
         "日", "一", "二", "三", "四", "五", "六"
