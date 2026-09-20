@@ -140,6 +140,11 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
                                 const char *scene,
                                 char *report, size_t report_size);
 
+/* WiFi 联网事件触发：下一轮 worker 迭代立即拉取天气（并经 HTTP
+ * Date 同步时间）。网络模块在 online 变 true 时调用。线程安全
+ * （仅写一个 volatile 计数器，worker 下一轮自增后触发）。 */
+void smart_home_miloco_kick_weather(smart_home_miloco_t *service);
+
 int smart_home_miloco_submit_control(smart_home_miloco_t *service,
                                      const char *did,
                                      const char *iid,

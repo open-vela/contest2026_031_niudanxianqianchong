@@ -66,7 +66,7 @@ struct smart_home_miloco {
     bool config_dirty;
     /* 天气数据与拉取节奏控制。 */
     smart_home_miloco_weather_t weather;
-    uint32_t weather_poll_count;    /* 5s/轮，120 轮 = 10 分钟 */
+    volatile uint32_t weather_poll_count;  /* 5s/轮，120轮=10分钟；kick置119 */
     /* 保存请求：worker 代写 secrets.json 后应用配置。 */
     smart_home_miloco_config_t save_config;
     bool save_pending;
@@ -1112,6 +1112,15 @@ static void *miloco_worker(void *argument)
 
     smart_home_bulk_free(body);
     return NULL;
+}
+
+void smart_home_miloco_kick_weather(smart_home_miloco_t *service)
+{
+    if (service) {
+        /* 下一轮 worker 迭代 weather_poll_count++ 变 120，
+         * 触发 >= 120 条件立即拉取天气 + HTTP Date 时间同步。 */
+        service->weather_poll_count = 119;
+    }
 }
 
 int smart_home_miloco_start(smart_home_miloco_t **service_out,
