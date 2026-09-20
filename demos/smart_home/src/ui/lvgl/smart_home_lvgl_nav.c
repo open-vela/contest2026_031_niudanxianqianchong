@@ -68,6 +68,20 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
         /* 首页统计（网络/米家设备数）在切回时取最新值。 */
         smart_home_lvgl_refresh_home(ui);
     }
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (tab == SMART_HOME_TAB_DEVICES && previous_tab != tab &&
+        ui->app && ui->app->miloco) {
+        /* 设备页的米家轮询定时器在其他页面停摆；在聊天页让 agent
+         * 控制设备后切回时，revision 差额要等 1s 定时器首轮才追平。
+         * 进入设备页立即同步一次，卡片/开关即时反映最新状态。 */
+        uint32_t revision = 0;
+
+        (void)smart_home_miloco_list(ui->app->miloco, NULL, 0, &revision);
+        if (revision != ui->miloco_revision) {
+            smart_home_lvgl_refresh_cards(ui);
+        }
+    }
+#endif
 
     /* Chat is entered from three independent product paths.  Load it
      * directly rather than queuing another screen animation: on the P4
