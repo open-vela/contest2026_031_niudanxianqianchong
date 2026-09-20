@@ -16,13 +16,13 @@ csi_probe / video_test）。
 | --- | --- | --- | --- |
 | 01 | [系统启动与芯片移植](开发日志/01-系统启动与芯片移植.md) | Route A 芯片层、板级 bring-up、最小系统（USB Serial/JTAG + NSH）、ESP-HAL 治理 | ✅ NSH 启动与内建命令通过 |
 | 02 | [MIPI-DSI 屏幕显示适配](开发日志/02-MIPI-DSI屏幕显示适配.md) | MIPI-DSI Host、EK79007 面板（1024×600）、NuttX framebuffer、LVGL | ✅ 色条 / `/dev/fb0` + `fb` 示例 / LVGL 静态首页三项通过 |
-| 03 | [触摸 GT911 适配](开发日志/03-触摸GT911适配.md) | I2C 触摸、`/dev/input0`、gt911_probe | ✅ 单指 DOWN/MOVE/UP 通过；多点与 LVGL 输入待验证 |
-| 04 | [MIPI-CSI 摄像头 SC2336 适配](开发日志/04-MIPI-CSI摄像头SC2336适配.md) | MIPI-CSI、CSI Host/Bridge、GDMA、V4L2（RGB565） | ✅ 300 帧 `app_fps=30.02`、`sequence_gaps=0` 吞吐验收通过 |
+| 03 | [触摸 GT911 适配](开发日志/03-触摸GT911适配.md) | I2C 触摸、`/dev/input0`、gt911_probe | ✅ 单指 + LVGL 触摸交互通过；多点待验证 |
+| 04 | [MIPI-CSI 摄像头 SC2336 适配](开发日志/04-MIPI-CSI摄像头SC2336适配.md) | MIPI-CSI、CSI Host/Bridge、GDMA、V4L2（RGB565） | ✅ 300 帧 `app_fps=30.02`、`sequence_gaps=0`；UI 实时预览已验收 |
 | 05 | [WiFi 适配（板载 C6 · ESP-Hosted）](开发日志/05-WiFi-C6托管适配.md) | SDIO 总线、ESP-Hosted 控制面、WLAN 数据面 | ✅ 枚举→关联→DHCP→DNS→TCP 443→TLS/模型对话（2026-09-20 真机闭环） |
 | 06 | [以太网适配](开发日志/06-以太网适配.md) | P4 内置 EMAC + 外置 PHY、`eth0` | 方案 + 代码就绪，待真机验证 |
 | 07 | [音频 ES8311 适配](开发日志/07-音频ES8311适配.md) | ES8311 codec、I2S/GDMA、语音链路（TTS/ASR/KWS） | ✅ 构建通过 + 真机初始化通过；录放与语音链路验收进行中 |
 | 08 | [存储 LittleFS 与系统集成](开发日志/08-存储LittleFS与系统集成.md) | LittleFS 数据分区（`0x600000`，10 MiB）、PSRAM 资源预加载、部署脚本 | ✅ `/data` 挂载 + 完整 MiSans（7,943,504 B）预加载通过 |
-| 09 | [智能家居应用](开发日志/09-智能家居应用.md) | cAGENT 云端对话（DeepSeek）、米家设备控制、LVGL 中控 UI、摄像头预览接入 | ✅ 米家控制 + Agent 工具链真机闭环；摄像头 UI 预览推进中 |
+| 09 | [智能家居应用](开发日志/09-智能家居应用.md) | cAGENT 云端对话（DeepSeek）、米家设备控制、LVGL 中控 UI、摄像头实时预览 | ✅ 米家控制 + Agent 工具链真机闭环；摄像头 UI 预览已验收 |
 
 ## 与大赛评分维度的对应
 

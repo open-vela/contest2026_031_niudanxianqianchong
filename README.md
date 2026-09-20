@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | USB Serial/JTAG 控制台 + NSH 最小系统 | ✅ 通过 | [competition/01](competition/开发日志/01-系统启动与芯片移植.md) |
 | MIPI-DSI 显示（EK79007，1024×600）：色条 → `/dev/fb0` → LVGL 首页 | ✅ 通过 | [competition/02](competition/开发日志/02-MIPI-DSI屏幕显示适配.md) |
-| GT911 触摸（I2C，`/dev/input0`）：单指 DOWN/MOVE/UP | ✅ 通过 | [competition/03](competition/开发日志/03-触摸GT911适配.md) |
+| GT911 触摸（I2C，`/dev/input0`）：单指 DOWN/MOVE/UP + 触摸交互可用 | ✅ 通过 | [competition/03](competition/开发日志/03-触摸GT911适配.md) |
 | SC2336 摄像头（MIPI-CSI，V4L2 RGB565）：300 帧 `app_fps=30.02` | ✅ 通过 | [competition/04](competition/开发日志/04-MIPI-CSI摄像头SC2336适配.md) |
 | WiFi（板载 C6，SDIO + ESP-Hosted）：枚举→关联→DHCP→DNS→TLS/模型对话 | ✅ 通过（2026-09-20 真机闭环） | [competition/05](competition/开发日志/05-WiFi-C6托管适配.md) |
 | 以太网（P4 内置 EMAC，`eth0`） | 方案+代码就绪，待真机 | [competition/06](competition/开发日志/06-以太网适配.md) |
@@ -38,9 +38,9 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| LVGL 中控面板 UI（1024×600 横屏、light-calm 浅色主题、设备卡片、完整中文字体） | 静态首页真机验收通过；网络模式 UI 持续迭代中 |
+| LVGL 中控面板 UI（1024×600 横屏、light-calm 浅色主题、设备卡片、完整中文字体） | 静态首页真机验收通过；触摸交互可用；网络模式 UI 持续迭代中 |
 | 米家设备接入（设备卡片、控制抽屉、Agent 工具控制） | ✅ 真机闭环：UI 手动控制 + Agent 控制（LLM→摄像机真实执行），七层排障闭环见 [competition/09](competition/开发日志/09-智能家居应用.md) |
-| 摄像头实时预览（`/dev/video0` V4L2 通路接入 UI） | 视频通路已真机验收（30 fps），UI 内预览接入推进中 |
+| 摄像头实时预览（`/dev/video0` V4L2 通路接入 UI） | 视频通路与 UI 内实时预览均已真机验收（30 fps） |
 | 云端模型对话（cAGENT，经 C6 WiFi → TLS → DeepSeek） | ✅ 真机闭环：TLS 握手/请求/响应全通，支撑米家 Agent 控制 |
 | 智能管家 Skill 体系（6 技能 + `read_skill` 按需加载 + LLM 可见摘要） | 米家控制/场景模式/安全/计时/天气/设备控制技能随数据分区部署，模型按需读取，新设备类型零代码接入 |
 | 智能家居工具（米家统一工具 + 本地查询/场景工具） | `miot_device_list`/`miot_device_control` 统一控制真实米家设备；`run_scene` 场景模式经 type_name 语义匹配真实设备（睡眠→夜视自动+人形追踪开）；天气/计时等本地工具经 wttr.in 真实数据 |
