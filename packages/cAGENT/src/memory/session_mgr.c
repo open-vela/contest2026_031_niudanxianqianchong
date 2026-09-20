@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <syslog.h>
 
 /* ── 内部辅助函数 ── */
 
@@ -248,10 +249,88 @@ static int append_char(char *buffer, size_t buffer_size, size_t *used, char c)
     return AGENT_OK;
 }
 
+/* 校验 text 处起始的 UTF-8 序列长度。
+ * 返回 0 表示该字节非法（孤立续字节/过长编码/超范围），1-4 为合法
+ * 序列的字节数。严格排除过长编码（C0/C1/F5+）、代理对（ED A0-9F）
+ * 与超 U+10FFFF（F4 90+）。 */
+static int utf8_sequence_length(const char *text)
+{
+    unsigned char c = (unsigned char)text[0];
+    unsigned char c1;
+    unsigned char c2;
+    size_t need;
+
+    if (c < 0x80u)
+      {
+        return 1;
+      }
+
+    if (c >= 0xC2u && c <= 0xDFu)
+      {
+        need = 1;
+      }
+    else if ((c >= 0xE1u && c <= 0xECu) ||
+             (c >= 0xEEu && c <= 0xEFu) ||
+             c == 0xE0u || c == 0xEDu)
+      {
+        need = 2;
+      }
+    else if (c >= 0xF0u && c <= 0xF3u)
+      {
+        need = 3;
+      }
+    else if (c == 0xF4u)
+      {
+        need = 3;
+      }
+    else
+      {
+        return 0;   /* 0x80-0xBF 孤立续字节 / 0xC0,0xC1,0xF5+ 非法 */
+      }
+
+    c1 = (unsigned char)text[1];
+    if ((c1 & 0xC0u) != 0x80u)
+      {
+        return 0;
+      }
+
+    /* 排除过长（E0 80-9F）、代理对（ED A0-BF）、超界（F0 80-8F、
+     * F4 90-BF）。 */
+    if ((c == 0xE0u && c1 < 0xA0u) ||
+        (c == 0xEDu && c1 >= 0xA0u) ||
+        (c == 0xF0u && c1 < 0x90u) ||
+        (c == 0xF4u && c1 >= 0x90u))
+      {
+        return 0;
+      }
+
+    if (need >= 2)
+      {
+        c2 = (unsigned char)text[2];
+        if ((c2 & 0xC0u) != 0x80u)
+          {
+            return 0;
+          }
+      }
+
+    if (need >= 3)
+      {
+        unsigned char c3 = (unsigned char)text[3];
+
+        if ((c3 & 0xC0u) != 0x80u)
+          {
+            return 0;
+          }
+      }
+
+    return (int)(need + 1u);
+}
+
 static int append_json_string(char *buffer,
                               size_t buffer_size,
                               size_t *used,
-                              const char *text)
+                              const char *text,
+                              int *invalid_utf8)
 {
     int err;
 
@@ -262,7 +341,7 @@ static int append_json_string(char *buffer,
 
     if (text) {
         while (*text) {
-            unsigned char c = (unsigned char)*text++;
+            unsigned char c = (unsigned char)*text;
             char escaped[7];
             const char *replacement = NULL;
 
@@ -298,8 +377,28 @@ static int append_json_string(char *buffer,
 
             if (replacement) {
                 err = append_raw(buffer, buffer_size, used, replacement);
+                text++;
+            } else if (c >= 0x80u) {
+                /* UTF-8 兜底清洗：非法字节替换为 '?' 并计数（调用方
+                 * 打日志点名消息角色）。合法多字节序列整段放行。 */
+                int seq = utf8_sequence_length(text);
+
+                if (seq == 0) {
+                    err = append_char(buffer, buffer_size, used, '?');
+                    text++;
+                    if (invalid_utf8) {
+                        (*invalid_utf8)++;
+                    }
+                } else {
+                    int i;
+
+                    for (i = 0; i < seq && err == AGENT_OK; i++) {
+                        err = append_char(buffer, buffer_size, used,
+                                          *text++);
+                    }
+                }
             } else {
-                err = append_char(buffer, buffer_size, used, (char)c);
+                err = append_char(buffer, buffer_size, used, *text++);
             }
             if (err != AGENT_OK) {
                 return err;
@@ -331,6 +430,7 @@ static int append_content_message(char *buffer,
 {
     const char *role;
     int err;
+    int bad_utf8 = 0;
 
     role = message_role_name(entry->role);
     if (!role) {
@@ -341,7 +441,7 @@ static int append_content_message(char *buffer,
     if (err != AGENT_OK) {
         return err;
     }
-    err = append_json_string(buffer, buffer_size, used, role);
+    err = append_json_string(buffer, buffer_size, used, role, NULL);
     if (err != AGENT_OK) {
         return err;
     }
@@ -351,7 +451,8 @@ static int append_content_message(char *buffer,
         if (err != AGENT_OK) {
             return err;
         }
-        err = append_json_string(buffer, buffer_size, used, entry->tool_call_id);
+        err = append_json_string(buffer, buffer_size, used,
+                             entry->tool_call_id, &bad_utf8);
         if (err != AGENT_OK) {
             return err;
         }
@@ -361,9 +462,19 @@ static int append_content_message(char *buffer,
     if (err != AGENT_OK) {
         return err;
     }
-    err = append_json_string(buffer, buffer_size, used, entry->content);
+    err = append_json_string(buffer, buffer_size, used,
+                             entry->content, &bad_utf8);
     if (err != AGENT_OK) {
         return err;
+    }
+
+    if (bad_utf8 > 0) {
+        /* 点名日志：该消息内容带 N 个非法字节（已替换为 ?）。
+         * 历史上工具 UAF 产出的 free-list 指针字节曾以 invalid
+         * unicode 拒整轮请求；此兜底保证只损字节、不废轮次。 */
+        syslog(LOG_WARNING,
+               "[utf8-sanitize] role=%s content invalid_bytes=%d\n",
+               role, bad_utf8);
     }
 
     return append_char(buffer, buffer_size, used, '}');
@@ -376,6 +487,7 @@ static int append_assistant_tool_calls_message(char *buffer,
 {
     uint32_t i;
     int err;
+    int bad_utf8 = 0;
 
     err = append_raw(buffer,
                      buffer_size,
@@ -399,7 +511,7 @@ static int append_assistant_tool_calls_message(char *buffer,
         if (err != AGENT_OK) {
             return err;
         }
-        err = append_json_string(buffer, buffer_size, used, call->id);
+        err = append_json_string(buffer, buffer_size, used, call->id, NULL);
         if (err != AGENT_OK) {
             return err;
         }
@@ -410,7 +522,7 @@ static int append_assistant_tool_calls_message(char *buffer,
         if (err != AGENT_OK) {
             return err;
         }
-        err = append_json_string(buffer, buffer_size, used, call->name);
+        err = append_json_string(buffer, buffer_size, used, call->name, NULL);
         if (err != AGENT_OK) {
             return err;
         }
@@ -418,7 +530,8 @@ static int append_assistant_tool_calls_message(char *buffer,
         if (err != AGENT_OK) {
             return err;
         }
-        err = append_json_string(buffer, buffer_size, used, call->arguments_json);
+        err = append_json_string(buffer, buffer_size, used,
+                             call->arguments_json, &bad_utf8);
         if (err != AGENT_OK) {
             return err;
         }
@@ -426,6 +539,12 @@ static int append_assistant_tool_calls_message(char *buffer,
         if (err != AGENT_OK) {
             return err;
         }
+    }
+
+    if (bad_utf8 > 0) {
+        syslog(LOG_WARNING,
+               "[utf8-sanitize] role=assistant tool_args invalid_bytes=%d\n",
+               bad_utf8);
     }
 
     return append_raw(buffer, buffer_size, used, "]}");
