@@ -13,6 +13,7 @@
 
 #include "smart_home_miloco.h"
 #include "smart_home_miloco_client.h"
+#include "smart_home_miloco_specscan.h"
 
 #include "../smart_home_memory.h"
 #include "../config/cjson_compat.h"
@@ -184,29 +185,8 @@ bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
     return reachable;
 }
 
-/* 危险动作 type_name 黑名单：解析期过滤（device_list 永不展示），
- * 执行期经"iid 必须在 controls 中"间接再拦一道。 */
-static const char *const g_miloco_dangerous_types[] = {
-    "format",            /* 格式化存储卡 */
-    "pop-up",            /* 弹出存储卡 */
-    "restart-device",    /* 重启设备 */
-};
-
-static bool type_is_dangerous(const char *type_name)
-{
-    size_t i;
-
-    if (!type_name) {
-        return false;
-    }
-    for (i = 0; i < sizeof(g_miloco_dangerous_types) /
-                    sizeof(g_miloco_dangerous_types[0]); i++) {
-        if (strcmp(type_name, g_miloco_dangerous_types[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
+/* 危险动作黑名单与类别映射已迁入 smart_home_miloco_specscan.c
+ * （随轻量解析整体迁移，仅 spec 端点使用）。 */
 
 int smart_home_miloco_submit_control(smart_home_miloco_t *service,
                                      const char *did,
@@ -308,31 +288,6 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
 }
 
 /* ── JSON 解析 ─────────────────────────────────────────────── */
-
-static smart_home_miloco_category_t category_from_name(const char *name)
-{
-    if (!name) {
-        return SMART_HOME_MILOCO_CATEGORY_UNKNOWN;
-    }
-    if (strcmp(name, "light") == 0) {
-        return SMART_HOME_MILOCO_CATEGORY_LIGHT;
-    }
-    if (strcmp(name, "air-conditioner") == 0 ||
-        strcmp(name, "air-conditioner-outdoor") == 0) {
-        return SMART_HOME_MILOCO_CATEGORY_AC;
-    }
-    if (strcmp(name, "outlet") == 0 || strcmp(name, "plug") == 0 ||
-        strcmp(name, "switch") == 0) {
-        return SMART_HOME_MILOCO_CATEGORY_OUTLET;
-    }
-    if (strcmp(name, "camera") == 0 || strcmp(name, "video-camera") == 0) {
-        return SMART_HOME_MILOCO_CATEGORY_CAMERA;
-    }
-    if (strcmp(name, "fan") == 0 || strcmp(name, "ceiling-fan") == 0) {
-        return SMART_HOME_MILOCO_CATEGORY_FAN;
-    }
-    return SMART_HOME_MILOCO_CATEGORY_OTHER;
-}
 
 static void copy_text(char *dst, size_t dst_size, const cJSON *value)
 {
@@ -456,19 +411,13 @@ static int parse_device_list(smart_home_miloco_t *service, const char *body,
     return AGENT_OK;
 }
 
-/* 解析 data: {did, name, category, spec:{iid:{...}}}。从 spec 提取
- * 可控清单：可写 bool 属性→开关、可写 uint8+value_list→多档、动作→
- * 按钮；危险 type_name 黑名单过滤。controllable=存在 prop.2.1。 */
+/* 解析 data: {did, name, category, spec:{iid:{...}}}。轻量扫描见
+ * smart_home_miloco_specscan.c——17KB 摄像机 spec 的 cJSON 整树解析
+ * （上千次 malloc/free 风暴，约 130KB 瞬时树落 SRAM 堆区）曾在真机
+ * 引发分配器冻死；现为零堆分配的线性扫描，本函数只剩结果应用。 */
 static int parse_device_spec(smart_home_miloco_t *service, const char *body)
 {
-    cJSON *root;
-    cJSON *data;
-    cJSON *spec;
-    cJSON *item;
-    const cJSON *did;
-    const cJSON *category;
     smart_home_miloco_category_t mapped;
-    const char *category_text;
     char target_did[24];
     size_t dev_index = SMART_HOME_MILOCO_MAX_DEVICES;
     smart_home_miloco_control_t parsed[SMART_HOME_MILOCO_MAX_CONTROLS];
@@ -476,110 +425,13 @@ static int parse_device_spec(smart_home_miloco_t *service, const char *body)
     bool power_ctrl = false;
     size_t i;
 
-    root = cJSON_Parse(body);
-    if (!root) {
+    if (smart_home_miloco_specscan(body, target_did, sizeof(target_did),
+                                   &mapped, parsed,
+                                   SMART_HOME_MILOCO_MAX_CONTROLS,
+                                   &parsed_count, &power_ctrl) != 0)
+      {
         return AGENT_ERROR_PARSE;
-    }
-    data = cJSON_GetObjectItemCaseSensitive(root, "data");
-    did = cJSON_IsObject(data) ?
-        cJSON_GetObjectItemCaseSensitive(data, "did") : NULL;
-    category = cJSON_IsObject(data) ?
-        cJSON_GetObjectItemCaseSensitive(data, "category") : NULL;
-    spec = cJSON_IsObject(data) ?
-        cJSON_GetObjectItemCaseSensitive(data, "spec") : NULL;
-    if (!cJSON_IsString(did) || !did->valuestring[0] ||
-        strlen(did->valuestring) >= sizeof(target_did)) {
-        cJSON_Delete(root);
-        return AGENT_ERROR_PARSE;
-    }
-    strcpy(target_did, did->valuestring);
-    category_text = cJSON_IsString(category) ? category->valuestring : NULL;
-    mapped = category_from_name(category_text);
-
-    cJSON_ArrayForEach(item, spec) {
-        const char *iid = item->string;
-        const cJSON *writeable = cJSON_GetObjectItemCaseSensitive(
-            item, "writeable");
-        const cJSON *desc = cJSON_GetObjectItemCaseSensitive(
-            item, "description");
-        const cJSON *format = cJSON_GetObjectItemCaseSensitive(
-            item, "format");
-        const cJSON *type_name = cJSON_GetObjectItemCaseSensitive(
-            item, "type_name");
-        const cJSON *value_list;
-        smart_home_miloco_control_t *ctrl;
-
-        if (!iid || parsed_count >= SMART_HOME_MILOCO_MAX_CONTROLS) {
-            continue;
-        }
-        if (strncmp(iid, "prop.", 5) == 0) {
-            if (!cJSON_IsTrue(writeable)) {
-                continue;
-            }
-        } else if (strncmp(iid, "action.", 7) == 0) {
-            /* 动作无 writeable 语义，按 spec 约定视为可调用。 */
-        } else {
-            continue;
-        }
-        if (type_is_dangerous(cJSON_IsString(type_name) ?
-                              type_name->valuestring : NULL)) {
-            continue;
-        }
-
-        ctrl = &parsed[parsed_count];
-        memset(ctrl, 0, sizeof(*ctrl));
-        snprintf(ctrl->iid, sizeof(ctrl->iid), "%.13s", iid);
-        snprintf(ctrl->desc, sizeof(ctrl->desc), "%s",
-                 cJSON_IsString(desc) && desc->valuestring[0] ?
-                     desc->valuestring : iid);
-        ctrl->value = 0;
-
-        if (strncmp(iid, "action.", 7) == 0) {
-            ctrl->type = SMART_HOME_MILOCO_CTRL_ACTION;
-            parsed_count++;
-            continue;
-        }
-        if (strcmp(cJSON_IsString(format) ? format->valuestring : "",
-                   "bool") == 0) {
-            ctrl->type = SMART_HOME_MILOCO_CTRL_BOOL;
-            if (strcmp(iid, "prop.2.1") == 0) {
-                power_ctrl = true;
-            }
-            parsed_count++;
-            continue;
-        }
-        /* uint8/uint16 + value_list → ENUM（最多取 4 档）。 */
-        value_list = cJSON_GetObjectItemCaseSensitive(item, "value_list");
-        if (cJSON_IsArray(value_list)) {
-            cJSON *opt;
-            uint8_t count = 0;
-
-            ctrl->type = SMART_HOME_MILOCO_CTRL_ENUM;
-            cJSON_ArrayForEach(opt, value_list) {
-                const cJSON *on = cJSON_GetObjectItemCaseSensitive(opt,
-                                                                   "name");
-                const cJSON *ov = cJSON_GetObjectItemCaseSensitive(opt,
-                                                                   "value");
-
-                if (count >= SMART_HOME_MILOCO_MAX_OPTIONS ||
-                    !cJSON_IsString(on) || !cJSON_IsNumber(ov)) {
-                    continue;
-                }
-                snprintf(ctrl->options[count].name,
-                         sizeof(ctrl->options[count].name), "%s",
-                         on->valuestring);
-                ctrl->options[count].value = (int32_t)ov->valueint;
-                count++;
-            }
-            ctrl->option_count = count;
-            if (count > 0) {
-                parsed_count++;
-            }
-            continue;
-        }
-        /* 其余可写数值属性按 ENUM 无选项处理为不可渲染，跳过。 */
-    }
-    cJSON_Delete(root);
+      }
 
     lock_state(service);
     for (i = 0; i < service->device_count; i++) {
