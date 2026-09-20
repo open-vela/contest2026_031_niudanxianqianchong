@@ -214,6 +214,7 @@ typedef struct {
     /* 顶栏摄像头状态图标（安防页开关联动：off 显 camera-off，
      * 开启显 camera），与 wifi 图标同款跨屏刷新模式。 */
     lv_obj_t *topbar_camera_icons[10];
+    lv_obj_t *topbar_clock_label;   /* 当前屏顶栏时钟（每屏建时覆写） */
     int topbar_camera_icon_count;
     int topbar_camera_on;
     lv_timer_t *network_status_timer;

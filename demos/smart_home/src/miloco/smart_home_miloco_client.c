@@ -38,9 +38,20 @@ static void parse_http_date(const char *text, time_t *out)
         return;
     }
 
-    if (sscanf(text, "%*[^,], %d %7s %d %d:%d:%d",
-               &day, mon, &year, &hour, &minute, &second) < 6) {
-        return;
+    /* 不用 %*[^,] 扫描集：NuttX 默认 CONFIG_LIBC_SCANSET=n，
+     * sscanf 不识别 '[' 转换符导致解析永远失败（曾致 date=-1）。
+     * 用 strchr 跳过星期缩写，从逗号后开始解析。 */
+    {
+        const char *p = strchr(text, ',');
+
+        if (!p) {
+            return;
+        }
+
+        if (sscanf(p + 1, " %d %7s %d %d:%d:%d",
+                   &day, mon, &year, &hour, &minute, &second) < 6) {
+            return;
+        }
     }
 
     for (i = 0; i < 12; i++) {

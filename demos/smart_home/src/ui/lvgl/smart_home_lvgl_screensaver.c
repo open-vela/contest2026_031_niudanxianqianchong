@@ -7,6 +7,8 @@
  */
 
 #include "smart_home_lvgl_internal.h"
+static void screensaver_time_timer_cb(lv_timer_t *timer);
+
 
 static void screensaver_wake_cb(lv_event_t *event)
 {
@@ -77,4 +79,28 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
     label = smart_home_lvgl_label_create(screen, "上滑进入首页",
                                          SMART_HOME_UI_COLOR_PRIMARY_DARK, 14);
     lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -38);
+
+    /* 30 秒定时器：对时成功后自动从占位切换到真实时间。 */
+    lv_timer_create(screensaver_time_timer_cb, 30000, ui);
+}
+
+static void screensaver_time_timer_cb(lv_timer_t *timer)
+{
+    smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
+    struct timespec ts;
+    struct tm tm_now;
+    char buf[16];
+
+    if (!ui || !ui->screensaver_time_label) {
+        return;
+    }
+
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
+        return;
+    }
+
+    ts.tv_sec += 8 * 3600L;
+    gmtime_r(&ts.tv_sec, &tm_now);
+    snprintf(buf, sizeof(buf), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
+    lv_label_set_text(ui->screensaver_time_label, buf);
 }

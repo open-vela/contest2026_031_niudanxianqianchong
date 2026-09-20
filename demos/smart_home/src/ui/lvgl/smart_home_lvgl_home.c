@@ -281,9 +281,10 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                          20);
     lv_obj_align_to(brand, brand_mark, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
-    time = smart_home_lvgl_label_create(bar, "11:37",
+    ui->topbar_clock_label = smart_home_lvgl_label_create(bar, "--:--",
                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
-    lv_obj_align(time, LV_ALIGN_RIGHT_MID, -smart_home_lvgl_pad_x(), 0);
+    lv_obj_align(ui->topbar_clock_label, LV_ALIGN_RIGHT_MID,
+                 -smart_home_lvgl_pad_x(), 0);
 
     /* Keep status icons in a fixed row anchored to the measured time label.
      * This avoids overlap when the rendered font gives the time a wider
@@ -647,6 +648,36 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
     (void)on_count;
 }
 
+/* 统一时钟刷新：首页卡片 + 顶栏 + 屏保，由各定时器调用。 */
+void smart_home_lvgl_update_clock(smart_home_lvgl_t *ui)
+{
+    struct timespec ts;
+    struct tm tm_now;
+    char buf[16];
+
+    if (!ui) {
+        return;
+    }
+
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
+        return;   /* 未同步：各处保持占位 */
+    }
+
+    ts.tv_sec += 8 * 3600L;
+    gmtime_r(&ts.tv_sec, &tm_now);
+    snprintf(buf, sizeof(buf), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
+
+    if (ui->topbar_clock_label) {
+        lv_label_set_text(ui->topbar_clock_label, buf);
+    }
+    if (ui->home_time_label) {
+        lv_label_set_text(ui->home_time_label, buf);
+    }
+    if (ui->screensaver_time_label) {
+        lv_label_set_text(ui->screensaver_time_label, buf);
+    }
+}
+
 static void home_time_update(smart_home_lvgl_t *ui)
 {
     struct timespec ts;
@@ -684,7 +715,10 @@ static void home_time_update(smart_home_lvgl_t *ui)
 
 static void home_time_timer_cb(lv_timer_t *timer)
 {
-    home_time_update((smart_home_lvgl_t *)lv_timer_get_user_data(timer));
+    smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
+
+    home_time_update(ui);
+    smart_home_lvgl_update_clock(ui);
 }
 
 void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
