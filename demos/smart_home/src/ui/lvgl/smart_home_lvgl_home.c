@@ -39,9 +39,9 @@ static const struct scene_mode_s {
     { "观影模式", "执行观影模式", "调暗灯光 · 合上窗帘",
       ICON_MEDIA_VIDEO, 0xF1F4FF },
     { "睡眠模式", "执行睡眠模式", "关闭照明 · 安静守护",
-      ICON_STATUS_DND, 0xF4F2FF },
+      ICON_SCENE_SLEEP, 0xF4F2FF },
     { "离家模式", "执行离家模式", "关闭设备 · 安防布防",
-      ICON_NAV_SECURITY, 0xEDF8F3 },
+      ICON_SCENE_AWAY, 0xEDF8F3 },
 };
 
 static void scene_popup_dismiss(smart_home_lvgl_t *ui)

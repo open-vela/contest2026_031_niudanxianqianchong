@@ -44,6 +44,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:lamp-2", NULL, &smart_home_icon_lamp_2_32, NULL},
     {"asset:lamp-off", NULL, &smart_home_icon_lamp_off_32, NULL},
     {"asset:lamp", NULL, &smart_home_icon_lamp_32, NULL},
+    {"asset:link", NULL, &smart_home_icon_link_32, NULL},
     {"asset:loader", NULL, &smart_home_icon_loader_32, NULL},
     {"asset:lock-open", NULL, &smart_home_icon_lock_open_32, NULL},
     {"asset:lock", NULL, &smart_home_icon_lock_32, NULL},
@@ -63,6 +64,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:propeller", &smart_home_icon_propeller_20, &smart_home_icon_propeller_32, NULL},
     {"asset:robot-vacuum", NULL, &smart_home_icon_robot_vacuum_32, NULL},
     {"asset:robot", &smart_home_icon_robot_20, &smart_home_icon_robot_32, &smart_home_icon_robot_48},
+    {"asset:run", NULL, &smart_home_icon_run_32, NULL},
     {"asset:sailboat", NULL, &smart_home_icon_sailboat_32, NULL},
     {"asset:settings", NULL, &smart_home_icon_settings_32, NULL},
     {"asset:shield", &smart_home_icon_shield_20, &smart_home_icon_shield_32, NULL},
@@ -82,6 +84,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:wifi-off", &smart_home_icon_wifi_off_20, &smart_home_icon_wifi_off_32, NULL},
     {"asset:wifi", &smart_home_icon_wifi_20, &smart_home_icon_wifi_32, NULL},
     {"asset:window", NULL, &smart_home_icon_window_32, NULL},
+    {"asset:zzz", NULL, &smart_home_icon_zzz_32, NULL},
 };
 
 const lv_image_dsc_t *smart_home_lvgl_png_icon_get(const char *name, int requested_size)

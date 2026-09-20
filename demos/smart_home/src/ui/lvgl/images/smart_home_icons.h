@@ -55,7 +55,10 @@ extern "C" {
 #define ICON_STATUS_OK       "asset:home-shield"
 #define ICON_STATUS_FAIL     "asset:cancel"
 #define ICON_LOADING         "asset:loader"
-#define ICON_TOOL            "asset:sparkle-2"
+#define ICON_TOOL            "asset:tool"       /* Agent 工具调用 */
+#define ICON_SCENE_AWAY      "asset:run"        /* 离家模式 */
+#define ICON_SCENE_SLEEP     "asset:zzz"        /* 睡眠模式 */
+#define ICON_SERVICE_MCP     "asset:link"       /* MCP 服务/连接 */
 #define ICON_MEDIA_AUDIO     "asset:music-circle-outline"
 #define ICON_MEDIA_VIDEO     "asset:television-classic"
 #define ICON_MEDIA_PREVIOUS  "asset:player-track-prev"

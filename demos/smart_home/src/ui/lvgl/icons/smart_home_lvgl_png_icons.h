@@ -53,6 +53,7 @@ extern const lv_image_dsc_t smart_home_icon_home_48;
 extern const lv_image_dsc_t smart_home_icon_lamp_2_32;
 extern const lv_image_dsc_t smart_home_icon_lamp_off_32;
 extern const lv_image_dsc_t smart_home_icon_lamp_32;
+extern const lv_image_dsc_t smart_home_icon_link_32;
 extern const lv_image_dsc_t smart_home_icon_loader_32;
 extern const lv_image_dsc_t smart_home_icon_lock_open_32;
 extern const lv_image_dsc_t smart_home_icon_lock_32;
@@ -79,6 +80,7 @@ extern const lv_image_dsc_t smart_home_icon_robot_vacuum_32;
 extern const lv_image_dsc_t smart_home_icon_robot_20;
 extern const lv_image_dsc_t smart_home_icon_robot_32;
 extern const lv_image_dsc_t smart_home_icon_robot_48;
+extern const lv_image_dsc_t smart_home_icon_run_32;
 extern const lv_image_dsc_t smart_home_icon_sailboat_32;
 extern const lv_image_dsc_t smart_home_icon_settings_32;
 extern const lv_image_dsc_t smart_home_icon_shield_20;
@@ -105,6 +107,7 @@ extern const lv_image_dsc_t smart_home_icon_wifi_off_32;
 extern const lv_image_dsc_t smart_home_icon_wifi_20;
 extern const lv_image_dsc_t smart_home_icon_wifi_32;
 extern const lv_image_dsc_t smart_home_icon_window_32;
+extern const lv_image_dsc_t smart_home_icon_zzz_32;
 
 /* `name` must use the stable `asset:<png-stem>` vocabulary. */
 const lv_image_dsc_t *smart_home_lvgl_png_icon_get(const char *name, int requested_size);

@@ -473,7 +473,7 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
-    page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xF2F5FF));
+    page_icon_badge(card, ICON_SERVICE_MCP, lv_color_hex(0xF2F5FF));
     page_title(card, "MCP 服务", "标准 MCP 工具桥");
     page_action(card, ui, PAGE_ACTION_MCP);
 
