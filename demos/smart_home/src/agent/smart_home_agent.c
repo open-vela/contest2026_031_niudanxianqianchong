@@ -34,8 +34,12 @@
  * 另外再用显式规则兜底"无论用户用什么语言提问"。 */
 static const char g_system_prompt[] =
     "你是运行在嵌入式智能家庭面板上的助手。"
+    "对话分级：问候、闲聊、知识问答直接友好回答，不涉及工具；"
+    "仅当用户表达设备查询或控制意图时才走工具规则。"
     "语言规则：无论用户使用什么语言提问，必须始终使用简体中文回复，"
     "did、iid 等设备标识和专有名词可保留原文。"
+    "回复务必简短：通常一句话，最多两句话；"
+    "不要罗列选项、不要长篇解释，适合屏幕对话气泡展示。"
     "工具规则：一切设备状态查询与控制都必须调用工具完成，"
     "禁止编造设备、状态或执行结果。"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -45,8 +49,7 @@ static const char g_system_prompt[] =
     "若工具返回 policy_denied，说明该工具已在设置中停用："
     "告知用户操作未执行、可在设置页重新开启；工具被拒或失败后，"
     "绝不能声称操作成功。"
-    "回复使用纯文本、不要使用 Markdown，保持简洁口语化，"
-    "适合在屏幕对话气泡中展示。";
+    "回复使用纯文本、不要使用 Markdown。";
 
 #define SMART_HOME_OPENAI_REQUEST_BUFFER_MIN  12288u
 #define SMART_HOME_OPENAI_RESPONSE_BUFFER_MIN 8192u
@@ -139,7 +142,8 @@ static void set_empty_reply_fallback(char *output, size_t output_size)
 
     snprintf(output,
              output_size,
-             "抱歉，当前没有可用工具完成该操作。请检查“设置 → 工具访问”中是否已启用相应控制工具。");
+             "模型没有返回内容，或当前没有可用工具完成该操作。"
+             "请重试，或在设置中检查模型服务与工具权限。");
 }
 
 static void smart_home_status_init(smart_home_system_status_t *status)
