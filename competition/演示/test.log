@@ -1,0 +1,853 @@
+(myenv) arongw@arongw22:~/openvela$ picocom -b 115200 /dev/ttyACM0
+picocom v3.1
+
+port is        : /dev/ttyACM0
+flowcontrol    : none
+baudrate is    : 115200
+parity is      : none
+databits are   : 8
+stopbits are   : 1
+escape is      : C-a
+local echo is  : no
+noinit is      : no
+noreset is     : no
+hangup is      : no
+nolock is      : no
+send_cmd is    : sz -vv
+receive_cmd is : rz -vv -E
+imap is        : 
+omap is        : 
+emap is        : crcrlf,delbs,
+logfile is     : none
+initstring     : none
+exit_after is  : not set
+exit is        : no
+
+Type [C-a] [C-h] to see available commands
+Terminal ready
+stage=i2s-before total=286200 used=6024 free=280176 largest=280176
+INFO: ES8311 kheap: stage=i2s-after total=286200 used=6432 free=279768 largest=279768
+INFO: ES8311 ready: i2c=0 addr=0x18 i2s=0 out=/dev/audio/pcm0 in=/dev/audio/pcm_in0
+INFO: ESP-Hosted C6 initialize: attempt=1/2
+INFO: ESP-Hosted C6 reset released: gpio=54 boot_wait_ms=1000
+INFO: ESP-Hosted C6 boot wait complete; probing SDIO
+INFO: ESP-Hosted SDIO: cmd=0 arg=0x00000000 raw=0x00000004 elapsed_us=1160
+INFO: ESP-Hosted SDIO: cmd=5 arg=0x00000000 raw=0x00000004 elapsed_us=940
+INFO: ESP-Hosted SDIO: cmd=5 arg=0x00ff8000 raw=0x00000004 elapsed_us=950
+INFO: ESP-Hosted SDIO: cmd=5 arg=0x00ff8000 raw=0x00000004 elapsed_us=940
+INFO: ESP-Hosted C6 probe: stage=cmd5 R4=0xa0ffff00
+INFO: ESP-Hosted SDIO: cmd=3 arg=0x00000000 raw=0x00000004 elapsed_us=940
+INFO: ESP-Hosted C6 probe: stage=cmd3_rca R6=0x00010000
+INFO: ESP-Hosted SDIO: cmd=7 arg=0x00010000 raw=0x00000004 elapsed_us=950
+INFO: ESP-Hosted C6 probe: stage=cmd7_select R1=0x00001e00
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x00000000 raw=0x00000004 elapsed_us=990
+INFO: ESP-Hosted C6 SDIO: slot=1 width=1 clock=384kHz revision=0x5342270a hardware=0x03c44c83
+INFO: ESP-Hosted C6 probe: CMD5 R4=0xa0ffff00 RCA=0x0001 CCCR=0x32
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x00000400 raw=0x00000004 elapsed_us=990
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x80000402 raw=0x00000004 elapsed_us=980
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x00000600 raw=0x00000004 elapsed_us=980
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x80022000 raw=0x00000004 elapsed_us=980
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x80022202 raw=0x00000004 elapsed_us=980
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x00022000 raw=0x00000004 elapsed_us=990
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x00022200 raw=0x00000004 elapsed_us=980
+INFO: ESP-Hosted Function 1 ready: io_ready=0x02 block_size=512
+INFO: ESP-Hosted C6 CMD53 probe: function=1 address=0x050 int_raw=0x00484000
+INFO: ESP-Hosted SDIO: cmd=52 arg=0x90011801 raw=0x00000004 elapsed_us=960
+INFO: ESP-Hosted SDIO DMA: stage=prepared ctrl=0x00000000 bmod=0x00000000 status=0x0001a906 raw=0x00000000 idsts=0x00000000 bytcnt=24 tcbcnt=4 tbbcnt=0 fifoth=0x01ff0000 own=1 error=0 size=24
+INFO: ESP-Hosted SDIO DMA: stage=started ctrl=0x02000022 bmod=0x00000082 status=0x0001a906 raw=0x00000000 idsts=0x00006000 bytcnt=24 tcbcnt=4 tbbcnt=0 fifoth=0x01ff0000 own=1 error=0 size=24
+INFO: ESP-Hosted C6 config sent: bytes=29 checksum=disabled
+INFO: ESP-Hosted C6 init: chip=0x0d capabilities=0x0d firmware=0x00000000 rxq=20 txq=0
+INFO: ESP-Hosted C6 RPC: WifiInit sent uid=1 bytes=65 config_bytes=29
+INFO: ESP-Hosted C6 RX: ESPInit event
+INFO: ESP-Hosted C6 RPC: WifiInit response uid=1 result=0
+INFO: ESP-Hosted C6 RPC: wifi_init remote_result=0
+INFO: ESP-Hosted C6 RPC: SetWifiMode sent uid=2 value=1 bytes=36
+INFO: ESP-Hosted C6 RPC: SetWifiMode response uid=2 result=0
+INFO: ESP-Hosted C6 RPC: set_sta_mode remote_result=0
+INFO: ESP-Hosted C6 RPC: WifiStart sent uid=3 bytes=34
+INFO: ESP-Hosted C6 RPC: WifiStart response uid=3 result=0
+INFO: ESP-Hosted C6 RPC: wifi_start remote_result=0
+INFO: ESP-Hosted C6 event: wifi_event=43 result=0
+INFO: ESP-Hosted C6 event: wifi_event=2 result=0
+INFO: ESP-Hosted C6 event: STA_START observed
+INFO: ESP-Hosted C6 RPC: GetMACAddress sent uid=4 bytes=34
+INFO: ESP-Hosted C6 RPC: GetMACAddress response uid=4 result=0 mac=10:bd:a3:8b:0c:f4
+INFO: ESP-Hosted C6 WLAN kheap: stage=registered total=286200 used=7360 free=278840 largest=278840
+INFO: ESP-Hosted C6 WLAN registered: wlan0 mac=10:bd:a3:8b:0c:f4
+INFO: ESP-Hosted C6: STA credentials unset; connect skipped
+INFO: P4X DSI backlight static=0 gpio=26
+INFO: P4X DSI host initialize begin
+INFO: MIPI-DSI D-PHY LDO ready channel=3 voltage_mv=2500 lanes=2 rate_mbps=1000 ref_hz=40000000
+INFO: MIPI-DSI clocks enabled bus=0
+INFO: MIPI-DSI PHY clock sources cfg=6 pllref=19 ref_hz=40000000
+INFO: MIPI-DSI PHY PLL configured timeout_ms=100
+INFO: MIPI-DSI DBI configured cmd_mode_cfg=010f7f02 command_ack=1 transfer=LP
+INFO: MIPI-DSI Host ready bus=0
+INFO: P4X DSI host initialize complete
+INFO: P4X DSI panel reset configure gpio=27 active_low=1
+INFO: P4X DSI panel reset assert delay_us=10000
+INFO: P4X DSI panel reset release delay_us=20000
+INFO: P4X DSI panel reset complete
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=8b80 d0_active=3/200 transitions=1 first=000015ad last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=7881 d0_active=2/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=8482 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=8883 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=a884 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=e385 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=8886 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x15 hdr=10b2 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI TX LP sample vc=0 type=0x05 hdr=0011 d0_active=3/200 transitions=4 first=000015bd last=000015bd
+INFO: MIPI-DSI DMA PSRAM buffer allocated bytes=2457600 alignment=64
+INFO: MIPI-DSI DPI clock source_hz=240000000 requested_hz=52000000 divider=5 actual_hz=48000000
+INFO: MIPI-DSI Bridge underrun interrupt disabled (flash-erase safety)
+INFO: MIPI-DSI video state stage=dma-started host_mode=00000000 vid_mode=0000ff02 color=00000000 pkt_size=00000400 phy=000015b9
+INFO: MIPI-DSI bridge state stage=dma-started en=00000001 host_ctrl=00000001 h0=040004e2 h1=000a00a0 v0=0258027c v1=00010017 misc=00004001
+INFO: MIPI-DSI bridge flow stage=dma-started pixel=00000102 flow=00000010 raw=00025800 int_raw=00000002 int_st=00000000
+INFO: MIPI-DSI format decode stage=dma-started bridge_raw=2 bridge_dpi=2 data_in=0 host_color=0
+INFO: MIPI-DSI PHY snapshot stage=dma-started lock=1 clk_stop=0 d0_stop=1 d1_stop=1
+INFO: MIPI-DSI DMA status stage=dma-started enabled=1 controller=00000003 lli=00000000 transferred_items=0 transferred_bytes=0 fifo_left=0 frames=0 latched_errors=00000000
+INFO: MIPI-DSI DMA events stage=dma-started enable=87c0bfe7 status=00000000 done=00000000 errors=00000000 channel_cfg0=0000000f channel_cfg1=0a020001
+INFO: MIPI-DSI Bridge events stage=dma-started raw=00000002 enable=00000000 status=00000000 underrun_raw=0 underrun_status=0 underrun_count=0 first_underrun=0
+INFO: MIPI-DSI DPI DMA started channel=0 size=1024x600 pixel_clock_hz=52000000 frame_bytes=1228800
+INFO: P4X DSI backlight static=1 gpio=26
+INFO: P4X MIPI-DSI framebuffer registered: /dev/fb0 1024x600 RGB565 buffers=2 base=0x48000200 bytes=2457600
+GT911 power-on wait: 100 ms before product-ID probe
+GT911 probing I2C address 0x5d
+ERROR: I2C0 transfer failed: msg=0 phase=address bytes=0 flags=0x0000 addr=0x5d frequency=100000 raw=0x00000400 nack=1 timeout=0 arbitration_lost=0 lines(sda=7:1 scl=8:1) state=4
+ERROR: GT911 probe failed: stage=product-id-read i2c_addr=0x5d frequency=100000 reg=0x8140 ret=-5
+GT911 address probe failed: address=0x5d ret=-5
+GT911 probing I2C address 0x14
+GT911 product id: 39 31 31 00 (911)
+GT911 registered at /dev/input0: I2C0 address=0x14 poll=20ms
+P4X storage bring-up: offset=0x00600000 size=0x00a00000
+P4X default Flash chip initialized: size=0x01000000
+P4X MTD partition: flash_size=0x1000000 offset=0x600000 size=0xa00000 block=64 erase=4096
+P4X LittleFS register: source=/dev/espflash mount=/data
+P4X LittleFS mounted: source=/dev/espflash mount=/data
+
+NuttShell (NSH)
+nsh> INFO: ES8311 kheap: 
+nsh: INFO:: command not found
+nsh> 
+nsh> smart_home
+=== Smart Home Agent Demo ===
+starting LVGL UI
+
+INFO: ESP-Hosted C6 RPC: WifiSetStorage sent uid=5 value=1 bytes=36
+INFO: ESP-Hosted C6 RPC: WifiSetStorage response uid=5 result=0
+INFO: ESP-Hosted C6 RPC: WifiSetConfig sent uid=6 bytes=57 ssid_bytes=3 password_bytes=8
+INFO: ESP-Hosted C6 RPC: WifiSetConfig response uid=6 result=0
+INFO: ESP-Hosted C6 RPC: WifiConnect sent uid=7 bytes=34
+INFO: ESP-Hosted C6 RPC: WifiConnect response uid=7 result=0
+INFO: ESP-Hosted C6 runtime station connect requested
+INFO: ESP-Hosted C6 event: wifi_event=43 result=0
+INFO: ESP-Hosted C6 STA connected; wlan0 carrier on
+Network init-begin: if=wlan0 ip=none gateway=none result=0 init=1 ip_status=1 dns=1 online=0
+[smart_home_net] init-begin if=wlan0 ip=none gateway=none result=0 init=1 ip_status=1 dns=1 online=0
+79128 largest=277304
+INFO: ESP-Hosted C6 WLAN kheap: stage=ifup-after total=286200 used=7072 free=279128 largest=277304
+INFO: ESP-Hosted C6 DHCP data: stage=complete tx_frames=2 tx_dhcp=2 tx_errors=0 rx_frames=2 rx_dhcp=2 rx_dropped=0
+Network: DNS verify OK
+Network init-end: if=wlan0 ip=192.168.251.251 gateway=192.168.251.153 result=0 init=0 ip_status=0 dns=0 online=1
+[smart_home_net] init-end if=wlan0 ip=192.168.251.251 gateway=192.168.251.153 result=0 init=0 ip_status=0 dns=0 online=1
+[milo] sec: serialized
+[cagent_mem] main-stack ptr=0x4826639f region=unknown
+[cagent_mem] smart-home-app ptr=0x48266440 region=unknown
+[smart_home_init] stage=begin ret=0
+[smart_home_init] stage=agent-create-begin ret=0
+[smart_home_init] stage=agent-create-done ret=0
+[milo] start: enter host=
+[milo] start: mutex/sem ready
+[milo] start: stack=0x4831f8d0 bytes=24576
+[milo] start: attr ret=0, creating thread
+[milo] start: pthread_create ret=0
+INFO: [miloco] gateway worker started host= port=1810
+[lvgl] lv_init done
+[smart_home_lvgl] font preload begin path=/data/res/fonts/MiSans-Normal.ttf
+[milo] worker: entry
+[milo] http: begin /Shenzhen?format=%C|%t|%h|%w
+[milo] http: addrinfo ok
+[milo] http: connected fd=4
+[milo] hdr[15] HTTP/1.0 200 OK
+[milo] hdr[30] Access-Control-Allow-Origin: *
+[milo] hdr[34] Cache-Control: public, max-age=600
+[milo] hdr[39] Content-Type: text/plain; charset=utf-8
+[milo] hdr[35] Date: Sun, 20 Sep 2026 12:55:29 GMT
+[milo] hdr[18] Content-Length: 26
+[milo] http: done status=200 len=26
+[milo] weather http date=1789908929 cur=26
+[milo] time set from HTTP Date: 1789908929
+[milo] weather Shenzhen: Clear(晴) 28°C 75% 0km/h
+[milo] worker: poll begin
+[smart_home_lvgl] font preload done size=7943504 buffer=0x48326140 region=PSRAM(user-heap)
+[smart_home_lvgl] font instances source=PSRAM-data size=7943504 font14=0x48316b28 font16=0x483260d8 font18=0x48326100 font24=0x48ac1880 font32=0x48ac1948
+[smart_home_lvgl] disp=0x48ac1a18 indev=0x48ac2c78 input=/dev/input0
+[smart_home_lvgl] build screensaver begin
+[smart_home_lvgl] build screensaver done
+[smart_home_lvgl] build home begin
+[smart_home_lvgl] build home done
+[smart_home_lvgl] build panel begin
+[smart_home_lvgl] build panel done
+[smart_home_lvgl] build security begin
+[smart_home_lvgl] build security done
+[smart_home_lvgl] build more begin
+[smart_home_lvgl] build more done
+[smart_home_lvgl] build network begin
+[smart_home_lvgl] build network done
+[smart_home_lvgl] build miloco begin
+[smart_home_lvgl] build miloco done
+[smart_home_lvgl] build miloco-bind begin
+[smart_home_lvgl] build miloco-bind done
+[smart_home_lvgl] build chat begin
+[smart_home_lvgl] build chat done
+[smart_home_lvgl] build settings begin
+[smart_home_lvgl] build settings done
+[milo] worker: poll begin
+[lvgl] ui init done
+[lvgl] show done, entering run loop
+[milo] worker: poll begin
+[milo] worker: poll begin
+[milo] worker: poll begin
+[milo] save: begin
+[milo] save: request ret=0
+[milo] worker: volatile config applied
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/spec
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=17426
+[milo] http: begin /api/miot/devices/688262994/spec
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=186
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[chat] user: hi
+[cagent_mem] lvgl-agent-worker-stack-base ptr=0x48b4b800 region=unknown
+[cagent_mem] lvgl-agent-worker-stack ptr=0x48b537cf region=unknown
+[agent_worker] start tid=7 policy=1 priority=100 stack_capacity=32736 stack_query=0
+[agent_worker] start network if=wlan0 ip=192.168.251.251 probe=0 init=0 ip_status=0 dns_status=0 online=1
+[cagent_mem] agent-run-stack ptr=0x48b5374b region=unknown
+[agent_event] type=1 iter=0 err=0 tool=- msg=start
+[agent_event] type=3 iter=1 err=0 tool=- msg=step
+[agent_event] type=4 iter=1 err=0 tool=- msg=request
+[cagent_mem] model-request-before fordblks=21669240 mxordblk=21661664 uordblks=11885192
+[cagent_mem] model-request-buffer ptr=0x48b57820 region=unknown
+[cagent_mem] model-request-after fordblks=21656944 mxordblk=21649368 uordblks=11897488
+[cagent_mem] model-response-before fordblks=21656944 mxordblk=21649368 uordblks=11897488
+[cagent_mem] model-response-buffer ptr=0x48b5a828 region=unknown
+[cagent_mem] model-response-after fordblks=21648744 mxordblk=21641168 uordblks=11905688
+[cagent_ov] http_post POST api.deepseek.com:443/v1/chat/completions body=6891 resp_cap=8192 timeout=30000
+[cagent_mem] tls-context ptr=0x48b52dd8 region=unknown
+[cagent_mem] tls-connect-before fordblks=21649536 mxordblk=21641168 uordblks=11904896
+[cagent_ov] connecting api.deepseek.com:443 (timeout 30000 ms)
+[cagent_ov] phase=dns resolving host=api.deepseek.com port=443
+[cagent_ov] phase=dns resolved host=api.deepseek.com family=2 socktype=1
+[cagent_ov] phase=tcp peer=14.116.174.67 port=443
+[cagent_ov] phase=tcp creating socket ...
+[cagent_ov] phase=tcp connect_start fd=6 nonblocking=1
+[cagent_ov] phase=tcp connected host=api.deepseek.com port=443 fd=6
+[cagent_mem] tls-setup-after fordblks=21613400 mxordblk=21607616 uordblks=11941032
+[cagent_mem] tls-handshake-before fordblks=21613376 mxordblk=21607616 uordblks=11941056
+[cagent_ov] phase=tls handshake_wait fd=6 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=6 events=0x1 revents=0x1
+[cagent_ov] phase=tls handshake_wait fd=6 want=read
+[milo] http: done status=200 len=367
+[cagent_ov] phase=tls_handshake wait ready fd=6 events=0x1 revents=0x1
+[cagent_ov] TLS handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+[cagent_ov] phase=tls handshake_ok version=TLSv1.2 cipher=TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384 fd=6
+[cagent_mem] tls-handshake-after fordblks=21604688 mxordblk=21599184 uordblks=11949744
+[cagent_mem] tls-header-buffer ptr=0x48b66c30 region=unknown
+[cagent_ov] phase=http write-header bytes=227
+[cagent_ov] phase=http write-body bytes=6891 chunk=1024
+[cagent_ov] phase=http write-body progress=1024/6891
+[cagent_ov] phase=http write-body progress=2048/6891
+[cagent_ov] phase=http write-body progress=3072/6891
+[cagent_ov] phase=http write-body progress=4096/6891
+[cagent_ov] phase=http write-body progress=5120/6891
+[cagent_ov] phase=http write-body progress=6144/6891
+[cagent_ov] phase=http write-body progress=6891/6891
+[cagent_ov] phase=http write-complete
+[cagent_mem] tls-read-buffer ptr=0x48b66c30 region=unknown
+[cagent_ov] phase=tls_response_header wait ready fd=6 events=0x1 revents=0x1
+[cagent_ov] HTTP status 200 header_bytes=484
+[cagent_ov] phase=tls_response_body wait ready fd=6 events=0x1 revents=0x1
+[cagent_ov] phase=tls_response_body wait ready fd=6 events=0x1 revents=0x1
+[cagent_ov] phase=tcp close_start fd=6
+[cagent_ov] phase=tcp close_done fd=6
+[cagent_ov] http_post done status=200 body_len=673
+[cagent_mem] model-request-finished fordblks=21662088 mxordblk=21641168 uordblks=11892344
+[agent_event] type=5 iter=1 err=0 tool=- msg=ok
+[agent_event] type=2 iter=0 err=0 tool=- msg=done
+[agent_worker] done tid=7 policy=1 priority=100 stack_capacity=32736 stack_query=0
+[agent_worker] done network if=wlan0 ip=192.168.251.251 probe=0 init=0 ip_status=0 dns_status=0 online=1
+[agent] reply(0): 你好！我是你的智能家庭助手，有什么可以帮你的吗？
+[milo] http: begin /Shenzhen?format=%C|%t|%h|%w
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] hdr[15] HTTP/1.0 200 OK
+[milo] hdr[30] Access-Control-Allow-Origin: *
+[milo] hdr[34] Cache-Control: public, max-age=600
+[milo] hdr[39] Content-Type: text/plain; charset=utf-8
+[milo] hdr[35] Date: Sun, 20 Sep 2026 12:56:54 GMT
+[milo] hdr[18] Content-Length: 26
+[milo] http: done status=200 len=26
+[milo] weather http date=1789909014 cur=1789909014
+[milo] weather Shenzhen: Clear(晴) 28°C 75% 0km/h
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[chat] user: mijia she xiang tou yun tai ce shi
+[cagent_mem] lvgl-agent-worker-stack ptr=0x48b537cf region=unknown
+[agent_worker] start tid=8 policy=1 priority=100 stack_capacity=32736 stack_query=0
+[agent_worker] start network if=wlan0 ip=192.168.251.251 probe=0 init=0 ip_status=0 dns_status=0 online=1
+[cagent_mem] agent-run-stack ptr=0x48b5374b region=unknown
+[agent_event] type=1 iter=0 err=0 tool=- msg=start
+[agent_event] type=3 iter=1 err=0 tool=- msg=step
+[agent_event] type=4 iter=1 err=0 tool=- msg=request
+[cagent_mem] model-request-before fordblks=21661680 mxordblk=21641168 uordblks=11892752
+[cagent_mem] model-request-buffer ptr=0x48b57820 region=unknown
+[cagent_mem] model-request-after fordblks=21649384 mxordblk=21641168 uordblks=11905048
+[cagent_mem] model-response-before fordblks=21657584 mxordblk=21649368 uordblks=11896848
+[cagent_mem] model-response-buffer ptr=0x48b5a828 region=unknown
+[cagent_mem] model-response-after fordblks=21649384 mxordblk=21641168 uordblks=11905048
+[cagent_ov] http_post POST api.deepseek.com:443/v1/chat/completions body=7060 resp_cap=8192 timeout=30000
+[cagent_mem] tls-context ptr=0x48b52dd8 region=unknown
+[cagent_mem] tls-connect-before fordblks=21649384 mxordblk=21641168 uordblks=11905048
+[cagent_ov] connecting api.deepseek.com:443 (timeout 30000 ms)
+[cagent_ov] phase=dns resolving host=api.deepseek.com port=443
+[cagent_ov] phase=dns resolved host=api.deepseek.com family=2 socktype=1
+[cagent_ov] phase=tcp peer=14.116.174.67 port=443
+[cagent_ov] phase=tcp creating socket ...
+[cagent_ov] phase=tcp connect_start fd=5 nonblocking=1
+[cagent_ov] phase=tcp connected host=api.deepseek.com port=443 fd=5
+[cagent_mem] tls-setup-after fordblks=21612520 mxordblk=21607616 uordblks=11941912
+[cagent_mem] tls-handshake-before fordblks=21612488 mxordblk=21607616 uordblks=11941944
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] TLS handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+[cagent_ov] phase=tls handshake_ok version=TLSv1.2 cipher=TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384 fd=5
+[cagent_mem] tls-handshake-after fordblks=21603600 mxordblk=21599712 uordblks=11950832
+[cagent_mem] tls-header-buffer ptr=0x48b66a20 region=unknown
+[cagent_ov] phase=http write-header bytes=227
+[cagent_ov] phase=http write-body bytes=7060 chunk=1024
+[cagent_ov] phase=http write-body progress=1024/7060
+[cagent_ov] phase=http write-body progress=2048/7060
+[cagent_ov] phase=http write-body progress=3072/7060
+[cagent_ov] phase=http write-body progress=4096/7060
+[cagent_ov] phase=http write-body progress=5120/7060
+[cagent_ov] phase=http write-body progress=6144/7060
+[cagent_ov] phase=http write-body progress=7060/7060
+[cagent_ov] phase=http write-complete
+[cagent_mem] tls-read-buffer ptr=0x48b66a20 region=unknown
+[cagent_ov] phase=tls_response_header wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] HTTP status 200 header_bytes=484
+[cagent_ov] phase=tls_response_body wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tcp close_start fd=5
+[cagent_ov] phase=tcp close_done fd=5
+[cagent_ov] http_post done status=200 body_len=904
+[cagent_mem] model-request-finished fordblks=21661056 mxordblk=21641168 uordblks=11893376
+[agent_event] type=5 iter=1 err=0 tool=- msg=ok
+[agent_event] type=6 iter=1 err=0 tool=miot_device_list msg=call
+[agent_event] type=7 iter=1 err=0 tool=miot_device_list msg=-
+[agent_event] type=3 iter=2 err=0 tool=- msg=step
+[agent_event] type=4 iter=2 err=0 tool=- msg=request
+[cagent_mem] model-request-before fordblks=21659656 mxordblk=21641168 uordblks=11894776
+[cagent_mem] model-request-buffer ptr=0x48b57820 region=unknown
+[cagent_mem] model-request-after fordblks=21647360 mxordblk=21641168 uordblks=11907072
+[cagent_mem] model-response-before fordblks=21655704 mxordblk=21649368 uordblks=11898728
+[cagent_mem] model-response-buffer ptr=0x48b5a828 region=unknown
+[cagent_mem] model-response-after fordblks=21647488 mxordblk=21641168 uordblks=11906944
+[cagent_ov] http_post POST api.deepseek.com:443/v1/chat/completions body=8224 resp_cap=8192 timeout=30000
+[cagent_mem] tls-context ptr=0x48b52dd8 region=unknown
+[cagent_mem] tls-connect-before fordblks=21646872 mxordblk=21641168 uordblks=11907560
+[cagent_ov] connecting api.deepseek.com:443 (timeout 30000 ms)
+[cagent_ov] phase=dns resolving host=api.deepseek.com port=443
+[cagent_ov] phase=dns resolved host=api.deepseek.com family=2 socktype=1
+[cagent_ov] phase=tcp peer=14.116.174.67 port=443
+[cagent_ov] phase=tcp creating socket ...
+[cagent_ov] phase=tcp connect_start fd=5 nonblocking=1
+[cagent_ov] phase=tcp connected host=api.deepseek.com port=443 fd=5
+[cagent_mem] tls-setup-after fordblks=21612128 mxordblk=21607616 uordblks=11942304
+[cagent_mem] tls-handshake-before fordblks=21612104 mxordblk=21607616 uordblks=11942328
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] TLS handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+[cagent_ov] phase=tls handshake_ok version=TLSv1.2 cipher=TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384 fd=5
+[cagent_mem] tls-handshake-after fordblks=21603304 mxordblk=21599096 uordblks=11951128
+[cagent_mem] tls-header-buffer ptr=0x48b66c88 region=unknown
+[cagent_ov] phase=http write-header bytes=227
+[cagent_ov] phase=http write-body bytes=8224 chunk=1024
+[cagent_ov] phase=http write-body progress=1024/8224
+[cagent_ov] phase=http write-body progress=2048/8224
+[cagent_ov] phase=http write-body progress=3072/8224
+[cagent_ov] phase=http write-body progress=4096/8224
+[cagent_ov] phase=http write-body progress=5120/8224
+[cagent_ov] phase=http write-body progress=6144/8224
+[cagent_ov] phase=http write-body progress=7168/8224
+[cagent_ov] phase=http write-body progress=8192/8224
+[cagent_ov] phase=http_write_body wait ready fd=5 events=0x4 revents=0x4
+[cagent_ov] phase=http write-body progress=8224/8224
+[cagent_ov] phase=http write-complete
+[cagent_mem] tls-read-buffer ptr=0x48b66c88 region=unknown
+[milo] http: begin /Shenzhen?format=%C|%t|%h|%w
+[milo] http: addrinfo ok
+[cagent_ov] phase=tls_response_header wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] HTTP status 200 header_bytes=484
+[milo] http: connected fd=6
+[milo] hdr[15] HTTP/1.0 200 OK
+[milo] hdr[30] Access-Control-Allow-Origin: *
+[milo] hdr[34] Cache-Control: public, max-age=600
+[milo] hdr[39] Content-Type: text/plain; charset=utf-8
+[milo] hdr[35] Date: Sun, 20 Sep 2026 12:57:21 GMT
+[milo] hdr[18] Content-Length: 26
+[milo] http: done status=200 len=26
+[milo] weather http date=1789909041 cur=1789909040
+[milo] weather Shenzhen: Clear(晴) 28°C 75% 0km/h
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=6
+[cagent_ov] phase=tls_response_body wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tcp close_start fd=5
+[cagent_ov] phase=tcp close_done fd=5
+[cagent_ov] http_post done status=200 body_len=1288
+[cagent_mem] model-request-finished fordblks=21660552 mxordblk=21602184 uordblks=11893880
+[agent_event] type=5 iter=2 err=0 tool=- msg=ok
+[agent_event] type=6 iter=2 err=0 tool=miot_device_control msg=call
+[agent_event] type=7 iter=2 err=0 tool=miot_device_control msg=-
+[agent_event] type=3 iter=3 err=0 tool=- msg=step
+[agent_event] type=4 iter=3 err=0 tool=- msg=request
+[cagent_mem] model-request-before fordblks=21659152 mxordblk=21602184 uordblks=11895280
+[cagent_mem] model-request-buffer ptr=0x48b57820 region=unknown
+[cagent_mem] model-request-after fordblks=21647152 mxordblk=21602184 uordblks=11907280
+[cagent_mem] model-response-before fordblks=21655240 mxordblk=21602184 uordblks=11899192
+[cagent_mem] model-response-buffer ptr=0x48b5a828 region=unknown
+[cagent_mem] model-response-after fordblks=21647048 mxordblk=21602184 uordblks=11907384
+[cagent_ov] http_post POST api.deepseek.com:443/v1/chat/completions body=8666 resp_cap=8192 timeout=30000
+[cagent_mem] tls-context ptr=0x48b52dd8 region=unknown
+[cagent_mem] tls-connect-before fordblks=21647056 mxordblk=21602184 uordblks=11907376
+[cagent_ov] connecting api.deepseek.com:443 (timeout 30000 ms)
+[cagent_ov] phase=dns resolving host=api.deepseek.com port=443
+[cagent_ov] phase=dns resolved host=api.deepseek.com family=2 socktype=1
+[cagent_ov] phase=tcp peer=14.116.174.67 port=443
+[cagent_ov] phase=tcp creating socket ...
+[cagent_ov] phase=tcp connect_start fd=5 nonblocking=1
+[cagent_ov] phase=tcp connected host=api.deepseek.com port=443 fd=5
+[cagent_mem] tls-setup-after fordblks=21611648 mxordblk=21602184 uordblks=11942784
+[cagent_mem] tls-handshake-before fordblks=21611624 mxordblk=21602184 uordblks=11942808
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=6
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tls handshake_wait fd=5 want=read
+[cagent_ov] phase=tls_handshake wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] TLS handshake OK: TLSv1.2 / TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+[cagent_ov] phase=tls handshake_ok version=TLSv1.2 cipher=TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384 fd=5
+[cagent_mem] tls-handshake-after fordblks=21602832 mxordblk=21598520 uordblks=11951600
+[cagent_mem] tls-header-buffer ptr=0x48b66ec8 region=unknown
+[cagent_ov] phase=http write-header bytes=227
+[cagent_ov] phase=http write-body bytes=8666 chunk=1024
+[cagent_ov] phase=http write-body progress=1024/8666
+[cagent_ov] phase=http write-body progress=2048/8666
+[cagent_ov] phase=http write-body progress=3072/8666
+[cagent_ov] phase=http write-body progress=4096/8666
+[cagent_ov] phase=http write-body progress=5120/8666
+[cagent_ov] phase=http write-body progress=6144/8666
+[cagent_ov] phase=http write-body progress=7168/8666
+[cagent_ov] phase=http write-body progress=8192/8666
+[cagent_ov] phase=http_write_body wait ready fd=5 events=0x4 revents=0x4
+[cagent_ov] phase=http_write_body wait ready fd=5 events=0x4 revents=0x4
+[cagent_ov] phase=http write-body progress=8666/8666
+[cagent_ov] phase=http write-complete
+[cagent_mem] tls-read-buffer ptr=0x48b66ec8 region=unknown
+[cagent_ov] phase=tls_response_header wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] HTTP status 200 header_bytes=484
+[milo] http: done status=200 len=367
+[milo] http: begin /api/miot/devices/1214024867/control
+[milo] http: addrinfo ok
+[cagent_ov] phase=tls_response_body wait ready fd=5 events=0x1 revents=0x1
+[cagent_ov] phase=tcp close_start fd=5
+[cagent_ov] phase=tcp close_done fd=5
+[cagent_ov] http_post done status=200 body_len=645
+[cagent_mem] model-request-finished fordblks=21660248 mxordblk=21602184 uordblks=11894184
+[agent_event] type=5 iter=3 err=0 tool=- msg=ok
+[agent_event] type=2 iter=0 err=0 tool=- msg=done
+[agent_worker] done tid=8 policy=1 priority=100 stack_capacity=32736 stack_query=0
+[agent_worker] done network if=wlan0 ip=192.168.251.251 probe=0 init=0 ip_status=0 dns_status=0 online=1
+[agent] reply(0): 已向米家摄像头（小米智能摄像机 3 3K，卧室）下发云台动作，指令已提交成功。
+[milo] http: connected fd=6
+[milo] http: done status=200 len=240
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] http: begin /Shenzhen?format=%C|%t|%h|%w
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] hdr[15] HTTP/1.0 200 OK
+[milo] hdr[30] Access-Control-Allow-Origin: *
+[milo] hdr[34] Cache-Control: public, max-age=600
+[milo] hdr[39] Content-Type: text/plain; charset=utf-8
+[milo] hdr[35] Date: Sun, 20 Sep 2026 12:57:26 GMT
+[milo] hdr[18] Content-Length: 26
+[milo] http: done status=200 len=26
+[milo] weather http date=1789909046 cur=1789909046
+[milo] weather Shenzhen: Clear(晴) 28°C 75% 0km/h
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=367
+[milo] http: begin /api/miot/devices/1214024867/control
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=155
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+INFO: MIPI-CSI D-PHY LDO ready channel=3 voltage_mv=2500
+SC2336 CSI prepare: stage=i2c_initialize bus=0
+SC2336 CSI prepare: stage=i2c_initialize result=0
+SC2336 CSI prepare: stage=product_id address=0x30 frequency=100000
+SC2336 detected: address=0x30 product_id=0xcb3a
+SC2336 CSI prepare: stage=product_id result=0 product_id=0xcb3a
+SC2336 CSI prepare: stage=profile_configure raw8=1024x600 lanes=2 dt=0x2a
+SC2336 profile configured: RAW8 1024x600 30fps, 2-lane 288Mbps
+SC2336 CSI prepare: stage=profile_configure result=0
+SC2336 CSI profile ready: 2 lane(s), dt=0x2a, 1024x600 RAW8 sensor_rate=288Mbps/lane phy_rate=200Mbps/lane
+INFO: MIPI-CSI revision: chip=3.2 build_min=301 bridge_color_conversion=1
+INFO: MIPI-CSI initialize: stage=begin lanes=2 dt=0x2a raw_bpp=8 width=1024 height=600 lane_rate_mbps=200
+INFO: MIPI-CSI initialize: stage=lock result=0
+INFO: MIPI-CSI initialize: stage=phy_clock_enable source=6
+INFO: MIPI-CSI initialize: stage=host_bridge_clock_reset
+INFO: MIPI-CSI initialize: stage=host_bridge_clock_reset result=0
+INFO: MIPI-CSI initialize: stage=hal_initialize lanes=2 width=1024 height=600 bpp=8 lane_rate_mbps=200
+INFO: MIPI-CSI initialize: stage=hal_initialize result=0
+INFO: MIPI-CSI initialize: stage=isp_configure result=0 isp_en=1 mipi_data_en=1 input_words32=1024 cntl=0x80002443
+INFO: MIPI-CSI initialize: stage=bridge_configure width=1024 height=600 dt=0x2a burst_words=512 fifo_threshold=960 words64_per_line=256 bridge_rows=599
+INFO: MIPI-CSI initialize: stage=bridge_configure result=0
+INFO: MIPI-CSI bridge: data_type=0x00002f12 dma_req=0x00020200 dmablk_size=0x00001fff
+INFO: MIPI-CSI bridge: host_cm_ctrl=0x00000803
+INFO: MIPI-CSI initialize: stage=complete frame_bytes=1228800
+[smart_home_camera] start path=/dev/video0 source=1024x600 rgb565 preview=512x300 target=15fps
+stage=lock result=0
+INFO: MIPI-CSI start: stage=frame_buffer_cache_sync
+INFO: MIPI-CSI start: stage=frame_buffer_cache_sync result=0
+INFO: MIPI-CSI start: stage=dma_prepare
+INFO: MIPI-CSI DMA prepare: stage=begin bytes=1228800 alignment=0
+INFO: MIPI-CSI DMA prepare: stage=dma_clock_share
+INFO: MIPI-CSI DMA prepare: stage=dma_clock_share result=0
+INFO: MIPI-CSI DMA prepare: stage=dma_channel_configure
+INFO: MIPI-CSI DMA prepare: stage=dma_channel_configure result=0
+INFO: MIPI-CSI DMA prepare: stage=dma_lli_cache_sync
+INFO: MIPI-CSI DMA prepare: stage=dma_lli_cache_sync result=0
+INFO: MIPI-CSI DMA prepare: stage=dma_irq_setup
+INFO: MIPI-CSI DMA prepare: stage=dma_irq_setup result=0 mode=shared-dsi cpuint=-1
+INFO: MIPI-CSI DMA prepare: stage=bridge_error_polling
+INFO: MIPI-CSI DMA prepare: stage=bridge_error_polling result=0
+INFO: MIPI-CSI DMA prepare: stage=irq_enable
+INFO: MIPI-CSI DMA prepare: stage=complete result=0
+INFO: MIPI-CSI start: stage=dma_channel_enable channel=1
+INFO: MIPI-CSI start: stage=dma_channel_enable channel=1 chen=0x00000003 enabled=1
+INFO: MIPI-CSI start: stage=bridge_enable
+INFO: MIPI-CSI start: stage=complete result=0
+SC2336 stream on
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=6
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=6
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=6
+[milo] http: done status=200 len=366
+SC2336 stream off
+CSI delivery: delivered=339 no_buffer=0 requeue_errors=0 copy_avg_us=20707 copy_max_us=30000
+[smart_home_camera] stop
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=366
+[milo] worker: poll begin
+[milo] http: begin /api/miot/status
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=307
+[milo] http: begin /api/miot/device_list
+[milo] http: addrinfo ok
+[milo] http: connected fd=5
+[milo] http: done status=200 len=632
+[milo] http: begin /api/miot/devices/1214024867/status?iid=prop.2.1,prop.2.3,prop.2.5,prop.2.6,prop.2.7,prop.2.9,prop.2.11
+[milo] http: addrinfo ok
+[milo] http: connected fd=5

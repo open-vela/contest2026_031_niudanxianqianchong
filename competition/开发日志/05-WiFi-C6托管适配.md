@@ -4,7 +4,7 @@
 | --- | --- |
 | 适配对象 | ESP32-P4X-Function-EV-Board，板载 ESP32-C6-MINI-1 协处理器；配置 `configs/smart_home`（实板验证用本地未跟踪目录 `configs/smart_home_local`） |
 | 协议与总线 | SDIO（P4 为 Host，C6 为 Slave；实测 1-bit、请求 400 kHz 按分频打印 384 kHz，Function 1 块大小 512 B）承载 ESP-Hosted 控制面 RPC 与 WLAN 数据面 |
-| 当前真机状态 | 手机热点实测已通过：SDIO 枚举、ESP-Hosted 控制面（WifiInit/WifiSetConfig/WifiConnect/Event_StaConnected）、`wlan0` 注册、carrier、DHCP、IPv4/网关、DNS、`api.deepseek.com:443` TCP 建连；TLS 握手与模型 HTTP 响应尚无完整验收证据 |
+| 当前真机状态 | 手机热点实测已通过：SDIO 枚举、ESP-Hosted 控制面（WifiInit/WifiSetConfig/WifiConnect/Event_StaConnected）、`wlan0` 注册、carrier、DHCP、IPv4/网关、DNS、`api.deepseek.com:443` TCP 建连。**2026-09-20 更新**：cAGENT TLS 路径真机全通（DeepSeek 握手/请求/响应），并在米家 Agent 工具控制闭环中稳定运行（出处见附录 6） |
 | 关键代码入口 | `board/esp32p4/esp32p4-function-ev-board/src/esp32p4_hosted.c` 的 `board_esp_hosted_initialize()`（由 `src/esp32p4_bringup.c` 调用）；芯片层 `chips/esp32p4/common/espressif/esp_hosted_{sdio,transport,wlan}.c`（均已核实存在于仓库） |
 
 ## 一、适配背景与目标
@@ -32,7 +32,7 @@ ESP32-P4 不带原生 Wi-Fi/Bluetooth 射频；Function EV Board 上的 ESP32-C6
 3. **ESP-Hosted 控制面**（2026-09-14 记录）：建立持续收包路径与序列号/消息类型匹配的同步 RPC；实板依次验收 WifiInit → 设置 STA 模式 → WifiStart → `STA_START` 事件 → `wlan0` 注册（含 GetMAC）。STA 配置与关联 RPC（`WifiSetStorage(RAM)` → `WifiSetConfig` → `WifiConnect`）初期在 SetConfig 处超时，经 2026-09-16 两轮排查修复后实板收到成功响应与 `Event_StaConnected`（775）。
 4. **WLAN 数据面**：将 Function 1 的 WLAN 负载接收回调转换为 NuttX `netdev_lowerhalf_s`/`netpkt` 输入，待发帧经 ESP-Hosted 封装后由 CMD53 发送；carrier 仅由 `STA_CONNECTED`/`STA_DISCONNECTED` 事件驱动。2026-09-18 手机热点复测通过 DHCP（`tx_dhcp=2/rx_dhcp=2`）、IPv4/网关、DNS 与模型端 TCP 建连。
 5. **传输层缺陷修复（HTTP 发送阻塞）**：TLS 请求体产生的大以太网帧因 CMD53 字节模式 512 B 限制无法发出，日志停在 `phase=http write-body`；修复为整 512 B 块模式 + 尾部字节模式分段，并启用 `CONFIG_NET_TCP_WRITE_BUFFERS`。主机侧回归已通过，真机验收在该文档中标注为待执行。
-6. **TLS/模型调用（进行中）**：手机热点会话在 TCP 建连、TLS 上下文建立后串口异常中止（`FATAL: read zero bytes from port`）；HTTP 修复文档的现象描述表明后续会话已完成 TLS 握手并推进到 HTTP body 写入阶段，但源文档中尚无 TLS 握手逐字日志、HTTP 状态码或模型响应的验收记录。
+6. **TLS/模型调用（2026-09-20 已闭环）**：手机热点会话在 TCP 建连、TLS 上下文建立后串口异常中止（`FATAL: read zero bytes from port`）；HTTP 修复文档的现象描述表明后续会话已完成 TLS 握手并推进到 HTTP body 写入阶段。**2026-09-20 米家链路七层排障闭环中，cAGENT TLS 握手/请求/响应在真机全通（DeepSeek）**，见 `docs/开发日志/应用/2026-09-20-米家链路七层排障闭环.md`（附录 6）。
 
 ## 三、关键代码与配置
 
@@ -228,8 +228,8 @@ term_exitfunc: reset failed for dev UNKNOWN: Input/output Error
 | `wlan0` 注册与 procfs/堆稳定性 | 已实板验证 | 注册显示 C6 MAC、初始地址 `0.0.0.0`；ProcFS 跨堆释放修复后 `DOWN → UP → DOWN` 多次读取正常 |
 | AP 关联、carrier、DHCP、IPv4、DNS | 已在手机热点实板验证 | `tx_dhcp=2/rx_dhcp=2`、无错误/丢弃、DNS verify OK（4.3）；方案 W2 通过条件满足，其他 AP 须分别复测（5.6） |
 | 模型 endpoint TCP 443 建连 | 已在手机热点实板验证 | `phase=tcp connected host=api.deepseek.com port=443`（4.3） |
-| TLS 握手 | 证据不完整 | HTTP 修复文档陈述已完成握手并推进到 `http write-body`，但无逐字握手日志；方案文档（2026-09-18）未标为已验收 |
-| HTTP 发送（修复后）、模型调用 | 待真机复测/待证据 | 修复后主机回归通过，真机验收标准已定义待执行；无 HTTP 状态码或模型响应记录 |
+| TLS 握手 | 已实板验证（2026-09-20） | 米家链路排障中验证 cAGENT TLS 路径真机稳定（DeepSeek 握手/请求/响应全通），出处：附录 6 |
+| HTTP 发送（修复后）、模型调用 | 已实板验证（2026-09-20） | Agent 经 LLM→miot_device_list→miot_device_control 完成摄像机真实控制，多轮对话正常（出处：附录 6）；该闭环同时覆盖 5.7 修复后的发送路径 |
 
 尚未验证、在取得证据前不宣称的能力：多次冷启动与复位稳定性；4-bit/高速模式、CMD53 FIFO 连续收发、数据 DMA、Function 1 中断；WPA3、SoftAP、断线自动恢复；`eth0`/`wlan0` 并存时的默认路由策略（须先在网络栈明确路由策略）；C6 固件版本与构建配置（`firmware=0x00000000` 不可推断）。测试脚本为宿主端桩验证，不模拟真实 SDIO、C6 调度、Flash 行为或并发时序，不能替代真机验收。
 
@@ -242,3 +242,4 @@ term_exitfunc: reset failed for dev UNKNOWN: Input/output Error
 | 3 | `docs/开发日志/ESP32-P4X-C6-ESP-Hosted控制面与WLAN数据面开发记录.md` | 2026-09-14 控制面/`wlan0` 数据面问题清单、2026-09-18 手机热点复测（DHCP/DNS/TCP） |
 | 4 | `docs/开发日志/应用/2026-09-16-C6-WifiSetConfig超时排查与修复.md` | SetConfig 超时两轮排查、旧版协议嵌套消息修复、回归验证与固件指纹 |
 | 5 | `docs/开发日志/ESP32-P4X-SmartHome-HTTP发送阻塞修复.md` | HTTP 发送阻塞根因（CMD53 512 B 字节模式限制）、修复内容、主机验证与待执行真机验收标准 |
+| 6 | `docs/开发日志/应用/2026-09-20-米家链路七层排障闭环.md` | 米家链路七层问题闭环（2026-09-20），含 cAGENT TLS 路径真机全通与 Agent 工具控制摄像机验证 |

@@ -14,21 +14,22 @@ csi_probe / video_test）。
 
 | # | 文档 | 适配域 | 真机验收状态 |
 | --- | --- | --- | --- |
-| 01 | [系统启动与芯片移植](01-系统启动与芯片移植.md) | Route A 芯片层、板级 bring-up、最小系统（USB Serial/JTAG + NSH）、ESP-HAL 治理 | ✅ NSH 启动与内建命令通过 |
-| 02 | [MIPI-DSI 屏幕显示适配](02-MIPI-DSI屏幕显示适配.md) | MIPI-DSI Host、EK79007 面板（1024×600）、NuttX framebuffer、LVGL | ✅ 色条 / `/dev/fb0` + `fb` 示例 / LVGL 静态首页三项通过 |
-| 03 | [触摸 GT911 适配](03-触摸GT911适配.md) | I2C 触摸、`/dev/input0`、gt911_probe | ✅ 单指 DOWN/MOVE/UP 通过；多点与 LVGL 输入待验证 |
-| 04 | [MIPI-CSI 摄像头 SC2336 适配](04-MIPI-CSI摄像头SC2336适配.md) | MIPI-CSI、CSI Host/Bridge、GDMA、V4L2（RGB565） | ✅ 300 帧 `app_fps=30.02`、`sequence_gaps=0` 吞吐验收通过 |
-| 05 | [WiFi 适配（板载 C6 · ESP-Hosted）](05-WiFi-C6托管适配.md) | SDIO 总线、ESP-Hosted 控制面、WLAN 数据面 | ✅ 枚举→关联→DHCP→DNS→TCP 443；TLS/模型调用证据待补 |
-| 06 | [以太网适配](06-以太网适配.md) | P4 内置 EMAC + 外置 PHY、`eth0` | 方案 + 代码就绪，待真机验证 |
-| 07 | [音频 ES8311 适配](07-音频ES8311适配.md) | ES8311 codec、I2S/GDMA、语音链路（TTS/ASR/KWS） | ✅ 构建通过 + 真机初始化通过；录放与语音链路验收进行中 |
-| 08 | [存储 LittleFS 与系统集成](08-存储LittleFS与系统集成.md) | LittleFS 数据分区（`0x600000`，10 MiB）、PSRAM 资源预加载、部署脚本 | ✅ `/data` 挂载 + 完整 MiSans（7,943,504 B）预加载通过 |
+| 01 | [系统启动与芯片移植](开发日志/01-系统启动与芯片移植.md) | Route A 芯片层、板级 bring-up、最小系统（USB Serial/JTAG + NSH）、ESP-HAL 治理 | ✅ NSH 启动与内建命令通过 |
+| 02 | [MIPI-DSI 屏幕显示适配](开发日志/02-MIPI-DSI屏幕显示适配.md) | MIPI-DSI Host、EK79007 面板（1024×600）、NuttX framebuffer、LVGL | ✅ 色条 / `/dev/fb0` + `fb` 示例 / LVGL 静态首页三项通过 |
+| 03 | [触摸 GT911 适配](开发日志/03-触摸GT911适配.md) | I2C 触摸、`/dev/input0`、gt911_probe | ✅ 单指 DOWN/MOVE/UP 通过；多点与 LVGL 输入待验证 |
+| 04 | [MIPI-CSI 摄像头 SC2336 适配](开发日志/04-MIPI-CSI摄像头SC2336适配.md) | MIPI-CSI、CSI Host/Bridge、GDMA、V4L2（RGB565） | ✅ 300 帧 `app_fps=30.02`、`sequence_gaps=0` 吞吐验收通过 |
+| 05 | [WiFi 适配（板载 C6 · ESP-Hosted）](开发日志/05-WiFi-C6托管适配.md) | SDIO 总线、ESP-Hosted 控制面、WLAN 数据面 | ✅ 枚举→关联→DHCP→DNS→TCP 443→TLS/模型对话（2026-09-20 真机闭环） |
+| 06 | [以太网适配](开发日志/06-以太网适配.md) | P4 内置 EMAC + 外置 PHY、`eth0` | 方案 + 代码就绪，待真机验证 |
+| 07 | [音频 ES8311 适配](开发日志/07-音频ES8311适配.md) | ES8311 codec、I2S/GDMA、语音链路（TTS/ASR/KWS） | ✅ 构建通过 + 真机初始化通过；录放与语音链路验收进行中 |
+| 08 | [存储 LittleFS 与系统集成](开发日志/08-存储LittleFS与系统集成.md) | LittleFS 数据分区（`0x600000`，10 MiB）、PSRAM 资源预加载、部署脚本 | ✅ `/data` 挂载 + 完整 MiSans（7,943,504 B）预加载通过 |
+| 09 | [智能家居应用](开发日志/09-智能家居应用.md) | cAGENT 云端对话（DeepSeek）、米家设备控制、LVGL 中控 UI、摄像头预览接入 | ✅ 米家控制 + Agent 工具链真机闭环；摄像头 UI 预览推进中 |
 
 ## 与大赛评分维度的对应
 
 | 评分维度（分值） | 对应证据 |
 | --- | --- |
 | 技术难度（30） | 新芯片从 0 到 1 的 Route A 移植（01）；MIPI-DSI/CSI 双高速接口、SDIO 托管 WiFi、GDMA 音频等底层驱动扩展（02/04/05/07）；携带 2 个 nuttx V4L2 修复 patch（04） |
-| 项目完整度（20） | 40+ 独立 defconfig 配置矩阵、probe-first 独立验证程序（`app/`）、SmartHome 可运行 Demo；本目录 8 份文档含完整适配流程与复现命令 |
+| 项目完整度（20） | 40+ 独立 defconfig 配置矩阵、probe-first 独立验证程序（`app/`）、SmartHome 可运行 Demo；本目录 9 份文档含完整适配流程与复现命令 |
 | AI 开发（10） | AI Coding 日志已按大赛要求归集至仓内 `logs/`（见《AI Coding 日志归集与提交手册》） |
 | 展示效果（10） | 各文档"适配证据"章节的真机日志与视觉验收记录可直接用于路演材料 |
 
@@ -47,5 +48,13 @@ csi_probe / video_test）。
 1. 专属仓代码（本仓 `chips/` + `board/` + `drivers/` + `app/` + `demos/` + `scripts/`）；
 2. AI Coding 日志：仓内 `logs/`；
 3. 作品介绍文档（.docx / .pdf / .pptx）与演示视频（≤ 5 分钟）另行准备，
-   本目录 8 份证据文档可作为介绍文档的技术附录；
+   本目录 9 份证据文档（01–08 硬件适配 + 09 智能家居应用）可作为介绍文档的技术附录；
 4. 仓库 README 为作品入口（名称、赛道、运行方式、简介）。
+
+## 其他材料
+
+| 文件 | 说明 |
+| --- | --- |
+| [作品技术报告-初稿.md](作品技术报告-初稿.md) / [.docx](作品技术报告-初稿.docx) | 按组委会《作品提交模板》撰写的作品技术报告（待补充占位项后定稿） |
+| [演示/test.log](演示/test.log) | 真机串口演示日志样例（852 行，含米家控制与云端对话过程；凭据仅出现长度无实际值） |
+| `2026 首届 openvela AI 硬件开发者大赛 - 作品提交模板.docx` | 组委会原始模板（提交打包时移出压缩包，不入仓评审视图） |
