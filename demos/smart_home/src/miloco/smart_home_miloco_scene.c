@@ -17,6 +17,8 @@
 
 #include "smart_home_miloco.h"
 
+#include <cagent/types.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -161,7 +163,10 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
                   {
                     if (device_actions > 0 && used < report_size - 96u)
                       {
-                        report[used++] = '、';
+                        /* '、' 是多字节 UTF-8，不能写成字符常量。 */
+                        used += (size_t)snprintf(report + used,
+                                                 report_size - used,
+                                                 "、");
                       }
 
                     used += (size_t)snprintf(
