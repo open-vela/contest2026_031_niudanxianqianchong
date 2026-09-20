@@ -166,11 +166,17 @@ typedef struct {
     lv_obj_t *settings_page;
     lv_obj_t *settings_keyboard;
     lv_obj_t *settings_model_api_body;
-    lv_obj_t *settings_model_api_toggle;
     lv_obj_t *settings_tool_directory_body;
-    lv_obj_t *settings_tool_directory_toggle;
     lv_obj_t *settings_system_status_body;
     lv_obj_t *settings_system_status_toggle;
+    /* 服务管理独立屏（更多页卡片入口）：模型服务/工具与权限/MCP/Node */
+    lv_obj_t *screen_model;
+    lv_obj_t *model_keyboard;
+    lv_obj_t *screen_tools;
+    lv_obj_t *screen_mcp;
+    lv_obj_t *screen_node;
+    lv_obj_t *settings_model_api_toggle;
+    lv_obj_t *settings_tool_directory_toggle;
     lv_obj_t *settings_backend_dd;
     lv_obj_t *settings_host_input;
     lv_obj_t *settings_path_input;

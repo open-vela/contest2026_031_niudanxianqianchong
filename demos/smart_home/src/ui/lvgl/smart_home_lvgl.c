@@ -100,6 +100,12 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_build_settings_screen(ui);
     smart_home_lvgl_log_build_stage("settings", "done");
 
+    /* 服务管理独立屏（更多页第二行卡片入口）。 */
+    smart_home_lvgl_build_model_screen(ui);
+    smart_home_lvgl_build_tools_screen(ui);
+    smart_home_lvgl_build_mcp_screen(ui);
+    smart_home_lvgl_build_node_screen(ui);
+
 #ifdef CONFIG_SMART_HOME_KWS
     /* 语音会话联动：KWS 常驻监听（kws.json enabled 时）+
      * TTS 播报期间自动暂停推理。 */

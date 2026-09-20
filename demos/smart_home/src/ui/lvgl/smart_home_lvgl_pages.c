@@ -24,9 +24,10 @@ enum page_action_e {
     PAGE_ACTION_SETTINGS,
     PAGE_ACTION_NETWORK,
     PAGE_ACTION_MILOCO,
-    PAGE_ACTION_MODEL,     /* 设置页·模型服务卡 */
-    PAGE_ACTION_TOOLS,     /* 设置页·工具与权限卡 */
-    PAGE_ACTION_STATUS,    /* 设置页·系统健康卡（MCP/Node 状态所在） */
+    PAGE_ACTION_MODEL,     /* 模型服务独立屏 */
+    PAGE_ACTION_TOOLS,     /* 工具与权限独立屏 */
+    PAGE_ACTION_MCP,       /* MCP 服务独立屏 */
+    PAGE_ACTION_NODE,      /* Node 服务独立屏 */
 };
 
 /* DHCP and DNS use substantially more stack than the 2 KiB pthread default.
@@ -119,18 +120,19 @@ static void page_click_cb(lv_event_t *event)
     } else if (action == PAGE_ACTION_SETTINGS && ui->screen_settings) {
         lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
                          180, 0, false);
-    } else if (action == PAGE_ACTION_MODEL && ui->screen_settings) {
-        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+    } else if (action == PAGE_ACTION_MODEL && ui->screen_model) {
+        lv_scr_load_anim(ui->screen_model, LV_SCR_LOAD_ANIM_MOVE_LEFT,
                          180, 0, false);
-        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_MODEL);
-    } else if (action == PAGE_ACTION_TOOLS && ui->screen_settings) {
-        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+    } else if (action == PAGE_ACTION_TOOLS && ui->screen_tools) {
+        smart_home_lvgl_refresh_tool_directory(ui);
+        lv_scr_load_anim(ui->screen_tools, LV_SCR_LOAD_ANIM_MOVE_LEFT,
                          180, 0, false);
-        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_TOOLS);
-    } else if (action == PAGE_ACTION_STATUS && ui->screen_settings) {
-        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+    } else if (action == PAGE_ACTION_MCP && ui->screen_mcp) {
+        lv_scr_load_anim(ui->screen_mcp, LV_SCR_LOAD_ANIM_MOVE_LEFT,
                          180, 0, false);
-        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_SYSTEM);
+    } else if (action == PAGE_ACTION_NODE && ui->screen_node) {
+        lv_scr_load_anim(ui->screen_node, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+                         180, 0, false);
     } else if (action == PAGE_ACTION_NETWORK && ui->screen_network) {
         smart_home_lvgl_refresh_network_screen(ui);
         lv_scr_load_anim(ui->screen_network, LV_SCR_LOAD_ANIM_MOVE_LEFT,
@@ -473,13 +475,13 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     col++;
     page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xF2F5FF));
     page_title(card, "MCP 服务", "标准 MCP 工具桥");
-    page_action(card, ui, PAGE_ACTION_STATUS);
+    page_action(card, ui, PAGE_ACTION_MCP);
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
     page_icon_badge(card, ICON_NAV_DEVICES, lv_color_hex(0xEDF8F3));
     page_title(card, "Node 服务", "局域网设备网关");
-    page_action(card, ui, PAGE_ACTION_STATUS);
+    page_action(card, ui, PAGE_ACTION_NODE);
 
     /* 第一行末尾：系统设置（保持最后位置，紧接网络设置之后）。 */
     row = 0;

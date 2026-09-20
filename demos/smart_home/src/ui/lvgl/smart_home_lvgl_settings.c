@@ -32,12 +32,6 @@
 
 #define SMART_HOME_BACKEND_OPTIONS_CAP 256u
 
-/* 更多页卡片跳转定位用：三张可折叠卡的卡片对象（单实例，构建时记录）。
- * 声明必须位于 create_tool_directory_card 等首个使用点之前。 */
-static lv_obj_t *s_settings_model_card;
-static lv_obj_t *s_settings_tool_card;
-static lv_obj_t *s_settings_system_card;
-
 /*
  * Keep the dropdown order identical to smart_home_backends.c.  The selected
  * index is used to retrieve the preset, so a separately maintained literal
@@ -74,24 +68,38 @@ static void build_backend_dropdown_options(char *options, size_t options_size)
     }
 }
 
+/* 输入框所在屏决定用哪块键盘：模型服务独立屏有自己的键盘实例。 */
+static lv_obj_t *settings_keyboard_for(smart_home_lvgl_t *ui)
+{
+    if (!ui) {
+        return NULL;
+    }
+    if (ui->screen_model && lv_scr_act() == ui->screen_model) {
+        return ui->model_keyboard;
+    }
+    return ui->settings_keyboard;
+}
+
 static void layout_settings_keyboard(smart_home_lvgl_t *ui, int visible)
 {
-    if (!ui || !ui->settings_keyboard) {
+    lv_obj_t *keyboard = settings_keyboard_for(ui);
+
+    if (!ui || !keyboard) {
         return;
     }
 
-    lv_obj_set_size(ui->settings_keyboard,
+    lv_obj_set_size(keyboard,
                     smart_home_lvgl_content_w(),
                     smart_home_lvgl_keyboard_h());
-    lv_obj_align(ui->settings_keyboard,
+    lv_obj_align(keyboard,
                  LV_ALIGN_BOTTOM_MID,
                  0,
                  -SMART_HOME_NAV_H - SMART_HOME_NAV_BOTTOM_PAD - 8);
 
     if (visible) {
-        lv_obj_clear_flag(ui->settings_keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_add_flag(ui->settings_keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -106,8 +114,10 @@ static void settings_input_event(lv_event_t *event)
     }
 
     if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        if (ui->settings_keyboard && target) {
-            lv_keyboard_set_textarea(ui->settings_keyboard, target);
+        lv_obj_t *keyboard = settings_keyboard_for(ui);
+
+        if (keyboard && target) {
+            lv_keyboard_set_textarea(keyboard, target);
         }
         layout_settings_keyboard(ui, 1);
     } else if (code == LV_EVENT_CANCEL || code == LV_EVENT_READY ||
@@ -833,7 +843,6 @@ static void create_tool_directory_card(lv_obj_t *content,
     }
 
     card = lv_obj_create(content);
-    s_settings_tool_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 8, 0);
@@ -1126,7 +1135,7 @@ static lv_color_t node_gateway_status_color(const smart_home_agent_app_t *app)
 #endif
 }
 
-static const char *mcp_bridge_status_text(const smart_home_agent_app_t *app,
+static __attribute__((unused)) const char *mcp_bridge_status_text(const smart_home_agent_app_t *app,
                                           char *buffer, size_t size)
 {
 #ifndef CONFIG_SMART_HOME_MCP_BRIDGE
@@ -1169,7 +1178,7 @@ static const char *mcp_bridge_status_text(const smart_home_agent_app_t *app,
 #endif
 }
 
-static lv_color_t mcp_bridge_status_color(const smart_home_agent_app_t *app)
+static __attribute__((unused)) lv_color_t mcp_bridge_status_color(const smart_home_agent_app_t *app)
 {
 #ifndef CONFIG_SMART_HOME_MCP_BRIDGE
     (void)app;
@@ -1329,7 +1338,6 @@ static void create_system_status_card(lv_obj_t *content,
     int device_count = app ? smart_home_device_count(&app->device_state) : 0;
 
     card = lv_obj_create(content);
-    s_settings_system_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 6, 0);
@@ -1429,48 +1437,7 @@ static void create_system_status_card(lv_obj_t *content,
                       agent_status_text(app, buffer, sizeof(buffer)),
                       agent_status_color(app));
 
-    create_status_row(body,
-                      "设备网关",
-                      node_gateway_status_text(app, buffer, sizeof(buffer)),
-                      node_gateway_status_color(app));
-
-#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
-    s_mcp_status_label =
-        create_status_row(body,
-                          "MCP 服务",
-                          mcp_bridge_status_text(app, buffer, sizeof(buffer)),
-                          mcp_bridge_status_color(app));
-    s_mcp_app = app;
-    s_mcp_ui = ui;
-    s_mcp_last_state_valid = 0;
-    if (s_mcp_timer) {
-        lv_timer_delete(s_mcp_timer);
-        s_mcp_timer = NULL;
-    }
-    if (s_mcp_status_label && s_mcp_app && s_mcp_app->mcp_bridge) {
-        s_mcp_timer = lv_timer_create(mcp_status_timer_cb, 1000, NULL);
-    }
-    s_mcp_discover_button = lv_btn_create(body);
-    lv_obj_remove_style_all(s_mcp_discover_button);
-    lv_obj_set_size(s_mcp_discover_button, 112, 32);
-    lv_obj_set_style_radius(s_mcp_discover_button, 6, 0);
-    smart_home_lvgl_set_bg(s_mcp_discover_button, SMART_HOME_UI_COLOR_PRIMARY);
-    lv_obj_add_event_cb(s_mcp_discover_button,
-                        mcp_discover_event,
-                        LV_EVENT_CLICKED,
-                        ui);
-    label = smart_home_lvgl_label_create(s_mcp_discover_button,
-                                         "发现 MCP",
-                                         lv_color_white(),
-                                         12);
-    lv_obj_center(label);
-    ui->settings_mcp_discover_btn = s_mcp_discover_button;
-#else
-    create_status_row(body,
-                      "MCP 服务",
-                      mcp_bridge_status_text(app, buffer, sizeof(buffer)),
-                      mcp_bridge_status_color(app));
-#endif
+    /* 设备网关与 MCP 状态迁至各自的独立服务页（更多页卡片入口）。 */
 
     snprintf(value, sizeof(value), "%d devices", device_count);
     create_status_row(body,
@@ -1840,91 +1807,20 @@ static void create_voice_announce_card(lv_obj_t *content,
 }
 #endif
 
-/* 更多页卡片跳转入口：展开对应卡并滚动到可见位置。 */
-void smart_home_lvgl_settings_focus(smart_home_lvgl_t *ui, int section)
+
+static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
 {
     lv_obj_t *card;
-    lv_obj_t *body;
-    lv_obj_t **toggle_slot;
-
-    if (!ui) {
-        return;
-    }
-
-    switch (section) {
-    case SMART_HOME_SETTINGS_FOCUS_MODEL:
-        card = s_settings_model_card;
-        body = ui->settings_model_api_body;
-        toggle_slot = &ui->settings_model_api_toggle;
-        break;
-    case SMART_HOME_SETTINGS_FOCUS_TOOLS:
-        card = s_settings_tool_card;
-        body = ui->settings_tool_directory_body;
-        toggle_slot = &ui->settings_tool_directory_toggle;
-        break;
-    case SMART_HOME_SETTINGS_FOCUS_SYSTEM:
-    default:
-        card = s_settings_system_card;
-        body = ui->settings_system_status_body;
-        toggle_slot = &ui->settings_system_status_toggle;
-        break;
-    }
-
-    if (card == NULL) {
-        return;
-    }
-
-    if (body && lv_obj_has_flag(body, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_clear_flag(body, LV_OBJ_FLAG_HIDDEN);
-        if (*toggle_slot) {
-            lv_label_set_text(*toggle_slot, "-");
-        }
-    }
-
-    lv_obj_update_layout(card);
-    lv_obj_scroll_to_view(card, LV_ANIM_OFF);
-}
-
-void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
-{
-    lv_obj_t *screen;
-    lv_obj_t *content;
-    lv_obj_t *card;
+    lv_obj_t *label;
     lv_obj_t *model_body;
     lv_obj_t *button;
-    lv_obj_t *label;
     char timeout_text[16];
     char max_tokens_text[16];
     char backend_options[SMART_HOME_BACKEND_OPTIONS_CAP];
     const smart_home_model_config_t *config;
     int selected_backend;
-    int content_w = smart_home_lvgl_content_w();
-    int content_y = SMART_HOME_TOPBAR_H + (smart_home_lvgl_compact() ? 8 : 12);
-    int content_h = smart_home_lvgl_disp_h() - SMART_HOME_NAV_H -
-                    SMART_HOME_NAV_BOTTOM_PAD - content_y - 8;
-
-    screen = lv_obj_create(NULL);
-    lv_obj_remove_style_all(screen);
-    smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
-    ui->screen_settings = screen;
-    smart_home_lvgl_build_top_bar(screen, ui, "系统设置");
-
-    content = lv_obj_create(screen);
-    lv_obj_remove_style_all(content);
-    lv_obj_set_size(content, content_w, content_h);
-    lv_obj_align(content,
-                 LV_ALIGN_TOP_MID,
-                 0,
-                 content_y);
-    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(content, 8, 0);
-    lv_obj_set_scroll_dir(content, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-    smart_home_lvgl_set_bg(content, SMART_HOME_UI_COLOR_BG);
-    ui->settings_page = content;
 
     card = lv_obj_create(content);
-    s_settings_model_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 8, 0);
@@ -2099,7 +1995,241 @@ void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
         show_backend_key_status(ui, preset);
     }
 
+}
+
+/* ── 服务管理独立屏（更多页第二行卡片入口）────────────────── */
+
+static void create_mcp_card(lv_obj_t *content, smart_home_lvgl_t *ui)
+{
+    const smart_home_agent_app_t *app = ui ? ui->app : NULL;
+    char buffer[96];
+    lv_obj_t *card;
+    lv_obj_t *body;
+    lv_obj_t *label;
+
+#ifndef CONFIG_SMART_HOME_MCP_BRIDGE
+    (void)app;
+    (void)buffer;
+#endif
+
+    card = lv_obj_create(content);
+    lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, 6, 0);
+    smart_home_lvgl_card_style(card);
+
+    label = smart_home_lvgl_label_create(card, "标准 MCP 工具桥",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+    label = smart_home_lvgl_label_create(
+        card,
+        "经 Streamable HTTP 连接外部 MCP 服务器，工具发现后自动注册给"
+        "智能管家。服务器配置在 /data/smart_home/mcp_bridge.json。",
+        SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+
+    body = lv_obj_create(card);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(body, 8, 0);
+
+#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+    s_mcp_status_label =
+        create_status_row(body, "连接状态",
+                          mcp_bridge_status_text(app, buffer, sizeof(buffer)),
+                          mcp_bridge_status_color(app));
+    s_mcp_app = app;
+    s_mcp_ui = ui;
+    s_mcp_last_state_valid = 0;
+    if (s_mcp_timer) {
+        lv_timer_delete(s_mcp_timer);
+        s_mcp_timer = NULL;
+    }
+    if (s_mcp_status_label && s_mcp_app && s_mcp_app->mcp_bridge) {
+        s_mcp_timer = lv_timer_create(mcp_status_timer_cb, 1000, NULL);
+    }
+    s_mcp_discover_button = lv_btn_create(body);
+    lv_obj_remove_style_all(s_mcp_discover_button);
+    lv_obj_set_size(s_mcp_discover_button, 112, 32);
+    lv_obj_set_style_radius(s_mcp_discover_button, 6, 0);
+    smart_home_lvgl_set_bg(s_mcp_discover_button, SMART_HOME_UI_COLOR_PRIMARY);
+    lv_obj_add_event_cb(s_mcp_discover_button,
+                        mcp_discover_event,
+                        LV_EVENT_CLICKED,
+                        ui);
+    label = smart_home_lvgl_label_create(s_mcp_discover_button,
+                                         "发现 MCP", lv_color_white(), 12);
+    lv_obj_center(label);
+    ui->settings_mcp_discover_btn = s_mcp_discover_button;
+#else
+    create_status_row(body, "连接状态",
+                      "固件未启用（CONFIG_SMART_HOME_MCP_BRIDGE）",
+                      SMART_HOME_UI_COLOR_TEXT_MUTED);
+#endif
+}
+
+static void create_node_card(lv_obj_t *content, smart_home_lvgl_t *ui)
+{
+    const smart_home_agent_app_t *app = ui ? ui->app : NULL;
+    char buffer[96];
+    lv_obj_t *card;
+    lv_obj_t *body;
+    lv_obj_t *label;
+
+    card = lv_obj_create(content);
+    lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, 6, 0);
+    smart_home_lvgl_card_style(card);
+
+    label = smart_home_lvgl_label_create(card, "局域网设备网关",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+    label = smart_home_lvgl_label_create(
+        card,
+        "通过 WebSocket 桥接局域网内的 Node 设备命令（端口 18790），"
+        "远程工具动态注册给智能管家。",
+        SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+
+    body = lv_obj_create(card);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(body, 8, 0);
+
+    create_status_row(body, "连接状态",
+                      node_gateway_status_text(app, buffer, sizeof(buffer)),
+                      node_gateway_status_color(app));
+}
+
+/* 服务页公共骨架：标题 + 滚动内容区，返回 nav_bar 由调用方建。 */
+static lv_obj_t *service_page_content(smart_home_lvgl_t *ui,
+                                      lv_obj_t **screen_out,
+                                      const char *title)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+    int content_w = smart_home_lvgl_content_w();
+    int content_y = SMART_HOME_TOPBAR_H + (smart_home_lvgl_compact() ? 8 : 12);
+    int content_h = smart_home_lvgl_disp_h() - SMART_HOME_NAV_H -
+                    SMART_HOME_NAV_BOTTOM_PAD - content_y - 8;
+
+    screen = lv_obj_create(NULL);
+    lv_obj_remove_style_all(screen);
+    smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
+    *screen_out = screen;
+    smart_home_lvgl_build_top_bar(screen, ui, title);
+
+    content = lv_obj_create(screen);
+    lv_obj_remove_style_all(content);
+    lv_obj_set_size(content, content_w, content_h);
+    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, content_y);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(content, 8, 0);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
+    smart_home_lvgl_set_bg(content, SMART_HOME_UI_COLOR_BG);
+    return content;
+}
+
+void smart_home_lvgl_build_model_screen(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+
+    if (!ui) {
+        return;
+    }
+    content = service_page_content(ui, &screen, "模型服务");
+    ui->screen_model = screen;
+    create_model_api_card(content, ui);
+
+    ui->model_keyboard = lv_keyboard_create(screen);
+    smart_home_lvgl_style_keyboard(ui->model_keyboard);
+    lv_obj_add_event_cb(ui->model_keyboard,
+                        settings_keyboard_event,
+                        LV_EVENT_ALL,
+                        ui);
+    layout_settings_keyboard(ui, 0);
+
+    smart_home_lvgl_build_nav_bar(screen, ui);
+}
+
+void smart_home_lvgl_build_tools_screen(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+
+    if (!ui) {
+        return;
+    }
+    content = service_page_content(ui, &screen, "工具与权限");
+    ui->screen_tools = screen;
     create_tool_directory_card(content, ui);
+    smart_home_lvgl_build_nav_bar(screen, ui);
+}
+
+void smart_home_lvgl_build_mcp_screen(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+
+    if (!ui) {
+        return;
+    }
+    content = service_page_content(ui, &screen, "MCP 服务");
+    ui->screen_mcp = screen;
+    create_mcp_card(content, ui);
+    smart_home_lvgl_build_nav_bar(screen, ui);
+}
+
+void smart_home_lvgl_build_node_screen(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+
+    if (!ui) {
+        return;
+    }
+    content = service_page_content(ui, &screen, "Node 服务");
+    ui->screen_node = screen;
+    create_node_card(content, ui);
+    smart_home_lvgl_build_nav_bar(screen, ui);
+}
+
+void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screen;
+    lv_obj_t *content;
+    lv_obj_t *card;
+    lv_obj_t *label;
+    int content_w = smart_home_lvgl_content_w();
+    int content_y = SMART_HOME_TOPBAR_H + (smart_home_lvgl_compact() ? 8 : 12);
+    int content_h = smart_home_lvgl_disp_h() - SMART_HOME_NAV_H -
+                    SMART_HOME_NAV_BOTTOM_PAD - content_y - 8;
+
+    screen = lv_obj_create(NULL);
+    lv_obj_remove_style_all(screen);
+    smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
+    ui->screen_settings = screen;
+    smart_home_lvgl_build_top_bar(screen, ui, "系统设置");
+
+    content = lv_obj_create(screen);
+    lv_obj_remove_style_all(content);
+    lv_obj_set_size(content, content_w, content_h);
+    lv_obj_align(content,
+                 LV_ALIGN_TOP_MID,
+                 0,
+                 content_y);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(content, 8, 0);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
+    smart_home_lvgl_set_bg(content, SMART_HOME_UI_COLOR_BG);
+    ui->settings_page = content;
+
 
     create_system_status_card(content, ui);
 
