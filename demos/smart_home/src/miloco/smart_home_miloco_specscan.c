@@ -420,7 +420,10 @@ static smart_home_miloco_category_t category_from_name(const char *name)
     return SMART_HOME_MILOCO_CATEGORY_OTHER;
 }
 
-/* 有界拷贝（对齐 snprintf "%s" 的截断语义）。 */
+/* 有界拷贝（对齐 snprintf "%s" 的截断语义），且在 UTF-8 字符边界
+ * 回退：截断点落在多字节序列中间时向前退到首字节之前——字节截断
+ * 会产生非法 UTF-8（曾导致 agent 请求被 deepseek 以 400
+ * "invalid unicode code point" 拒绝：desc[24] 切半个汉字）。 */
 static void copy_bounded(char *dst, size_t cap, const char *src)
 {
     size_t n = strlen(src);
@@ -428,6 +431,10 @@ static void copy_bounded(char *dst, size_t cap, const char *src)
     if (n > cap - 1)
       {
         n = cap - 1;
+        while (n > 0 && ((unsigned char)src[n] & 0xC0) == 0x80)
+          {
+            n--;
+          }
       }
 
     memcpy(dst, src, n);

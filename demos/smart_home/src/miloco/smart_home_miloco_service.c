@@ -292,8 +292,22 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
 static void copy_text(char *dst, size_t dst_size, const cJSON *value)
 {
     const char *text = cJSON_IsString(value) ? value->valuestring : "";
+    size_t n = strlen(text);
 
-    snprintf(dst, dst_size, "%s", text);
+    if (n > dst_size - 1)
+      {
+        /* UTF-8 字符边界回退：字节截断会产生非法序列（同
+         * specscan copy_bounded 的教训——半个汉字曾让 agent 请求
+         * 被 LLM 服务端以 invalid unicode 拒绝）。 */
+        n = dst_size - 1;
+        while (n > 0 && ((unsigned char)text[n] & 0xC0) == 0x80)
+          {
+            n--;
+          }
+      }
+
+    memcpy(dst, text, n);
+    dst[n] = '\0';
 }
 
 /* 解析 data: [{did,name,online,room_name,...}, ...]（device_list 响应）。 */
