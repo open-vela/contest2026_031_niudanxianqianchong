@@ -234,7 +234,7 @@ static void smart_home_model_config_default(smart_home_model_config_t *config)
     config->response_buffer_size =
         max_u32(CAGENT_HTTP_RESPONSE_BUFFER_SIZE,
                 SMART_HOME_OPENAI_RESPONSE_BUFFER_MIN);
-    config->max_output_tokens = 512u;
+    config->max_output_tokens = 1024u;
 }
 
 /* settings.json 只选择内置后端；未知/custom 项回退内置默认，避免启动时
