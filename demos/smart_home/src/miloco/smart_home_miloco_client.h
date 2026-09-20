@@ -34,6 +34,21 @@ int smart_home_miloco_http_get(const smart_home_miloco_client_config_t *config,
                                size_t response_size,
                                int *http_status_out);
 
+/*
+ * GET 变体：额外解析响应头 Date:（RFC 7231，如
+ * "Thu, 20 Sep 2026 19:30:00 GMT"）并输出 epoch 秒；服务器未带
+ * Date 或格式无法解析时 *date_out 保持 -1。这是砍掉独立 SNTP 后
+ * 的时间源：天气拉取成功即完成对时。
+ */
+#include <time.h>
+int smart_home_miloco_http_get_date(
+    const smart_home_miloco_client_config_t *config,
+    const char *path,
+    char *response,
+    size_t response_size,
+    int *http_status_out,
+    time_t *date_out);
+
 /* POST 请求，body 为 JSON 字符串。语义与 http_get 一致。 */
 int smart_home_miloco_http_post(const smart_home_miloco_client_config_t *config,
                                 const char *path,

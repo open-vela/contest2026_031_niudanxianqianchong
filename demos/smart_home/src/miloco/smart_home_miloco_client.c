@@ -22,7 +22,8 @@ static int http_request(const smart_home_miloco_client_config_t *config,
                         const char *body,
                         char *response,
                         size_t response_size,
-                        int *http_status_out)
+                        int *http_status_out,
+                        time_t *date_out)
 {
     struct addrinfo hints;
     struct addrinfo *result = NULL;
@@ -172,12 +173,15 @@ static int http_request(const smart_home_miloco_client_config_t *config,
     {
         char chunk[256];
         char status_line[40];
+        char header_line[64];   /* 逐行捕获头部，命中 Date: 解析时间 */
+        size_t header_len = 0;
         size_t used = 0;
         size_t line_len = 0;
         bool line_pending = false;
         size_t i;
 
         status_line[0] = '\0';
+        header_line[0] = '\0';
         while (1) {
             ret = recv(sockfd, chunk, sizeof(chunk), 0);
             if (ret < 0) {
@@ -217,6 +221,13 @@ static int http_request(const smart_home_miloco_client_config_t *config,
                         }
                         line_len = 0;
                     }
+                    /* Date: Thu, 20 Sep 2026 19:30:00 GMT */
+                    if (date_out && header_len > 6 &&
+                        strncmp(header_line, "Date: ", 6) == 0) {
+                        parse_http_date(header_line + 6, date_out);
+                    }
+                    header_len = 0;
+                    header_line[0] = '\0';
                     continue;
                 }
                 if (byte != '\r') {
@@ -224,6 +235,10 @@ static int http_request(const smart_home_miloco_client_config_t *config,
                     if (!have_status && line_len + 1 < sizeof(status_line)) {
                         status_line[line_len++] = byte;
                         status_line[line_len] = '\0';
+                    }
+                    if (header_len + 1 < sizeof(header_line)) {
+                        header_line[header_len++] = byte;
+                        header_line[header_len] = '\0';
                     }
                 }
                 /* '\r'：可能是行尾或空行组成，保持状态。 */
@@ -246,6 +261,82 @@ out_freeaddr:
 }
 
 
+/* 解析 RFC 7231 日期 "Thu, 20 Sep 2026 19:30:00 GMT" 为 epoch 秒。
+ * 失败时 *out 保持调用方预置值。纯计算无时区依赖（GMT 即 UTC）。 */
+static void parse_http_date(const char *text, time_t *out)
+{
+    static const char months[12][4] =
+    {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    char mon[8] = "";
+    int mon_index = -1;
+    int i;
+
+    if (!text || !out) {
+        return;
+    }
+
+    if (sscanf(text, "%*[^,], %d %7s %d %d:%d:%d",
+               &day, mon, &year, &hour, &minute, &second) < 6) {
+        return;
+    }
+
+    for (i = 0; i < 12; i++) {
+        if (strcmp(mon, months[i]) == 0) {
+            mon_index = i;
+            break;
+        }
+    }
+    if (mon_index < 0 || day < 1 || day > 31 || year < 2020 ||
+        year > 2100 || hour < 0 || hour > 23 || minute < 0 ||
+        minute > 59 || second < 0 || second > 59) {
+        return;
+    }
+
+    /* days_from_civil（Howard Hinnant 算法）：1970-01-01 = 0。 */
+    {
+        long y = year;
+        long m = mon_index + 1;
+        long era;
+        long yoe;
+        long doy;
+        long doe;
+        long days;
+
+        y -= (m <= 2) ? 1 : 0;
+        era = (y >= 0 ? y : y - 399) / 400;
+        yoe = y - era * 400;
+        doy = (153L * (m + (m > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+        doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        days = era * 146097 + doe - 719468;
+
+        *out = (time_t)(days * 86400L + hour * 3600L + minute * 60L +
+                        second);
+    }
+}
+
+int smart_home_miloco_http_get_date(
+    const smart_home_miloco_client_config_t *config,
+    const char *path,
+    char *response,
+    size_t response_size,
+    int *http_status_out,
+    time_t *date_out)
+{
+    if (date_out) {
+        *date_out = (time_t)-1;
+    }
+    return http_request(config, "GET", path, NULL, response, response_size,
+                        http_status_out, date_out);
+}
+
 int smart_home_miloco_http_get(const smart_home_miloco_client_config_t *config,
                                const char *path,
                                char *response,
@@ -253,7 +344,7 @@ int smart_home_miloco_http_get(const smart_home_miloco_client_config_t *config,
                                int *http_status_out)
 {
     return http_request(config, "GET", path, NULL, response, response_size,
-                        http_status_out);
+                        http_status_out, NULL);
 }
 
 int smart_home_miloco_http_post(const smart_home_miloco_client_config_t *config,
@@ -264,5 +355,5 @@ int smart_home_miloco_http_post(const smart_home_miloco_client_config_t *config,
                                 int *http_status_out)
 {
     return http_request(config, "POST", path, body, response, response_size,
-                        http_status_out);
+                        http_status_out, NULL);
 }

@@ -816,6 +816,7 @@ static void poll_weather(smart_home_miloco_t *service,
     smart_home_miloco_client_config_t cfg;
     char path[64];
     char *fields[4];
+    time_t server_date = (time_t)-1;
     char *saveptr;
     int http_status = 0;
     int field_count;
@@ -829,13 +830,28 @@ static void poll_weather(smart_home_miloco_t *service,
 
     snprintf(path, sizeof(path), "/%.20s?format=%%C|%%t|%%h|%%w",
              service->weather.city);
-    ret = smart_home_miloco_http_get(&cfg, path, body, body_size,
-                                     &http_status);
+    ret = smart_home_miloco_http_get_date(&cfg, path, body, body_size,
+                                          &http_status, &server_date);
     if (ret < 0 || http_status != 200) {
         syslog(LOG_WARNING,
                "[milo] weather fetch failed ret=%d status=%d\n",
                ret, http_status);
         return;
+    }
+
+    /* 响应头 Date 即时间源（砍掉独立 SNTP 后的对时途径）：仅当
+     * 本地时钟明显落后时前拨，避免正常走时被反复回写。 */
+    if (server_date > (time_t)1000000000L) {
+        struct timeval tv;
+
+        gettimeofday(&tv, NULL);
+        if (tv.tv_sec < server_date - 30L) {
+            tv.tv_sec = server_date;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+            syslog(LOG_INFO, "[milo] time set from HTTP Date: %ld\n",
+                   (long)server_date);
+        }
     }
 
     /* 响应形如 "Clear|+29°C|72%|→13km/h"，按管道切四段。 */
@@ -875,60 +891,6 @@ static void poll_weather(smart_home_miloco_t *service,
 }
 
 
-/* ── SNTP 时间同步（UDP 8.8.8.8:123，约 50 行裸实现） ───────── */
-static void sync_time_sntp(void)
-{
-    struct sockaddr_in addr;
-    uint8_t packet[48] = {0};
-    uint8_t reply[48];
-    int sockfd;
-    int ret;
-    struct timeval tv = {3, 0};    /* 3 秒超时 */
-
-    packet[0] = 0x1B;               /* LI=0, VN=3, Mode=3 (client) */
-
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) {
-        return;
-    }
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(123);
-    addr.sin_addr.s_addr = htonl(0x08080808);   /* 8.8.8.8 */
-
-    ret = sendto(sockfd, packet, sizeof(packet), 0,
-                 (struct sockaddr *)&addr, sizeof(addr));
-    if (ret < 0) {
-        close(sockfd);
-        return;
-    }
-
-    ret = recv(sockfd, reply, sizeof(reply), 0);
-    close(sockfd);
-    if (ret < 48) {
-        return;
-    }
-
-    /* NTP 时间戳在 reply[40..47]：秒（高 32 位）+ 小数（低 32 位）。
-     * NTP epoch = 1900-01-01，Unix epoch = 1970-01-01，偏移 2208988800。 */
-    {
-        uint32_t secs = ((uint32_t)reply[40] << 24) |
-                        ((uint32_t)reply[41] << 16) |
-                        ((uint32_t)reply[42] << 8) |
-                        (uint32_t)reply[43];
-        struct timespec ts;
-
-        if (secs > 2208988800U && secs < 4000000000U) {
-            ts.tv_sec = (time_t)(secs - 2208988800U);
-            ts.tv_nsec = 0;
-            clock_settime(CLOCK_REALTIME, &ts);
-            syslog(LOG_INFO, "[milo] SNTP time set: %lu\n",
-                   (unsigned long)ts.tv_sec);
-        }
-    }
-}
 
 bool smart_home_miloco_get_weather(const smart_home_miloco_t *service,
                                    smart_home_miloco_weather_t *out)
@@ -1049,21 +1011,11 @@ static void *miloco_worker(void *argument)
         miloco_control_request_t control;
 
         /* 天气拉取：首次立即拉取，此后每 120 轮（10 分钟）一次。
-         * SNTP：未同步期间每轮（5s）重试——开机首轮常赶在 Wi-Fi
-         * 就绪之前，若等 10 分钟周期才重试，首页会长时间停在
-         * 12:00 假时间。 */
+         * 时间同步随天气走（HTTP Date 头），不再有独立 SNTP。 */
         service->weather_poll_count++;
         if (service->weather_poll_count >= 120) {
             poll_weather(service, body, MILOCO_RESPONSE_BYTES);
-            sync_time_sntp();
             service->weather_poll_count = 0;
-        } else {
-            struct timespec ts_now;
-
-            if (clock_gettime(CLOCK_REALTIME, &ts_now) != 0 ||
-                ts_now.tv_sec < 1000000000L) {
-                sync_time_sntp();
-            }
         }
 
         if (poll_due) {
