@@ -24,6 +24,9 @@ enum page_action_e {
     PAGE_ACTION_SETTINGS,
     PAGE_ACTION_NETWORK,
     PAGE_ACTION_MILOCO,
+    PAGE_ACTION_MODEL,     /* 设置页·模型服务卡 */
+    PAGE_ACTION_TOOLS,     /* 设置页·工具与权限卡 */
+    PAGE_ACTION_STATUS,    /* 设置页·系统健康卡（MCP/Node 状态所在） */
 };
 
 /* DHCP and DNS use substantially more stack than the 2 KiB pthread default.
@@ -116,6 +119,18 @@ static void page_click_cb(lv_event_t *event)
     } else if (action == PAGE_ACTION_SETTINGS && ui->screen_settings) {
         lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
                          180, 0, false);
+    } else if (action == PAGE_ACTION_MODEL && ui->screen_settings) {
+        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+                         180, 0, false);
+        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_MODEL);
+    } else if (action == PAGE_ACTION_TOOLS && ui->screen_settings) {
+        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+                         180, 0, false);
+        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_TOOLS);
+    } else if (action == PAGE_ACTION_STATUS && ui->screen_settings) {
+        lv_scr_load_anim(ui->screen_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT,
+                         180, 0, false);
+        smart_home_lvgl_settings_focus(ui, SMART_HOME_SETTINGS_FOCUS_SYSTEM);
     } else if (action == PAGE_ACTION_NETWORK && ui->screen_network) {
         smart_home_lvgl_refresh_network_screen(ui);
         lv_scr_load_anim(ui->screen_network, LV_SCR_LOAD_ANIM_MOVE_LEFT,
@@ -411,32 +426,69 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     int gap = 14;
     int w = (smart_home_lvgl_content_w() - gap * 3) / 4;
     int col = 0;
+    int row = 0;
+#define MORE_CARD_X() (x + (w + gap) * col)
+#define MORE_CARD_Y() (y + 154 * row)
 
     if (!ui) return;
     screen = page_screen(ui);
     ui->screen_more = screen;
     page_heading(screen, "更多");
-    /* 单行四卡（能耗中心/家庭成员已移除）：位置由 col 递增计算，
-     * 避免硬编码列号导致米家卡漂到最右。 */
-    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
+    /* 2×4 网格：第一行产品入口，第二行服务管理。位置由 col/row
+     * 递增计算，每行满 4 张自动换行。 */
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
     page_icon_badge(card, ICON_NAV_CHAT, lv_color_hex(0xF1F4FF));
     page_title(card, "智能管家", "家庭问答与受控执行");
     page_action(card, ui, PAGE_ACTION_AGENT);
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
     page_icon_badge(card, ICON_MIJIA, lv_color_hex(0xFFF8F4));
     page_title(card, "米家网关", "Miloco 服务器与设备");
     page_action(card, ui, PAGE_ACTION_MILOCO);
 #endif
-    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
     page_icon_badge(card, ICON_STATUS_WIFI, lv_color_hex(0xEAF7F1));
     page_title(card, "网络设置", "连接家庭 Wi-Fi");
     page_action(card, ui, PAGE_ACTION_NETWORK);
 
-    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
+    /* 第二行：服务管理。 */
+    col = 0;
+    row = 1;
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
+    page_icon_badge(card, ICON_SETTING_AI, lv_color_hex(0xF1F4FF));
+    page_title(card, "模型服务", "LLM 后端与密钥");
+    page_action(card, ui, PAGE_ACTION_MODEL);
+
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
+    page_icon_badge(card, ICON_TOOL, lv_color_hex(0xFFF6EA));
+    page_title(card, "工具与权限", "Agent 工具目录");
+    page_action(card, ui, PAGE_ACTION_TOOLS);
+
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
+    page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xF2F5FF));
+    page_title(card, "MCP 服务", "标准 MCP 工具桥");
+    page_action(card, ui, PAGE_ACTION_STATUS);
+
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
+    col++;
+    page_icon_badge(card, ICON_NAV_DEVICES, lv_color_hex(0xEDF8F3));
+    page_title(card, "Node 服务", "局域网设备网关");
+    page_action(card, ui, PAGE_ACTION_STATUS);
+
+    /* 第一行末尾：系统设置（保持最后位置，紧接网络设置之后）。 */
+    row = 0;
+    card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xEDF8F3));
-    page_title(card, "系统设置", "网络、智能服务与系统状态");
+    page_title(card, "系统设置", "系统健康与语音");
     page_action(card, ui, PAGE_ACTION_SETTINGS);
+#undef MORE_CARD_X
+#undef MORE_CARD_Y
     smart_home_lvgl_build_nav_bar(screen, ui);
 }
 

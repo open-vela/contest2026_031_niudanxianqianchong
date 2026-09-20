@@ -127,6 +127,13 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui);
+/* 设置页分区定位（更多页卡片跳转）：展开对应卡并滚动到可见。 */
+enum {
+    SMART_HOME_SETTINGS_FOCUS_MODEL = 0,
+    SMART_HOME_SETTINGS_FOCUS_TOOLS,
+    SMART_HOME_SETTINGS_FOCUS_SYSTEM,
+};
+void smart_home_lvgl_settings_focus(smart_home_lvgl_t *ui, int section);
 void smart_home_lvgl_refresh_tool_directory(smart_home_lvgl_t *ui);
 void smart_home_lvgl_settings_deinit(void);
 

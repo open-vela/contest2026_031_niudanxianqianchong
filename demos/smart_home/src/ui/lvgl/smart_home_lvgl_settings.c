@@ -827,6 +827,7 @@ static void create_tool_directory_card(lv_obj_t *content,
     }
 
     card = lv_obj_create(content);
+    s_settings_tool_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 8, 0);
@@ -1198,6 +1199,10 @@ static lv_color_t mcp_bridge_status_color(const smart_home_agent_app_t *app)
 /* MCP discovery is manually requested, so keep this timer alive for future
  * requests and refresh both the status row and its command button. */
 static lv_obj_t *s_mcp_status_label;
+/* 更多页卡片跳转定位用：三张可折叠卡的卡片对象（单实例，构建时记录）。 */
+static lv_obj_t *s_settings_model_card;
+static lv_obj_t *s_settings_tool_card;
+static lv_obj_t *s_settings_system_card;
 static lv_obj_t *s_mcp_discover_button;
 static const smart_home_agent_app_t *s_mcp_app;
 static lv_timer_t *s_mcp_timer;
@@ -1322,6 +1327,7 @@ static void create_system_status_card(lv_obj_t *content,
     int device_count = app ? smart_home_device_count(&app->device_state) : 0;
 
     card = lv_obj_create(content);
+    s_settings_system_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 6, 0);
@@ -1832,6 +1838,51 @@ static void create_voice_announce_card(lv_obj_t *content,
 }
 #endif
 
+/* 更多页卡片跳转入口：展开对应卡并滚动到可见位置。 */
+void smart_home_lvgl_settings_focus(smart_home_lvgl_t *ui, int section)
+{
+    lv_obj_t *card;
+    lv_obj_t *body;
+    lv_obj_t **toggle_slot;
+
+    if (!ui) {
+        return;
+    }
+
+    switch (section) {
+    case SMART_HOME_SETTINGS_FOCUS_MODEL:
+        card = s_settings_model_card;
+        body = ui->settings_model_api_body;
+        toggle_slot = &ui->settings_model_api_toggle;
+        break;
+    case SMART_HOME_SETTINGS_FOCUS_TOOLS:
+        card = s_settings_tool_card;
+        body = ui->settings_tool_directory_body;
+        toggle_slot = &ui->settings_tool_directory_toggle;
+        break;
+    case SMART_HOME_SETTINGS_FOCUS_SYSTEM:
+    default:
+        card = s_settings_system_card;
+        body = ui->settings_system_status_body;
+        toggle_slot = &ui->settings_system_status_toggle;
+        break;
+    }
+
+    if (card == NULL) {
+        return;
+    }
+
+    if (body && lv_obj_has_flag(body, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_clear_flag(body, LV_OBJ_FLAG_HIDDEN);
+        if (*toggle_slot) {
+            lv_label_set_text(*toggle_slot, "-");
+        }
+    }
+
+    lv_obj_update_layout(card);
+    lv_obj_scroll_to_view(card, LV_ANIM_OFF);
+}
+
 void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
 {
     lv_obj_t *screen;
@@ -1871,6 +1922,7 @@ void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
     ui->settings_page = content;
 
     card = lv_obj_create(content);
+    s_settings_model_card = card;
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, 8, 0);
