@@ -332,12 +332,10 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
 #endif
 
     card = page_card(screen, x, y, preview_w, preview_h);
-    smart_home_lvgl_set_bg(card, lv_color_hex(0x354846));
-    lv_obj_set_style_border_color(card, lv_color_hex(0x415654), 0);
+    smart_home_lvgl_set_bg(card, lv_color_hex(0x1a2e2c));
+    lv_obj_set_style_border_color(card, lv_color_hex(0x2a3e3c), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-    label = smart_home_lvgl_label_create(card, "客厅 · 本地实时预览",
-                                         lv_color_hex(0xD9E4E0), 13);
-    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
     ui->security_camera_buffer =
         smart_home_bulk_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES);
     if (ui->security_camera_buffer) {
@@ -359,9 +357,9 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
         lv_obj_set_size(ui->security_camera_preview,
                         SMART_HOME_CAMERA_PREVIEW_WIDTH,
                         SMART_HOME_CAMERA_PREVIEW_HEIGHT);
-        /* Center the feed in the area above the metrics footer. */
-        lv_obj_align(ui->security_camera_preview, LV_ALIGN_CENTER, 0, -22);
-        lv_obj_set_style_radius(ui->security_camera_preview, 12, 0);
+        /* 预览图撑满卡片减去 footer 的高度，居中放置。 */
+        lv_obj_align(ui->security_camera_preview, LV_ALIGN_TOP_MID, 0, 4);
+        lv_obj_set_style_radius(ui->security_camera_preview, 10, 0);
         lv_obj_add_flag(ui->security_camera_preview,
                         LV_OBJ_FLAG_ADV_HITTEST);
     } else {
@@ -375,20 +373,22 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     lv_obj_center(label);
 #endif
 
+    /* 底部状态条：状态行 + FPS 指标 + 进入监控按钮。 */
     footer = lv_obj_create(card);
     lv_obj_remove_style_all(footer);
-    lv_obj_set_size(footer, lv_pct(100), 48);
+    lv_obj_set_size(footer, lv_pct(100), 44);
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, 0);
     smart_home_lvgl_set_bg(footer, SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_set_style_bg_opa(footer, 230, 0);
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-    ui->security_camera_metrics = smart_home_lvgl_label_create(
-        footer, "预览上限 15 FPS · 等待开启", SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
-    lv_obj_align(ui->security_camera_metrics, LV_ALIGN_TOP_LEFT, 0, 2);
     ui->security_camera_status = smart_home_lvgl_label_create(
-        footer, "摄像头已关闭", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
-    lv_obj_align(ui->security_camera_status, LV_ALIGN_BOTTOM_LEFT, 0, -2);
+        footer, "摄像头已关闭", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_align(ui->security_camera_status, LV_ALIGN_LEFT_MID, 12, -8);
+    ui->security_camera_metrics = smart_home_lvgl_label_create(
+        footer, "15 FPS 上限", SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
+    lv_obj_align(ui->security_camera_metrics, LV_ALIGN_LEFT_MID, 12, 10);
     button = page_outline_button(footer, "进入监控", 92);
-    lv_obj_align(button, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_align(button, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_add_event_cb(button, security_camera_button_cb,
                         LV_EVENT_CLICKED, ui);
     ui->security_camera_timer = lv_timer_create(security_camera_timer_cb,
