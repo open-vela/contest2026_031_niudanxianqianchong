@@ -16,6 +16,67 @@
 #define MILOCO_HTTP_CONNECT_TIMEOUT_MS 3000
 #define MILOCO_HTTP_IO_TIMEOUT_MS      5000
 
+/* 解析 RFC 7231 日期 "Thu, 20 Sep 2026 19:30:00 GMT" 为 epoch 秒。
+ * 失败时 *out 保持调用方预置值。纯计算无时区依赖（GMT 即 UTC）。 */
+static void parse_http_date(const char *text, time_t *out)
+{
+    static const char months[12][4] =
+    {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    char mon[8] = "";
+    int mon_index = -1;
+    int i;
+
+    if (!text || !out) {
+        return;
+    }
+
+    if (sscanf(text, "%*[^,], %d %7s %d %d:%d:%d",
+               &day, mon, &year, &hour, &minute, &second) < 6) {
+        return;
+    }
+
+    for (i = 0; i < 12; i++) {
+        if (strcmp(mon, months[i]) == 0) {
+            mon_index = i;
+            break;
+        }
+    }
+    if (mon_index < 0 || day < 1 || day > 31 || year < 2020 ||
+        year > 2100 || hour < 0 || hour > 23 || minute < 0 ||
+        minute > 59 || second < 0 || second > 59) {
+        return;
+    }
+
+    /* days_from_civil（Howard Hinnant 算法）：1970-01-01 = 0。 */
+    {
+        long y = year;
+        long m = mon_index + 1;
+        long era;
+        long yoe;
+        long doy;
+        long doe;
+        long days;
+
+        y -= (m <= 2) ? 1 : 0;
+        era = (y >= 0 ? y : y - 399) / 400;
+        yoe = y - era * 400;
+        doy = (153L * (m + (m > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+        doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        days = era * 146097 + doe - 719468;
+
+        *out = (time_t)(days * 86400L + hour * 3600L + minute * 60L +
+                        second);
+    }
+}
+
 static int http_request(const smart_home_miloco_client_config_t *config,
                         const char *method,
                         const char *path,
@@ -261,66 +322,6 @@ out_freeaddr:
 }
 
 
-/* 解析 RFC 7231 日期 "Thu, 20 Sep 2026 19:30:00 GMT" 为 epoch 秒。
- * 失败时 *out 保持调用方预置值。纯计算无时区依赖（GMT 即 UTC）。 */
-static void parse_http_date(const char *text, time_t *out)
-{
-    static const char months[12][4] =
-    {
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    };
-    int day = 0;
-    int year = 0;
-    int hour = 0;
-    int minute = 0;
-    int second = 0;
-    char mon[8] = "";
-    int mon_index = -1;
-    int i;
-
-    if (!text || !out) {
-        return;
-    }
-
-    if (sscanf(text, "%*[^,], %d %7s %d %d:%d:%d",
-               &day, mon, &year, &hour, &minute, &second) < 6) {
-        return;
-    }
-
-    for (i = 0; i < 12; i++) {
-        if (strcmp(mon, months[i]) == 0) {
-            mon_index = i;
-            break;
-        }
-    }
-    if (mon_index < 0 || day < 1 || day > 31 || year < 2020 ||
-        year > 2100 || hour < 0 || hour > 23 || minute < 0 ||
-        minute > 59 || second < 0 || second > 59) {
-        return;
-    }
-
-    /* days_from_civil（Howard Hinnant 算法）：1970-01-01 = 0。 */
-    {
-        long y = year;
-        long m = mon_index + 1;
-        long era;
-        long yoe;
-        long doy;
-        long doe;
-        long days;
-
-        y -= (m <= 2) ? 1 : 0;
-        era = (y >= 0 ? y : y - 399) / 400;
-        yoe = y - era * 400;
-        doy = (153L * (m + (m > 2 ? -3 : 9)) + 2) / 5 + day - 1;
-        doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-        days = era * 146097 + doe - 719468;
-
-        *out = (time_t)(days * 86400L + hour * 3600L + minute * 60L +
-                        second);
-    }
-}
 
 int smart_home_miloco_http_get_date(
     const smart_home_miloco_client_config_t *config,
