@@ -283,6 +283,11 @@ static int http_request(const smart_home_miloco_client_config_t *config,
                         line_len = 0;
                     }
                     /* Date: Thu, 20 Sep 2026 19:30:00 GMT */
+                    if (date_out && header_len > 0) {
+                        syslog(LOG_INFO,
+                               "[milo] hdr[%zu] %.40s\n",
+                               header_len, header_line);
+                    }
                     if (date_out && header_len > 6 &&
                         strncmp(header_line, "Date: ", 6) == 0) {
                         parse_http_date(header_line + 6, date_out);
