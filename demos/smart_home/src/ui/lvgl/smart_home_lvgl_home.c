@@ -239,7 +239,6 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_t *bar;
     lv_obj_t *brand;
     lv_obj_t *brand_mark;
-    lv_obj_t *time;
     lv_obj_t *status_row;
     lv_obj_t *icon;
     int width = smart_home_lvgl_disp_w();
@@ -281,10 +280,17 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                          20);
     lv_obj_align_to(brand, brand_mark, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
-    ui->topbar_clock_label = smart_home_lvgl_label_create(bar, "--:--",
-                                        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
-    lv_obj_align(ui->topbar_clock_label, LV_ALIGN_RIGHT_MID,
-                 -smart_home_lvgl_pad_x(), 0);
+    {
+        lv_obj_t *clock = smart_home_lvgl_label_create(bar, "--:--",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
+
+        lv_obj_align(clock, LV_ALIGN_RIGHT_MID, -smart_home_lvgl_pad_x(), 0);
+        if (ui && ui->topbar_clock_count <
+                       (int)(sizeof(ui->topbar_clock_labels) /
+                             sizeof(ui->topbar_clock_labels[0]))) {
+            ui->topbar_clock_labels[ui->topbar_clock_count++] = clock;
+        }
+    }
 
     /* Keep status icons in a fixed row anchored to the measured time label.
      * This avoids overlap when the rendered font gives the time a wider
@@ -294,7 +300,10 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_set_size(status_row,
                     (int)(sizeof(status_icons) / sizeof(status_icons[0])) * 26,
                     20);
-    lv_obj_align_to(status_row, time, LV_ALIGN_OUT_LEFT_MID, -18, 0);
+    lv_obj_align_to(status_row,
+                    ui->topbar_clock_labels[ui->topbar_clock_count > 0 ?
+                                            ui->topbar_clock_count - 1 : 0],
+                    LV_ALIGN_OUT_LEFT_MID, -18, 0);
     lv_obj_clear_flag(status_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(status_row, LV_OBJ_FLAG_CLICKABLE);
 
@@ -667,8 +676,14 @@ void smart_home_lvgl_update_clock(smart_home_lvgl_t *ui)
     gmtime_r(&ts.tv_sec, &tm_now);
     snprintf(buf, sizeof(buf), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
 
-    if (ui->topbar_clock_label) {
-        lv_label_set_text(ui->topbar_clock_label, buf);
+    {
+        int i;
+
+        for (i = 0; i < ui->topbar_clock_count; i++) {
+            if (ui->topbar_clock_labels[i]) {
+                lv_label_set_text(ui->topbar_clock_labels[i], buf);
+            }
+        }
     }
     if (ui->home_time_label) {
         lv_label_set_text(ui->home_time_label, buf);

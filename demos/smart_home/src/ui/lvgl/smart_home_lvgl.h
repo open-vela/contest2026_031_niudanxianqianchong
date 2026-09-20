@@ -210,11 +210,12 @@ typedef struct {
     lv_obj_t *network_password_input;
     lv_obj_t *network_status_label;
     lv_obj_t *network_keyboard;
-    lv_obj_t *topbar_wifi_icons[10];
+    lv_obj_t *topbar_wifi_icons[16];
     /* 顶栏摄像头状态图标（安防页开关联动：off 显 camera-off，
      * 开启显 camera），与 wifi 图标同款跨屏刷新模式。 */
-    lv_obj_t *topbar_camera_icons[10];
-    lv_obj_t *topbar_clock_label;   /* 当前屏顶栏时钟（每屏建时覆写） */
+    lv_obj_t *topbar_camera_icons[16];
+    lv_obj_t *topbar_clock_labels[16];  /* 每屏一个顶栏时钟，定时器统一刷新 */
+    int topbar_clock_count;
     int topbar_camera_icon_count;
     int topbar_camera_on;
     lv_timer_t *network_status_timer;
