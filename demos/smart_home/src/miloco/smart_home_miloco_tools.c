@@ -149,26 +149,42 @@ static int miot_device_control_tool(const agent_tool_call_t *call,
         return result->status;
     }
 
-    result->status = smart_home_miloco_submit_control(
-        app->miloco, did->valuestring, iid->valuestring,
-        (cJSON_IsString(operation) &&
-         strcmp(operation->valuestring, "action") == 0) ?
-            "action" : "set",
-        cJSON_IsNumber(value) ? (int32_t)value->valueint :
-        cJSON_IsTrue(value) ? 1 : 0);
-    cJSON_Delete(root);
-    if (result->status != AGENT_OK) {
+    /* did/iid 的 valuestring 挂在 cJSON 树上，cJSON_Delete 后即释放。
+     * 曾在 delete 之后才格式化回执，读已释放内存（UAF）——free-list
+     * 指针字节（0x48b4.. 含孤立续字节）随会话进入请求体，被 LLM
+     * 服务端以 400 invalid unicode 拒绝，且间歇复现。先拷贝再释放。 */
+    {
+        char did_copy[24];
+        char iid_copy[16];
+
+        snprintf(did_copy, sizeof(did_copy), "%s", did->valuestring);
+        snprintf(iid_copy, sizeof(iid_copy), "%s", iid->valuestring);
+
+        result->status = smart_home_miloco_submit_control(
+            app->miloco, did_copy, iid_copy,
+            (cJSON_IsString(operation) &&
+             strcmp(operation->valuestring, "action") == 0) ?
+                "action" : "set",
+            cJSON_IsNumber(value) ? (int32_t)value->valueint :
+            cJSON_IsTrue(value) ? 1 : 0);
+        cJSON_Delete(root);
+        root = NULL;
+
+        if (result->status != AGENT_OK) {
+            snprintf(output, sizeof(output),
+                     "{\"ok\":false,\"error\":\"submit_failed\",\"code\":%d,"
+                     "\"hint\":\"iid must come from miot_device_list "
+                     "controls\"}",
+                     result->status);
+            result->status = AGENT_ERROR;
+            return result->status;
+        }
         snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"submit_failed\",\"code\":%d,"
-                 "\"hint\":\"iid must come from miot_device_list controls\"}",
-                 result->status);
-        result->status = AGENT_ERROR;
-        return result->status;
+                 "{\"ok\":true,\"did\":\"%s\",\"iid\":\"%s\","
+                 "\"note\":\"control submitted; state updates on next "
+                 "poll\"}",
+                 did_copy, iid_copy);
     }
-    snprintf(output, sizeof(output),
-             "{\"ok\":true,\"did\":\"%s\",\"iid\":\"%s\","
-             "\"note\":\"control submitted; state updates on next poll\"}",
-             did->valuestring, iid->valuestring);
     result->status = AGENT_OK;
     result->error_message = NULL;
     return result->status;
