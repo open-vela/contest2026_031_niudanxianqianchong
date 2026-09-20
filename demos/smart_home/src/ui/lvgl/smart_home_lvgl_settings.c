@@ -80,11 +80,11 @@ static lv_obj_t *settings_keyboard_for(smart_home_lvgl_t *ui)
     return ui->settings_keyboard;
 }
 
-static void layout_settings_keyboard(smart_home_lvgl_t *ui, int visible)
+/* 显式传键盘对象：构建期和运行期都安全（不依赖 lv_scr_act 推断）。
+ * visible=0 设尺寸+隐藏，visible=1 设尺寸+显示。 */
+static void layout_kb(lv_obj_t *keyboard, int visible)
 {
-    lv_obj_t *keyboard = settings_keyboard_for(ui);
-
-    if (!ui || !keyboard) {
+    if (!keyboard) {
         return;
     }
 
@@ -119,10 +119,10 @@ static void settings_input_event(lv_event_t *event)
         if (keyboard && target) {
             lv_keyboard_set_textarea(keyboard, target);
         }
-        layout_settings_keyboard(ui, 1);
+        layout_kb(keyboard, 1);
     } else if (code == LV_EVENT_CANCEL || code == LV_EVENT_READY ||
                code == LV_EVENT_DEFOCUSED) {
-        layout_settings_keyboard(ui, 0);
+        layout_kb(settings_keyboard_for(ui), 0);
     }
 }
 
@@ -132,7 +132,7 @@ static void settings_keyboard_event(lv_event_t *event)
     lv_event_code_t code = lv_event_get_code(event);
 
     if (code == LV_EVENT_CANCEL || code == LV_EVENT_READY) {
-        layout_settings_keyboard(ui, 0);
+        layout_kb(settings_keyboard_for(ui), 0);
     }
 }
 
@@ -2152,7 +2152,7 @@ void smart_home_lvgl_build_model_screen(smart_home_lvgl_t *ui)
                         settings_keyboard_event,
                         LV_EVENT_ALL,
                         ui);
-    layout_settings_keyboard(ui, 0);
+    layout_kb(ui->model_keyboard, 0);
 
     smart_home_lvgl_build_nav_bar(screen, ui);
 }
@@ -2244,7 +2244,7 @@ void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui)
                         settings_keyboard_event,
                         LV_EVENT_ALL,
                         ui);
-    layout_settings_keyboard(ui, 0);
+    layout_kb(ui->settings_keyboard, 0);
 
     card = lv_obj_create(content);
     lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);

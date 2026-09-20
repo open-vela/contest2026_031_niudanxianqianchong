@@ -6,6 +6,10 @@
 
 #include <nuttx/config.h>
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#include "../miloco/smart_home_miloco.h"
+#endif
+
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
@@ -512,12 +516,13 @@ int smart_home_network_probe(FAR smart_home_network_status_t *status)
   ret = smart_home_network_verify_dns();
   status->dns_status = ret;
   status->online = ret == SMART_HOME_NETWORK_OK;
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
   if (status->online) {
       /* WiFi→DNS 全通：kick 天气 worker 立即拉取天气+时间。 */
       extern smart_home_miloco_t *g_weather_miloco_service;
-      extern void smart_home_miloco_kick_weather(smart_home_miloco_t *);
       smart_home_miloco_kick_weather(g_weather_miloco_service);
   }
+#endif
   return status->online ? SMART_HOME_NETWORK_OK : ret;
 }
 

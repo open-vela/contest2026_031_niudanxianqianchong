@@ -70,7 +70,7 @@ static inline int smart_home_lvgl_content_h(void)
 
 static inline int smart_home_lvgl_keyboard_h(void)
 {
-    return smart_home_lvgl_compact() ? 88 : 150;
+    return smart_home_lvgl_compact() ? 100 : 180;
 }
 
 static inline int smart_home_lvgl_pad_x(void)
