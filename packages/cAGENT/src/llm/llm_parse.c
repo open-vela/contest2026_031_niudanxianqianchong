@@ -98,12 +98,22 @@ int llm_parse_response_text(const char *text, agent_llm_parse_result_t *result)
 
     content = find_json_string_value(text, "\"content\"");
     if (content) {
-        static char content_buf[512];
+        /* 4096 对齐 session content 与 max_output_tokens=768 的中文
+         * 上限（~2.3KB）；512 曾把回复切半个汉字，随会话历史进入
+         * 下轮请求被 LLM 服务端以 invalid unicode 拒绝（400）。 */
+        static char content_buf[4096];
         size_t i = 0u;
 
         while (content[i] && content[i] != '"' && i + 1u < sizeof(content_buf)) {
             content_buf[i] = content[i];
             i++;
+        }
+        /* UTF-8 字符边界回退：末字节为非 ASCII 即回退——续字节
+         * (10xxxxxx) 说明切在序列中间，首字节(11xxxxxx) 说明该
+         * 多字节字符的续字节已被截掉，两者都必须整体丢弃。 */
+        while (i > 0 &&
+               ((unsigned char)content_buf[i - 1] & 0x80) != 0u) {
+            i--;
         }
         content_buf[i] = '\0';
         result->content = content_buf;

@@ -87,6 +87,11 @@ static int copy_final_output(agent_response_t *response, const char *content)
     }
 
     memcpy(response->output, content, len);
+    /* UTF-8 字符边界回退：末字节非 ASCII 即整体丢弃该（不完整）
+     * 多字节字符，避免非法序列随会话历史进入后续请求。 */
+    while (len > 0 && ((unsigned char)response->output[len - 1] & 0x80) != 0u) {
+        len--;
+    }
     response->output[len] = '\0';
     return AGENT_OK;
 }
