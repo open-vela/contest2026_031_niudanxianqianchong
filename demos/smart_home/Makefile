@@ -52,6 +52,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/miloco/smart_home_miloco_client.c
     CSRCS   += src/miloco/smart_home_miloco_service.c
     CSRCS   += src/miloco/smart_home_miloco_specscan.c
+    CSRCS   += src/miloco/smart_home_miloco_scene.c
     CSRCS   += src/miloco/smart_home_miloco_tools.c
     CSRCS   += src/miloco/smart_home_miloco_qr.c
     CSRCS   += third_party/qrcodegen/qrcodegen.c

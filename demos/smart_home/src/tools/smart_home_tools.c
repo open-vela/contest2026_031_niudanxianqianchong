@@ -601,6 +601,33 @@ static int run_scene_tool(const agent_tool_call_t *call,
     int ret;
 
     ret = json_get_string(call->arguments_json, "\"scene\"", scene, sizeof(scene));
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (ret == AGENT_OK) {
+        /* 场景只面向真实米家设备：动作以 type_name 语义锚点在各
+         * 在线设备的 controls 中匹配提交（如睡眠模式开夜视/人形
+         * 追踪）。不再回落虚拟设备。 */
+        extern smart_home_miloco_t *g_weather_miloco_service;
+        char report[512];
+        char escaped_report[896];
+        int scene_ret = -1;
+
+        report[0] = '\0';
+        if (g_weather_miloco_service) {
+            scene_ret = smart_home_miloco_run_scene(
+                g_weather_miloco_service, scene, report, sizeof(report));
+        }
+        json_escape_string(report[0] ? report : "miloco gateway unavailable",
+                           escaped_report, sizeof(escaped_report));
+        snprintf(output, sizeof(output),
+                 "{\"ok\":%s,\"scene\":\"%s\",\"report\":\"%s\"}",
+                 scene_ret == 0 ? "true" : "false", scene, escaped_report);
+        result->status = scene_ret == 0 ? AGENT_OK : AGENT_ERROR;
+        result->content_json = output;
+        result->error_message = scene_ret == 0 ? NULL :
+                                "run_scene failed on real devices";
+        return scene_ret == 0 ? AGENT_OK : AGENT_ERROR;
+    }
+#endif
     if (ret == AGENT_OK) {
         ret = smart_home_device_service_run_scene(service, scene);
     }

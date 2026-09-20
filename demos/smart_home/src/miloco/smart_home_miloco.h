@@ -49,6 +49,8 @@ typedef enum {
 typedef struct {
     char iid[14];                        /* 如 "prop.2.3" / "action.2.1" */
     char desc[24];                       /* spec 中文描述 */
+    char type_name[24];                  /* spec 语义锚点，如 "night-shot"
+                                          * （场景模式按此匹配，跨型号稳定） */
     uint8_t type;                        /* smart_home_miloco_ctrl_type_t */
     int32_t value;                       /* BOOL:0/1 ENUM:当前值 ACTION:无效 */
     uint8_t option_count;
@@ -131,6 +133,13 @@ int smart_home_miloco_submit_power(smart_home_miloco_t *service,
  * （call_action）。iid 必须存在于该设备已解析的 controls 中（黑名单
  * 已在解析期过滤），否则 AGENT_ERROR_INVALID——这是统一工具的执行
  * 侧安全闸。 */
+/* 场景模式在真实设备上执行（sleep/away/home/movie）。动作以
+ * type_name 语义锚点在各在线设备的 controls 中匹配后提交。
+ * 返回 0 成功；report 输出人类可读的执行报告。 */
+int smart_home_miloco_run_scene(smart_home_miloco_t *service,
+                                const char *scene,
+                                char *report, size_t report_size);
+
 int smart_home_miloco_submit_control(smart_home_miloco_t *service,
                                      const char *did,
                                      const char *iid,

@@ -664,6 +664,9 @@ int smart_home_miloco_specscan(const char *body,
 
         copy_bounded(ctrl->desc, sizeof(ctrl->desc),
                      desc[0] ? desc : iid);
+        /* type_name 语义锚点（场景模式匹配用，见 miloco_scene.c）。 */
+        copy_bounded(ctrl->type_name, sizeof(ctrl->type_name),
+                     type_name[0] ? type_name : "");
         ctrl->value = 0;
 
         if (strncmp(iid, "action.", 7) == 0)
