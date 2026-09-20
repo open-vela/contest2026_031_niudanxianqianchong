@@ -32,6 +32,12 @@
 
 #define SMART_HOME_BACKEND_OPTIONS_CAP 256u
 
+/* 更多页卡片跳转定位用：三张可折叠卡的卡片对象（单实例，构建时记录）。
+ * 声明必须位于 create_tool_directory_card 等首个使用点之前。 */
+static lv_obj_t *s_settings_model_card;
+static lv_obj_t *s_settings_tool_card;
+static lv_obj_t *s_settings_system_card;
+
 /*
  * Keep the dropdown order identical to smart_home_backends.c.  The selected
  * index is used to retrieve the preset, so a separately maintained literal
@@ -1199,10 +1205,6 @@ static lv_color_t mcp_bridge_status_color(const smart_home_agent_app_t *app)
 /* MCP discovery is manually requested, so keep this timer alive for future
  * requests and refresh both the status row and its command button. */
 static lv_obj_t *s_mcp_status_label;
-/* 更多页卡片跳转定位用：三张可折叠卡的卡片对象（单实例，构建时记录）。 */
-static lv_obj_t *s_settings_model_card;
-static lv_obj_t *s_settings_tool_card;
-static lv_obj_t *s_settings_system_card;
 static lv_obj_t *s_mcp_discover_button;
 static const smart_home_agent_app_t *s_mcp_app;
 static lv_timer_t *s_mcp_timer;
