@@ -427,6 +427,19 @@ int agent_loop_run(agent_t *agent,
                 if (ret != AGENT_OK) {
                     break;
                 }
+
+                /* 快照最后一次成功的工具结果：若后续模型请求失败
+                 * （网络/超时），response->output 仍带着它返回——
+                 * 调用方的错误气泡可见"设备已动"，而不是空白。
+                 * 正常成功路径会被 copy_final_output 覆盖。 */
+                if (tool_status == AGENT_OK && response->output &&
+                    response->output_size > 0u) {
+                    snprintf(response->output, response->output_size,
+                             "工具 %s 已执行：%.160s",
+                             call->name ? call->name : "?",
+                             tool_result.content_json ?
+                                 tool_result.content_json : "");
+                }
             }
 
             if (ret != AGENT_OK) {
