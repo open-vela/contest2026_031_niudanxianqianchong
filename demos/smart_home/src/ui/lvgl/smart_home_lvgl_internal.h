@@ -117,6 +117,8 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_network_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_refresh_network_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui);
+/* 顶栏摄像头图标跨屏同步（安防页开关/摄像头服务状态驱动）。 */
+void smart_home_lvgl_set_camera_indicator(smart_home_lvgl_t *ui, int on);
 void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab);
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title);

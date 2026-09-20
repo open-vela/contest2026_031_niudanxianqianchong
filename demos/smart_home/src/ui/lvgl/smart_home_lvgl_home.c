@@ -299,6 +299,9 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
 
     for (i = 0; i < (int)(sizeof(status_icons) / sizeof(status_icons[0])); i++) {
         const char *icon_name = i == 3 ? topbar_network_icon(ui) :
+                             i == 1 ? (ui && ui->topbar_camera_on ?
+                                           ICON_STATUS_CAMERA :
+                                           "asset:camera-off") :
                                          status_icons[i];
 
         icon = smart_home_lvgl_icon_create(status_row, icon_name, 20, 20);
@@ -317,6 +320,31 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                            (int)(sizeof(ui->topbar_wifi_icons) /
                                  sizeof(ui->topbar_wifi_icons[0]))) {
             ui->topbar_wifi_icons[ui->topbar_wifi_icon_count++] = icon;
+        }
+        if (i == 1 && ui && ui->topbar_camera_icon_count <
+                           (int)(sizeof(ui->topbar_camera_icons) /
+                                 sizeof(ui->topbar_camera_icons[0]))) {
+            ui->topbar_camera_icons[ui->topbar_camera_icon_count++] = icon;
+        }
+    }
+}
+
+void smart_home_lvgl_set_camera_indicator(smart_home_lvgl_t *ui, int on)
+{
+    int i;
+
+    if (!ui) {
+        return;
+    }
+
+    ui->topbar_camera_on = on != 0;
+    for (i = 0; i < ui->topbar_camera_icon_count; i++) {
+        lv_obj_t *icon = ui->topbar_camera_icons[i];
+        const lv_image_dsc_t *asset = smart_home_lvgl_png_icon_get(
+            on ? "asset:camera" : "asset:camera-off", 20);
+
+        if (icon && asset) {
+            lv_image_set_src(icon, asset);
         }
     }
 }

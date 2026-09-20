@@ -149,9 +149,11 @@ static void security_camera_refresh_ui(smart_home_lvgl_t *ui)
     switch (status.state) {
     case SMART_HOME_CAMERA_STARTING:
         lv_label_set_text(ui->security_camera_status, "摄像头启动中…");
+        smart_home_lvgl_set_camera_indicator(ui, 1);
         break;
     case SMART_HOME_CAMERA_RUNNING:
         lv_label_set_text(ui->security_camera_status, "● 摄像头在线");
+        smart_home_lvgl_set_camera_indicator(ui, 1);
         if (ui->security_camera_preview && ui->security_camera_buffer &&
             status.preview_sequence != ui->security_camera_sequence &&
             smart_home_camera_copy_latest(ui->security_camera_buffer,
@@ -168,6 +170,7 @@ static void security_camera_refresh_ui(smart_home_lvgl_t *ui)
             lv_obj_remove_state(ui->security_camera_switch,
                                 LV_STATE_CHECKED);
         }
+        smart_home_lvgl_set_camera_indicator(ui, 0);
         /* A failed worker remains joinable until reaped. Reap it here so a
          * later user retry can allocate a fresh V4L2 ring and PSRAM buffers. */
         (void)smart_home_camera_stop();
@@ -175,6 +178,7 @@ static void security_camera_refresh_ui(smart_home_lvgl_t *ui)
     case SMART_HOME_CAMERA_OFF:
     default:
         lv_label_set_text(ui->security_camera_status, "摄像头已关闭");
+        smart_home_lvgl_set_camera_indicator(ui, 0);
         break;
     }
 
@@ -299,10 +303,16 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     screen = page_screen(ui);
     ui->screen_security = screen;
     page_heading(screen, "安防");
-    label = smart_home_lvgl_label_create(screen, "●  已布防",
-                                         SMART_HOME_UI_COLOR_PRIMARY,
-                                         14);
-    lv_obj_align(label, LV_ALIGN_TOP_RIGHT, -x, SMART_HOME_TOPBAR_H + 34);
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    /* 摄像头开关置于右上角（原'已布防'徽标位置）：安防页最高频的
+     * 操作应一步可达；布防状态不再是本页主叙事。 */
+    ui->security_camera_switch = lv_switch_create(screen);
+    lv_obj_set_size(ui->security_camera_switch, 46, 26);
+    lv_obj_align(ui->security_camera_switch, LV_ALIGN_TOP_RIGHT, -x,
+                 SMART_HOME_TOPBAR_H + 32);
+    lv_obj_add_event_cb(ui->security_camera_switch, security_camera_switch_cb,
+                        LV_EVENT_VALUE_CHANGED, ui);
+#endif
 
     card = page_card(screen, x, y, preview_w, preview_h);
     smart_home_lvgl_set_bg(card, lv_color_hex(0x354846));
@@ -364,12 +374,6 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     lv_obj_align(button, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(button, security_camera_button_cb,
                         LV_EVENT_CLICKED, ui);
-    ui->security_camera_switch = lv_switch_create(footer);
-    lv_obj_set_size(ui->security_camera_switch, 46, 26);
-    lv_obj_align_to(ui->security_camera_switch, button, LV_ALIGN_OUT_LEFT_MID,
-                    -12, 0);
-    lv_obj_add_event_cb(ui->security_camera_switch, security_camera_switch_cb,
-                        LV_EVENT_VALUE_CHANGED, ui);
     ui->security_camera_timer = lv_timer_create(security_camera_timer_cb,
                                                 1000u / 15u, ui);
     security_camera_refresh_ui(ui);
@@ -406,33 +410,30 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     int y = SMART_HOME_TOPBAR_H + 78;
     int gap = 14;
     int w = (smart_home_lvgl_content_w() - gap * 3) / 4;
+    int col = 0;
 
     if (!ui) return;
     screen = page_screen(ui);
     ui->screen_more = screen;
     page_heading(screen, "更多");
-    card = page_card(screen, x, y, w, 140);
+    /* 单行四卡（能耗中心/家庭成员已移除）：位置由 col 递增计算，
+     * 避免硬编码列号导致米家卡漂到最右。 */
+    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
     page_icon_badge(card, ICON_NAV_CHAT, lv_color_hex(0xF1F4FF));
     page_title(card, "智能管家", "家庭问答与受控执行");
     page_action(card, ui, PAGE_ACTION_AGENT);
-    card = page_card(screen, x + w + gap, y, w, 140);
-    page_icon_badge(card, ICON_SUN, lv_color_hex(0xFFF6EA));
-    page_title(card, "能耗中心", "本周用电概览");
-    card = page_card(screen, x + (w + gap) * 2, y, w, 140);
-    page_icon_badge(card, ICON_ROOM_LIVING, lv_color_hex(0xF2F5FF));
-    page_title(card, "家庭成员", "2 人在家");
-    card = page_card(screen, x + (w + gap) * 3, y, w, 140);
-    page_icon_badge(card, ICON_STATUS_WIFI, lv_color_hex(0xEAF7F1));
-    page_title(card, "网络设置", "连接家庭 Wi-Fi");
-    page_action(card, ui, PAGE_ACTION_NETWORK);
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    card = page_card(screen, x + (w + gap) * 3, y + 154, w, 140);
+    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
     page_icon_badge(card, ICON_MIJIA, lv_color_hex(0xFFF8F4));
     page_title(card, "米家网关", "Miloco 服务器与设备");
     page_action(card, ui, PAGE_ACTION_MILOCO);
 #endif
+    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
+    page_icon_badge(card, ICON_STATUS_WIFI, lv_color_hex(0xEAF7F1));
+    page_title(card, "网络设置", "连接家庭 Wi-Fi");
+    page_action(card, ui, PAGE_ACTION_NETWORK);
 
-    card = page_card(screen, x, y + 154, w, 140);
+    card = page_card(screen, x + (w + gap) * col++, y, w, 140);
     page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xEDF8F3));
     page_title(card, "系统设置", "网络、智能服务与系统状态");
     page_action(card, ui, PAGE_ACTION_SETTINGS);

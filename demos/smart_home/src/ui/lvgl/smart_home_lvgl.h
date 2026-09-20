@@ -205,6 +205,11 @@ typedef struct {
     lv_obj_t *network_status_label;
     lv_obj_t *network_keyboard;
     lv_obj_t *topbar_wifi_icons[10];
+    /* 顶栏摄像头状态图标（安防页开关联动：off 显 camera-off，
+     * 开启显 camera），与 wifi 图标同款跨屏刷新模式。 */
+    lv_obj_t *topbar_camera_icons[10];
+    int topbar_camera_icon_count;
+    int topbar_camera_on;
     lv_timer_t *network_status_timer;
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     lv_timer_t *miloco_timer;
