@@ -223,6 +223,7 @@ typedef struct {
     lv_obj_t *home_miloco_sub_label;
     lv_obj_t *home_weather_temp_label;
     lv_obj_t *home_weather_cond_label;
+    lv_obj_t *home_weather_badge;
     lv_obj_t *home_date_label;
     lv_obj_t *home_time_label;
     lv_timer_t *home_time_timer;

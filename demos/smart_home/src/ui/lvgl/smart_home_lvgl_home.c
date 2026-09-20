@@ -373,6 +373,23 @@ static void home_feature_text(lv_obj_t *card, const char *title,
     lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+/* 天气条件→图标：wttr.in 返回英文条件词，映射到已有图标资产。 */
+static const char *weather_icon_for(const char *condition_en)
+{
+    if (!condition_en || !condition_en[0]) {
+        return "asset:cloud-rain";
+    }
+
+    /* 晴类 → 太阳 */
+    if (strstr(condition_en, "Sunny") != NULL ||
+        strstr(condition_en, "Clear") != NULL) {
+        return "asset:sun";
+    }
+
+    /* 降水/雾/霾类 → 云雨（现有资产中最接近的图形） */
+    return "asset:cloud-rain";
+}
+
 static lv_obj_t *home_icon_badge(lv_obj_t *card, const char *icon,
                                  lv_color_t color, int size)
 {
@@ -586,8 +603,23 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                 }
                 snprintf(buf, sizeof(buf), "%s · 湿%d%% · 风%dkm/h",
                          wx.condition_cn, wx.humidity, wx.wind_kmph);
-                if (ui->home_weather_cond_label) {
-                    lv_label_set_text(ui->home_weather_cond_label, buf);
+                if (ui->home_env_label) {
+                    lv_label_set_text(ui->home_env_label, buf);
+                }
+                /* 图标随真实天气同步：晴=太阳，降水=云雨，其他保持云雨。 */
+                if (ui->home_weather_badge) {
+                    const char *icon = weather_icon_for(wx.condition_en);
+                    const lv_image_dsc_t *asset =
+                        smart_home_lvgl_png_icon_get(icon, 60);
+
+                    if (asset) {
+                        lv_obj_t *glyph =
+                            lv_obj_get_child(ui->home_weather_badge, 0);
+
+                        if (glyph) {
+                            lv_image_set_src(glyph, asset);
+                        }
+                    }
                 }
             }
         }
@@ -697,12 +729,14 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     label = smart_home_lvgl_label_create(card, "深圳市南山区",
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 70);
-    badge = home_icon_badge(card, ICON_HUMIDITY, lv_color_hex(0xEAF4F5), 76);
+    ui->home_weather_badge = home_icon_badge(card, ICON_HUMIDITY,
+                                             lv_color_hex(0xEAF4F5), 76);
     /* Make the weather pictogram the visual anchor of the tall card. */
-    lv_obj_align(badge, LV_ALIGN_CENTER, 0, -10);
-    label = smart_home_lvgl_label_create(card, "32°", SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         32);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 42);
+    lv_obj_align(ui->home_weather_badge, LV_ALIGN_CENTER, 0, -10);
+    ui->home_weather_temp_label =
+        smart_home_lvgl_label_create(card, "--°", SMART_HOME_UI_COLOR_TEXT_PRIMARY,
+                                      32);
+    lv_obj_align(ui->home_weather_temp_label, LV_ALIGN_CENTER, 0, 42);
     ui->home_env_label = smart_home_lvgl_label_create(card, "",
                                                       SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                                       14);

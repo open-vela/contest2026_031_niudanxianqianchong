@@ -483,8 +483,10 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     page_title(card, "Node 服务", "局域网设备网关");
     page_action(card, ui, PAGE_ACTION_NODE);
 
-    /* 第一行末尾：系统设置（保持最后位置，紧接网络设置之后）。 */
+    /* 第一行末尾：系统设置（第 4 列，紧接网络设置之后）。
+     * col=3 显式指定——第二行结束时 col 已是 4，不重置会放到屏幕外。 */
     row = 0;
+    col = 3;
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     page_icon_badge(card, ICON_NAV_SETTINGS, lv_color_hex(0xEDF8F3));
     page_title(card, "系统设置", "系统健康与语音");

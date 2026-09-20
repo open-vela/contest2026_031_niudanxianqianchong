@@ -1012,8 +1012,13 @@ static void *miloco_worker(void *argument)
 
         /* 天气拉取：首次立即拉取，此后每 120 轮（10 分钟）一次。
          * 时间同步随天气走（HTTP Date 头），不再有独立 SNTP。 */
+        /* 天气拉取：首次立即，此后每 120 轮（10 分钟）一次；
+         * 拉取失败（WiFi 未就绪/外网不通）时每 12 轮（1 分钟）重试，
+         * 开机联网后最迟 1 分钟内即有天气和时间（HTTP Date 同步）。 */
         service->weather_poll_count++;
-        if (service->weather_poll_count >= 120) {
+        if (service->weather_poll_count >= 120 ||
+            (!service->weather.valid &&
+             (service->weather_poll_count % 12) == 0)) {
             poll_weather(service, body, MILOCO_RESPONSE_BYTES);
             service->weather_poll_count = 0;
         }
