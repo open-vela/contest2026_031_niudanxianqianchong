@@ -42,7 +42,7 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, smart_home_lvgl_pad_x(), 28);
 
     ui->screensaver_time_label = smart_home_lvgl_label_create(
-        screen, "--:--", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
+        screen, "12:00", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_align(ui->screensaver_time_label, LV_ALIGN_CENTER, 0, -26);
     {
         struct timespec ts;

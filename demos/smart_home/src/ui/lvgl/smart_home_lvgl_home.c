@@ -594,7 +594,13 @@ static void home_time_update(smart_home_lvgl_t *ui)
     char buf[32];
 
     if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
-        /* NTP 未同步：显示占位。 */
+        /* NTP 未同步：以 12:00 占位（假时间），同步成功后自动刷新。 */
+        if (ui->home_time_label) {
+            lv_label_set_text(ui->home_time_label, "12:00");
+        }
+        if (ui->home_date_label) {
+            lv_label_set_text(ui->home_date_label, "时间同步中…");
+        }
         return;
     }
     gmtime_r(&ts.tv_sec, &tm_now);
@@ -657,7 +663,7 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     ui->home_date_label = smart_home_lvgl_label_create(card, "",
                                                        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_align(ui->home_date_label, LV_ALIGN_TOP_LEFT, 0, 0);
-    ui->home_time_label = smart_home_lvgl_label_create(card, "--:--",
+    ui->home_time_label = smart_home_lvgl_label_create(card, "12:00",
                                                        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_align(ui->home_time_label, LV_ALIGN_TOP_LEFT, 0, 24);
     label = smart_home_lvgl_label_create(card, "深圳市南山区",

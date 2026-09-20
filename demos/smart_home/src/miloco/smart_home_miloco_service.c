@@ -1048,12 +1048,22 @@ static void *miloco_worker(void *argument)
         bool has_control = false;
         miloco_control_request_t control;
 
-        /* 天气拉取：首次立即拉取，此后每 120 轮（10 分钟）一次。 */
+        /* 天气拉取：首次立即拉取，此后每 120 轮（10 分钟）一次。
+         * SNTP：未同步期间每轮（5s）重试——开机首轮常赶在 Wi-Fi
+         * 就绪之前，若等 10 分钟周期才重试，首页会长时间停在
+         * 12:00 假时间。 */
         service->weather_poll_count++;
         if (service->weather_poll_count >= 120) {
             poll_weather(service, body, MILOCO_RESPONSE_BYTES);
             sync_time_sntp();
             service->weather_poll_count = 0;
+        } else {
+            struct timespec ts_now;
+
+            if (clock_gettime(CLOCK_REALTIME, &ts_now) != 0 ||
+                ts_now.tv_sec < 1000000000L) {
+                sync_time_sntp();
+            }
         }
 
         if (poll_due) {
