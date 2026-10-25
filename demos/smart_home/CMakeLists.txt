@@ -16,6 +16,7 @@ if(CONFIG_SMART_HOME_DEMO)
     src/smart_home_cpu_debug.c
     src/smart_home_memory.c
     src/agent/smart_home_agent.c
+    src/agent/smart_home_agent_backend.c
     src/config/smart_home_backends.c
     src/config/smart_home_config_store.c
     src/config/smart_home_secrets.c
@@ -28,6 +29,12 @@ if(CONFIG_SMART_HOME_DEMO)
     src/ui/smart_home_ui.c
   )
   set(SMART_HOME_DEPS cagent)
+  include_directories(
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/model/openai/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/runtime/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/transport/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/tls/include
+  )
 
   if(CONFIG_FEATURE_SYSTEM_SMARTHOME)
     include_directories(

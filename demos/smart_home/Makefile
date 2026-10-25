@@ -11,6 +11,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/smart_home_cpu_debug.c
   CSRCS     += src/smart_home_memory.c
   CSRCS     += src/agent/smart_home_agent.c
+  CSRCS     += src/agent/smart_home_agent_backend.c
   ifneq ($(CONFIG_FEATURE_SYSTEM_SMARTHOME),)
     CSRCS   += src/quickapp/smart_home_quickapp_provider.c
     CSRCS   += src/quickapp/smart_home_quickapp_ipc_server.c
@@ -158,9 +159,12 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/icons
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/images
-  # cAGENT 内部头（runtime_openvela.h，TLS 封装复用）
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
-  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/src/runtime
+  CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/model/openai/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/runtime/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/transport/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/tls/include
   # TTS/ASR 客户端直接使用 mbedtls base64 编解码
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/mbedtls/include
 endif

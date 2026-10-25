@@ -9,6 +9,7 @@
 
 include $(APPDIR)/Make.defs
 
+CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/include
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/codecs/json

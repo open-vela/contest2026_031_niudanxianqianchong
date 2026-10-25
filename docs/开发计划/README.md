@@ -41,6 +41,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [SmartHome cAGENT V2 移植方案](应用与AI/ESP32-P4X-SmartHome-cAGENT-V2移植方案.md) | V2 接入顺序、验收范围与 Git 提交安排 |
 | [ESP32-P4X SmartHome Demo 测试开发计划](应用与AI/ESP32-P4X-SmartHome-Demo测试开发计划.md) | 基于已验证 DSI 显示基线的 demo 分阶段方案、代码边界、defconfig 方向与验收矩阵 |
 | [ESP32-P4X SmartHome 摄像头实时预览接入方案](应用与AI/ESP32-P4X-SmartHome摄像头实时预览接入方案.md) | 基于 `/dev/video0` V4L2 视频通路的本地预览架构、线程/缓冲边界、分期实施与真机验收 |
 | [ESP32-P4X 智能家居中控面板 UI 设计方案](应用与AI/ESP32-P4X-智能家居中控面板UI设计方案.md) | 1024x600 横屏深色中控面板：信息架构、视觉规范、组件规划、业务解耦，附录含 LVGL 与快应用路线取舍 |

@@ -1,20 +1,11 @@
 config SMART_HOME_DEMO
     bool "Smart home demo"
-    # Do not make these selects conditional on SMART_HOME_DEMO_STATIC_LVGL_HOME.
-    # That symbol is a child of SMART_HOME_DEMO_UI_BACKEND; QuickApp depends on
-    # CAGENT through its Feature/QuickApp dependency chain, so referring back
-    # to the choice child here creates a Kconfig dependency loop.
     select CAGENT
-    select CAGENT_PROFILE_REACT_DEFAULTS
-    select CAGENT_MODEL_OPENAI
-    select CAGENT_RUNTIME_OPENVELA_DEFAULTS
-    # Do not derive a cAGENT runtime dependency from an LVGL-only profile.
-    # SMART_HOME_DEMO_OFFLINE_UI itself depends on the UI-backend choice; a
-    # reverse reference here makes Kconfig traverse QuickApp -> libcurl ->
-    # mbedTLS -> cAGENT back into that same choice.  All SmartHome variants
-    # can safely include the runtime TLS adapter; offline UI simply does not
-    # use it at runtime.
-    select CAGENT_RUNTIME_OPENVELA_TLS
+    select NETUTILS_WEBCLIENT
+    select CAGENT_PROVIDER_OPENAI
+    select CAGENT_PORT_OPENVELA_RUNTIME
+    select CAGENT_PORT_OPENVELA_TRANSPORT
+    select CAGENT_PORT_OPENVELA_TLS
     default n
     help
       Smart home cAGENT demo skeleton with separated agent, tool, skill,
@@ -37,6 +28,26 @@ config SMART_HOME_DEMO_STACKSIZE
 config SMART_HOME_DEMO_PRIORITY
     int "Smart home demo task priority"
     default 100
+
+config SMART_HOME_MODEL_REQUEST_BUFFER_SIZE
+    int "Model request buffer capacity"
+    default 16384
+    range 8192 65536
+
+config SMART_HOME_MODEL_RESPONSE_BUFFER_SIZE
+    int "Model response buffer capacity"
+    default 16384
+    range 1024 65536
+
+config SMART_HOME_MODEL_DECODED_BUFFER_SIZE
+    int "Model decoded text buffer capacity"
+    default 8192
+    range 2048 32768
+
+config SMART_HOME_MODEL_JSON_TOKENS
+    int "Model response JSON token capacity"
+    default 512
+    range 128 2048
 
 config SMART_HOME_AUDIO_SMOKE
     bool "ES8311 audio smoke command"

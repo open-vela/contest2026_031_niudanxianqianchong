@@ -29,6 +29,6 @@ const smart_home_loaded_skill_t *smart_home_skill_store_find(
     const smart_home_skill_store_t *store,
     const char *name);
 
-int smart_home_skill_read_tool(const agent_tool_call_t *call,
-                               agent_tool_result_t *result,
-                               void *user_data);
+agent_error_t smart_home_skill_read_tool(void *user_data,
+                                        const agent_tool_context_t *context,
+                                        const agent_text_sink_t *output);

@@ -37,11 +37,27 @@ cAGENT（V2 内核）
 - 原 `packages/cAgent2/` 已迁入本目录；同一固件只编入这一份 V2 内核。
 - `demos/cagent2_chat/` 和配套 Goldfish defconfig 已调整包路径及组件开关，
   Demo 名称及 `CONFIG_CAGENT2_CHAT` 保持不变。
-- SmartHome、cagent_addons 和现有板级配置仍使用部分 V1 API/配置，尚待适配。
-  当前包替换不表示 SmartHome 已可编译或运行。
+- SmartHome Agent 层已接入 V2 生命周期及模型后端；通过 Host/mock 验证和
+  P4 对象编译。模型配置与缓冲区由应用持有，运行与配置切换串行执行。
+- 工具、Skill、设备上下文、UI、语音、cagent_addons 和现有板级配置仍有
+  V1 API/配置依赖。完整 SmartHome 固件及真机业务尚未通过验收。
 - 下一步需迁移初始化/启动、模型 Provider、工具、Skill、Session、事件与
   TTS/ASR 的 HTTP/TLS 接入，并重新验证容量、固件构建和板端行为。
 - 此快照仅提供 Make 接入；CMakeLists.txt 是占位文件，不提供 V2 库目标。
+- Make 通过 `AGENT_BUILD_CONFIG_HEADER` 为库和调用方统一加载
+  `nuttx/config.h`，保证 `CONFIG_AGENT_*` 容量配置一致。
+
+Agent 层 Host 验证（在竞赛仓根目录执行）：
+
+```sh
+python3 scripts/test_smart_home_agent.py
+# 使用现有 P4 .config 做对象编译，不修改配置
+python3 scripts/test_smart_home_agent.py --p4
+```
+
+测试链接真实 V2 Core/Provider，HTTP、设备、Skill 和 UI 使用 mock；
+覆盖模型配置生命周期、失败回退、工具权限、截断、资源清理及线程互斥，
+并启用 ASan/UBSan。测试需要外层工作区的 cJSON 源码和支持 sanitizer 的 Host C 编译器。
 
 许可证
 ------
