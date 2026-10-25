@@ -28,6 +28,10 @@ config CAGENT_PROVIDER_OPENAI
 	  application may request the legacy "max_tokens" field per
 	  provider instance.
 
+config CAGENT_SESSION_RAM
+	bool "Bounded RAM Session Storage"
+	default n
+
 config CAGENT_PORT_OPENVELA_RUNTIME
 	bool "OpenVela monotonic-clock runtime"
 	default y

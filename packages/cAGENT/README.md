@@ -12,6 +12,7 @@ cAGENT（V2 内核）
     src/                         可移植 Core（ReAct loop/session/tool/skill/...）
     codecs/json/                 私有有界 JSON 读写器（内嵌 jsmn）
     providers/model/openai/      OpenAI 兼容 Chat Completions provider
+    providers/storage/ram/       有界 RAM 会话及按完整回合淘汰
     ports/runtime|transport|tls/ openvela 三件套 + mbedTLS TLS 后端
 
 旧版 cAGENT 的源码、公共头文件、构建配置和文档已从本目录移除。
@@ -22,7 +23,7 @@ cAGENT（V2 内核）
 
 - `Make.defs` 注册 CONFIGURED_APPS 并对外暴露 `include/`；
 - 总开关为 `CONFIG_CAGENT`；组件开关为 `CONFIG_CAGENT_PROVIDER_OPENAI`
-  和 `CONFIG_CAGENT_PORT_OPENVELA_RUNTIME|TRANSPORT|TLS`；
+  、`CONFIG_CAGENT_SESSION_RAM` 和 `CONFIG_CAGENT_PORT_OPENVELA_RUNTIME|TRANSPORT|TLS`；
 - `Makefile` 按以上组件开关组装源文件；
 - `Kconfig` 提供总开关、组件开关与容量项；
 - CMake 构建路径暂不提供（Make 为权威路径）。
@@ -39,10 +40,9 @@ cAGENT（V2 内核）
   Demo 名称及 `CONFIG_CAGENT2_CHAT` 保持不变。
 - SmartHome Agent 层已接入 V2 生命周期及模型后端；通过 Host/mock 验证和
   P4 对象编译。模型配置与缓冲区由应用持有，运行与配置切换串行执行。
-- 工具、Skill、设备上下文、UI、语音、cagent_addons 和现有板级配置仍有
-  V1 API/配置依赖。完整 SmartHome 固件及真机业务尚未通过验收。
-- 下一步需迁移初始化/启动、模型 Provider、工具、Skill、Session、事件与
-  TTS/ASR 的 HTTP/TLS 接入，并重新验证容量、固件构建和板端行为。
+- 本地/Miloco 工具、设备参考上下文和按需 Skill 已适配；RAM 会话默认保留
+  最近三个完整回合，重启清空。容量不足返回错误，可清空会话后重试。
+- UI、语音、cagent_addons 和板级配置仍待迁移；完整固件与真机待验收。
 - 此快照仅提供 Make 接入；CMakeLists.txt 是占位文件，不提供 V2 库目标。
 - Make 通过 `AGENT_BUILD_CONFIG_HEADER` 为库和调用方统一加载
   `nuttx/config.h`，保证 `CONFIG_AGENT_*` 容量配置一致。

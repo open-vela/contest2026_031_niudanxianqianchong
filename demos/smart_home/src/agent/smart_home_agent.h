@@ -112,3 +112,5 @@ int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
 /** 查询本地工具的用户访问策略；未显式配置的本地工具默认允许。 */
 int smart_home_agent_app_local_tool_access_allowed(
     const smart_home_agent_app_t *app, const char *tool_name, int *allowed);
+
+int smart_home_agent_app_clear_session(smart_home_agent_app_t *app);

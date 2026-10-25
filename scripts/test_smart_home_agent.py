@@ -19,13 +19,14 @@ def main():
     includes = [
         package / "include", package / "src", package / "codecs/json",
         package / "codecs/json/vendor/jsmn",
-        package / "providers/model/openai/include",
+        package / "providers/model/openai/include", package / "providers/storage/ram/include",
         package / "ports/runtime/include", package / "ports/transport/include",
         package / "ports/tls/include", app / "src", cjson,
     ]
     sources = sorted(package.glob("src/*/*.c"))
     sources += [package / "codecs/json/reader.c", package / "codecs/json/writer.c"]
     sources += sorted(package.glob("providers/model/openai/src/*.c"))
+    sources += [package / "providers/storage/ram/src/session_ram.c"]
     application = [
         app / "src/agent/smart_home_agent.c",
         app / "src/agent/smart_home_agent_backend.c",

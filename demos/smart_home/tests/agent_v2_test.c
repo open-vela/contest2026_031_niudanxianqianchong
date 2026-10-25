@@ -7,6 +7,7 @@
 #include "ui/smart_home_ui.h"
 #include "miloco/smart_home_miloco.h"
 #include <agent_openvela_tls.h>
+#include <agent_session_ram.h>
 #include <agent_openvela_transport.h>
 
 #include <assert.h>
@@ -28,6 +29,7 @@ static int fail_transport_init;
 static int transport_error;
 static int tool_flow;
 static int effects;
+static int last_user_count, failed_history;
 static int events;
 static unsigned int http_status = 200u;
 static char last_url[288], last_model[64], last_auth[264];
@@ -79,8 +81,16 @@ static agent_error_t http_request(void *context, const agent_http_request_t *req
     assert(cJSON_IsString(message));
     snprintf(last_model, sizeof(last_model), "%s", message->valuestring);
     messages = cJSON_GetObjectItemCaseSensitive(json, "messages");
+    last_user_count = 0;
+    failed_history = 0;
     cJSON_ArrayForEach(message, messages) {
         role = cJSON_GetObjectItemCaseSensitive(message, "role");
+        if (cJSON_IsString(role) && strcmp(role->valuestring, "user") == 0) {
+            cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
+            ++last_user_count;
+            has_result = 0;
+            if (cJSON_IsString(content) && !strcmp(content->valuestring, "failed-turn")) ++failed_history;
+        }
         if (cJSON_IsString(role) && strcmp(role->valuestring, "tool") == 0) has_result = 1;
     }
     cJSON_Delete(json);
@@ -369,8 +379,66 @@ static void serialization(void)
     puts("PASS: standard SmartHome serializes model changes with an active run");
 }
 
+static void session_history(void)
+{
+    smart_home_agent_app_t app;
+    char output[64];
+    size_t count;
+    assert(!smart_home_agent_app_init(&app));
+    for (int i = 0; i < 8; ++i) {
+        expect_run(&app);
+        assert(last_user_count == (i < 3 ? i + 1 : 4));
+    }
+    assert(!agent_session_count(app.agent, &count) && count == 1);
+    smart_home_model_config_t config = custom_config(&app);
+    assert(!smart_home_agent_app_apply_model_config(&app, &config));
+    expect_run(&app);
+    assert(last_user_count == 4);
+    http_status = 401;
+    assert(smart_home_agent_run(&app, "failed-turn", output, sizeof(output)) == AGENT_ERROR_AUTH);
+    http_status = 200;
+    expect_run(&app);
+    assert(failed_history == 0 && last_user_count == 4);
+    assert(!smart_home_agent_app_clear_session(&app));
+    assert(!agent_session_count(app.agent, &count) && count == 0);
+    expect_run(&app);
+    assert(last_user_count == 1);
+    smart_home_agent_app_deinit(&app);
+    assert(!live_allocations);
+    puts("PASS: RAM history rolls by whole turns, excludes failures, survives model switch and clears");
+}
+
+static void session_capacity(void)
+{
+    agent_session_ram_t ram;
+    agent_session_storage_t storage;
+    agent_session_ram_turn_t turns[2];
+    agent_session_ram_message_t messages[4];
+    agent_message_view_t read_messages[4];
+    char payload[16];
+    const agent_session_ram_config_t config = {
+        .turns = turns, .turn_capacity = 2, .messages = messages, .message_capacity = 4,
+        .payload = payload, .payload_capacity = sizeof(payload),
+        .read_messages = read_messages, .read_message_capacity = 4
+    };
+    void *transaction;
+    assert(!agent_session_ram_init(&ram, &config));
+    assert(!agent_session_ram_bind(&ram, &storage));
+    assert(!storage.ops.begin(storage.context, agent_string_view("s", 1), &transaction));
+    const agent_message_view_t too_large = {.role = AGENT_MESSAGE_ROLE_USER,
+        .content = AGENT_SV_LITERAL("this cannot fit in sixteen bytes")};
+    assert(storage.ops.append(storage.context, transaction, &too_large) == AGENT_ERROR_CAPACITY);
+    assert(agent_session_ram_trim(&ram, 0) == AGENT_ERROR_BUSY);
+    assert(!storage.ops.finish(storage.context, transaction, AGENT_SESSION_TURN_ABORTED));
+    assert(!agent_session_ram_trim(&ram, 0));
+    assert(ram.payload_used == 0 && ram.turn_count == 0 && ram.message_count == 0);
+    puts("PASS: RAM capacity failure is atomic and aborted payload is reclaimed");
+}
+
 int main(void)
 {
+    session_history();
+    session_capacity();
 #ifdef CONFIG_AGENT_MAX_TOOLS
     _Static_assert(AGENT_MAX_TOOLS == CONFIG_AGENT_MAX_TOOLS, "inconsistent build profile");
 #endif

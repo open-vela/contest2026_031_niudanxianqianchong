@@ -8,5 +8,6 @@ ifneq ($(CONFIG_CAGENT),)
 CONFIGURED_APPS += $(APPDIR)/packages/cAGENT
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
 CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
+CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/ram/include
 CXXFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
 endif

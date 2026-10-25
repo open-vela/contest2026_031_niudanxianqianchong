@@ -161,6 +161,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/images
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
   CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/ram/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/model/openai/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/runtime/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/transport/include

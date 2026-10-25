@@ -736,7 +736,10 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
         response.output = output;
         response.output_size = output_size;
         smart_home_cpu_debug_log("agent-run-start");
-        ret = agent_run(app->agent, &request, &response);
+        ret = smart_home_agent_backend_prepare_turn(app->backend);
+        if (ret == AGENT_OK) ret = agent_run(app->agent, &request, &response);
+        if (ret == AGENT_OK && response.session_status != AGENT_OK)
+            ret = response.session_status;
         if (ret == AGENT_OK && response.delivery_status != AGENT_OK)
             ret = response.delivery_status;
         if (ret == AGENT_OK && output[0] == '\0') {
@@ -891,4 +894,14 @@ int smart_home_agent_app_local_tool_access_allowed(
     *allowed = local_tool_access_allowed(app, tool_name) ? 1 : 0;
     pthread_mutex_unlock((pthread_mutex_t *)&app->agent_mutex);
     return AGENT_OK;
+}
+
+int smart_home_agent_app_clear_session(smart_home_agent_app_t *app)
+{
+    int ret;
+    if (!app || !app->agent_mutex_initialized) return AGENT_ERROR_STATE;
+    pthread_mutex_lock(&app->agent_mutex);
+    ret = app->agent ? agent_session_clear_all(app->agent) : AGENT_ERROR_STATE;
+    pthread_mutex_unlock(&app->agent_mutex);
+    return ret;
 }

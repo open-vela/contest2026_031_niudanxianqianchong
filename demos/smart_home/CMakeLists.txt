@@ -31,6 +31,7 @@ if(CONFIG_SMART_HOME_DEMO)
   set(SMART_HOME_DEPS cagent)
   include_directories(
     ${NUTTX_APPS_DIR}/packages/cAGENT/providers/model/openai/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/ram/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/runtime/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/transport/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/tls/include

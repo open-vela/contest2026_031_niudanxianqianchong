@@ -16,6 +16,13 @@
 #define CONFIG_SMART_HOME_MODEL_JSON_TOKENS 512u
 #endif
 
+#ifndef CONFIG_SMART_HOME_SESSION_HISTORY_TURNS
+#define CONFIG_SMART_HOME_SESSION_HISTORY_TURNS 3u
+#endif
+#ifndef CONFIG_SMART_HOME_SESSION_PAYLOAD_BYTES
+#define CONFIG_SMART_HOME_SESSION_PAYLOAD_BYTES 65536u
+#endif
+
 typedef struct {
     char backend_id[32];
     char host[128];
@@ -40,3 +47,5 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
 int smart_home_agent_backend_apply(smart_home_agent_backend_t *backend,
                                    const smart_home_model_config_t *config);
 void smart_home_agent_backend_destroy(smart_home_agent_backend_t **backend);
+
+int smart_home_agent_backend_prepare_turn(smart_home_agent_backend_t *backend);

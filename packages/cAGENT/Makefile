@@ -19,6 +19,12 @@ CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/runtime/include
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/transport/include
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/tls/include
 
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/providers/storage/ram/include
+
+ifeq ($(CONFIG_CAGENT_SESSION_RAM),y)
+CSRCS += providers/storage/ram/src/session_ram.c
+endif
+
 # 可移植 Core + 私有 JSON codec（零 malloc，全部借用式缓冲）
 CSRCS += $(wildcard src/*/*.c)
 CSRCS += codecs/json/reader.c

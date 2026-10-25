@@ -2,6 +2,7 @@ config SMART_HOME_DEMO
     bool "Smart home demo"
     select CAGENT
     select NETUTILS_WEBCLIENT
+    select CAGENT_SESSION_RAM
     select CAGENT_PROVIDER_OPENAI
     select CAGENT_PORT_OPENVELA_RUNTIME
     select CAGENT_PORT_OPENVELA_TRANSPORT
@@ -48,6 +49,16 @@ config SMART_HOME_MODEL_JSON_TOKENS
     int "Model response JSON token capacity"
     default 512
     range 128 2048
+
+config SMART_HOME_SESSION_HISTORY_TURNS
+    int "Recent complete turns retained in RAM"
+    default 3
+    range 1 6
+
+config SMART_HOME_SESSION_PAYLOAD_BYTES
+    int "RAM session payload capacity"
+    default 65536
+    range 16384 262144
 
 config SMART_HOME_AUDIO_SMOKE
     bool "ES8311 audio smoke command"
