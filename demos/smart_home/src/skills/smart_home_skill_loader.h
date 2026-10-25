@@ -11,6 +11,8 @@ typedef struct {
     char *name;
     char *description;
     char *context_text;
+    char summary[384];
+    int visible;
 } smart_home_loaded_skill_t;
 
 typedef struct {

@@ -1,9 +1,17 @@
 #include "smart_home_skill_loader.h"
+#include <agent/skill.h>
+#include "../tools/smart_home_tool_io.h"
+#include <errno.h>
+#include <limits.h>
 
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define SMART_HOME_SKILL_ENABLED 1u
+#define SMART_HOME_SKILL_VISIBLE 2u
+#define SMART_HOME_SKILL_SUMMARY 4u
 
 #define SMART_HOME_SKILL_READ_MAX 4096u
 
@@ -50,14 +58,14 @@ static int parse_flags(const char *text)
         return AGENT_ERROR_INVALID;
     }
 
-    if (strstr(text, "enabled")) {
-        flags |= AGENT_SKILL_FLAG_ENABLED;
-    }
-    if (strstr(text, "llm_visible")) {
-        flags |= AGENT_SKILL_FLAG_LLM_VISIBLE;
-    }
-    if (strstr(text, "summary_only")) {
-        flags |= AGENT_SKILL_FLAG_SUMMARY_ONLY;
+    while (*text) {
+        size_t n = strcspn(text, ",");
+        if (n == 7u && !memcmp(text, "enabled", n)) flags |= SMART_HOME_SKILL_ENABLED;
+        else if (n == 11u && !memcmp(text, "llm_visible", n)) flags |= SMART_HOME_SKILL_VISIBLE;
+        else if (n == 12u && !memcmp(text, "summary_only", n)) flags |= SMART_HOME_SKILL_SUMMARY;
+        else return AGENT_ERROR_INVALID;
+        text += n;
+        if (*text) ++text;
     }
 
     return (int)flags;
@@ -71,7 +79,7 @@ static int parse_front_matter(char *buffer,
     char *meta;
     char *line;
     char *save = NULL;
-    int flags_seen = 0;
+    unsigned flags = SMART_HOME_SKILL_ENABLED | SMART_HOME_SKILL_VISIBLE;
 
     if (!buffer || !loaded || !skill || strncmp(buffer, "---", 3) != 0) {
         return AGENT_ERROR_INVALID;
@@ -117,31 +125,42 @@ static int parse_front_matter(char *buffer,
 
             if (strcmp(key, "name") == 0) {
                 loaded->name = value;
-                skill->name = value;
+                skill->name = agent_string_view(value, strlen(value));
             } else if (strcmp(key, "description") == 0) {
                 loaded->description = value;
-                skill->description = value;
+                skill->description = agent_string_view(value, strlen(value));
             } else if (strcmp(key, "priority") == 0) {
-                skill->priority = (uint32_t)strtoul(value, NULL, 10);
+                char *end;
+                long priority;
+                errno = 0;
+                priority = strtol(value, &end, 10);
+                if (errno || !value[0] || *end || priority < INT32_MIN || priority > INT32_MAX)
+                    return AGENT_ERROR_INVALID;
+                skill->priority = (int32_t)priority;
             } else if (strcmp(key, "flags") == 0) {
                 int parsed = parse_flags(value);
                 if (parsed < 0) {
                     return parsed;
                 }
-                skill->flags = (uint32_t)parsed;
-                flags_seen = 1;
+                flags = (unsigned)parsed;
             }
         }
         line = strtok_r(NULL, "\n", &save);
     }
 
     loaded->context_text = trim(body);
-    skill->context_text = loaded->context_text;
-    if (!skill->name || !skill->context_text || !skill->context_text[0]) {
-        return AGENT_ERROR_INVALID;
-    }
-    if (!flags_seen) {
-        skill->flags = AGENT_SKILL_FLAG_ENABLED | AGENT_SKILL_FLAG_LLM_VISIBLE;
+    if (!skill->name.size || !loaded->context_text[0]) return AGENT_ERROR_INVALID;
+    loaded->visible = (flags & (SMART_HOME_SKILL_ENABLED | SMART_HOME_SKILL_VISIBLE)) ==
+                      (SMART_HOME_SKILL_ENABLED | SMART_HOME_SKILL_VISIBLE);
+    if (flags & SMART_HOME_SKILL_SUMMARY) {
+        int n = snprintf(loaded->summary, sizeof(loaded->summary),
+                         "Skill %s: %s Use read_skill(name=\"%s\") for full instructions.",
+                         loaded->name, loaded->description ? loaded->description : "",
+                         loaded->name);
+        if (n < 0 || (size_t)n >= sizeof(loaded->summary)) return AGENT_ERROR_CAPACITY;
+        skill->content = agent_string_view(loaded->summary, (size_t)n);
+    } else {
+        skill->content = agent_string_view(loaded->context_text, strlen(loaded->context_text));
     }
 
     return AGENT_OK;
@@ -161,7 +180,7 @@ static int read_file(const char *path, char **buffer_out)
     *buffer_out = NULL;
     fp = fopen(path, "rb");
     if (!fp) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_IO;
     }
 
     if (fseek(fp, 0, SEEK_END) != 0) {
@@ -194,105 +213,6 @@ static int read_file(const char *path, char **buffer_out)
     buffer[nread] = '\0';
     *buffer_out = buffer;
     return AGENT_OK;
-}
-
-static void json_escape(const char *in, char *out, size_t out_size)
-{
-    size_t used = 0u;
-
-    if (!out || out_size == 0u) {
-        return;
-    }
-
-    while (in && *in && used + 1u < out_size) {
-        if ((*in == '"' || *in == '\\') && used + 2u < out_size) {
-            out[used++] = '\\';
-            out[used++] = *in++;
-        } else if (*in == '\n' && used + 2u < out_size) {
-            out[used++] = '\\';
-            out[used++] = 'n';
-            in++;
-        } else if (*in == '\r' && used + 2u < out_size) {
-            out[used++] = '\\';
-            out[used++] = 'r';
-            in++;
-        } else if (*in == '\t' && used + 2u < out_size) {
-            out[used++] = '\\';
-            out[used++] = 't';
-            in++;
-        } else {
-            out[used++] = *in++;
-        }
-    }
-    out[used] = '\0';
-}
-
-static size_t json_escaped_length(const char *text)
-{
-    size_t len = 0u;
-
-    if (!text) {
-        return 0u;
-    }
-
-    while (*text) {
-        if (*text == '"' || *text == '\\' ||
-            *text == '\n' || *text == '\r' || *text == '\t') {
-            len += 2u;
-        } else {
-            len++;
-        }
-        text++;
-    }
-
-    return len;
-}
-
-static const char *find_json_value(const char *json, const char *key)
-{
-    const char *p;
-
-    if (!json || !key) {
-        return NULL;
-    }
-
-    p = strstr(json, key);
-    if (!p) {
-        return NULL;
-    }
-
-    p = strchr(p + strlen(key), ':');
-    if (!p) {
-        return NULL;
-    }
-
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
-        p++;
-    }
-
-    return p;
-}
-
-static int json_get_string(const char *json,
-                           const char *key,
-                           char *out,
-                           size_t out_size)
-{
-    const char *p = find_json_value(json, key);
-    size_t used = 0u;
-
-    if (!p || !out || out_size == 0u || *p != '"') {
-        return AGENT_ERROR_INVALID;
-    }
-
-    p++;
-    while (*p && *p != '"' && used + 1u < out_size) {
-        out[used++] = *p++;
-    }
-    out[used] = '\0';
-
-    return *p == '"' ? AGENT_OK : AGENT_ERROR_LIMIT;
 }
 
 void smart_home_skill_store_init(smart_home_skill_store_t *store)
@@ -350,7 +270,7 @@ int smart_home_skill_loader_load_dir(agent_t *agent,
 
     dp = opendir(dir);
     if (!dp) {
-        return AGENT_ERROR_NOTFOUND;
+        return errno == ENOENT ? AGENT_ERROR_NOT_FOUND : AGENT_ERROR_IO;
     }
 
     while ((entry = readdir(dp)) != NULL) {
@@ -368,7 +288,11 @@ int smart_home_skill_loader_load_dir(agent_t *agent,
             return AGENT_ERROR_LIMIT;
         }
 
-        snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
+        ret = snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(path)) {
+            closedir(dp);
+            return AGENT_ERROR_CAPACITY;
+        }
         ret = read_file(path, &buffer);
         if (ret != AGENT_OK) {
             closedir(dp);
@@ -385,7 +309,7 @@ int smart_home_skill_loader_load_dir(agent_t *agent,
             return ret;
         }
 
-        ret = agent_register_skill(agent, &skill);
+        ret = loaded->visible ? agent_register_skill(agent, &skill) : AGENT_OK;
         if (ret != AGENT_OK) {
             free(buffer);
             closedir(dp);
@@ -397,72 +321,38 @@ int smart_home_skill_loader_load_dir(agent_t *agent,
     }
 
     closedir(dp);
-    return loaded_count > 0u ? AGENT_OK : AGENT_ERROR_NOTFOUND;
+    return loaded_count > 0u ? AGENT_OK : AGENT_ERROR_NOT_FOUND;
 }
 
-int smart_home_skill_read_tool(const agent_tool_call_t *call,
-                               agent_tool_result_t *result,
-                               void *user_data)
+agent_error_t smart_home_skill_read_tool(void *user_data,
+                                        const agent_tool_context_t *context,
+                                        const agent_text_sink_t *output)
 {
-    static char output[CAGENT_TOOL_OUTPUT_MAX_SIZE];
-    char name[64] = "";
-    char escaped_name[128];
-    char escaped_content[CAGENT_TOOL_OUTPUT_MAX_SIZE];
-    const smart_home_skill_store_t *store =
-        (const smart_home_skill_store_t *)user_data;
+    const smart_home_skill_store_t *store = user_data;
     const smart_home_loaded_skill_t *skill;
-    int ret;
-    int written;
+    char name[64];
+    char *encoded;
+    cJSON *json;
+    agent_error_t ret;
 
-    if (!result) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    ret = json_get_string(call ? call->arguments_json : NULL,
-                          "\"name\"",
-                          name,
-                          sizeof(name));
-    if (ret != AGENT_OK) {
-        result->status = ret;
-        result->content_json = "{\"ok\":false}";
-        result->error_message = "read_skill failed";
-        return ret;
-    }
-
+    if (!context || smart_home_tool_get_string(context->call.arguments_json,
+                                               "name", name, sizeof(name)))
+        return AGENT_ERROR_TOOL_ARGUMENT;
     skill = smart_home_skill_store_find(store, name);
-    if (!skill || !skill->context_text) {
-        result->status = AGENT_ERROR_NOTFOUND;
-        result->content_json = "{\"ok\":false,\"error\":\"skill not found\"}";
-        result->error_message = "skill not found";
-        return result->status;
+    if (!skill || !skill->visible)
+        return smart_home_tool_reply(output, "{\"ok\":false,\"error\":\"skill_not_found\"}", AGENT_ERROR_NOT_FOUND);
+    json = cJSON_CreateObject();
+    if (!json) return AGENT_ERROR_NOMEM;
+    if (!cJSON_AddBoolToObject(json, "ok", 1) ||
+        !cJSON_AddStringToObject(json, "name", name) ||
+        !cJSON_AddStringToObject(json, "content", skill->context_text)) {
+        cJSON_Delete(json);
+        return AGENT_ERROR_NOMEM;
     }
-
-    if (json_escaped_length(skill->context_text) + 1u >
-        sizeof(escaped_content)) {
-        result->status = AGENT_ERROR_LIMIT;
-        result->content_json = "{\"ok\":false,\"error\":\"skill too large\"}";
-        result->error_message = "skill too large";
-        return result->status;
-    }
-
-    json_escape(name, escaped_name, sizeof(escaped_name));
-    json_escape(skill->context_text,
-                escaped_content,
-                sizeof(escaped_content));
-    written = snprintf(output,
-                       sizeof(output),
-                       "{\"ok\":true,\"name\":\"%s\",\"content\":\"%s\"}",
-                       escaped_name,
-                       escaped_content);
-    if (written < 0 || (size_t)written >= sizeof(output)) {
-        result->status = AGENT_ERROR_LIMIT;
-        result->content_json = "{\"ok\":false,\"error\":\"skill too large\"}";
-        result->error_message = "skill too large";
-        return result->status;
-    }
-
-    result->status = AGENT_OK;
-    result->content_json = output;
-    result->error_message = NULL;
-    return AGENT_OK;
+    encoded = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (!encoded) return AGENT_ERROR_NOMEM;
+    ret = smart_home_tool_reply(output, encoded, AGENT_OK);
+    cJSON_free(encoded);
+    return ret;
 }

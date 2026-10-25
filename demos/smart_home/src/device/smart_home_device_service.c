@@ -1,4 +1,5 @@
 #include "smart_home_device_service.h"
+#include <agent/context.h>
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -257,7 +258,7 @@ int smart_home_device_service_find_first(smart_home_device_service_t *service,
         *out_device = *device;
     }
     pthread_mutex_unlock(&service->mutex);
-    return device ? AGENT_OK : AGENT_ERROR_NOTFOUND;
+    return device ? AGENT_OK : AGENT_ERROR_NOT_FOUND;
 }
 
 int smart_home_device_service_build_snapshot_json(
@@ -496,7 +497,7 @@ int smart_home_device_service_set_device_control(
     device = smart_home_device_find_by_id(service->state, device_id);
     if (!device) {
         pthread_mutex_unlock(&service->mutex);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     type = device->type;
     strncpy(room, device->room, sizeof(room) - 1u);
@@ -541,7 +542,7 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *service,
     pthread_mutex_lock(&service->mutex);
     if (service->scene_catalog.version != SMART_HOME_SCENE_CATALOG_VERSION) {
         pthread_mutex_unlock(&service->mutex);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     for (i = 0u; i < service->scene_catalog.scene_count; i++) {
         if (strcmp(service->scene_catalog.scenes[i].id, scene) == 0) {
@@ -551,7 +552,7 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *service,
     }
     if (!matched) {
         pthread_mutex_unlock(&service->mutex);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     /* Validate every target before changing state, so a scene is atomic. */
@@ -561,7 +562,7 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *service,
         if (!smart_home_device_find_first(service->state, action->room,
                                           action->device_type)) {
             pthread_mutex_unlock(&service->mutex);
-            return AGENT_ERROR_NOTFOUND;
+            return AGENT_ERROR_NOT_FOUND;
         }
     }
     for (i = 0u; i < matched->action_count; i++) {
@@ -584,4 +585,30 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *service,
     }
     snprintf(data, sizeof(data), "{\"sceneId\":\"%s\"}", scene);
     return commit_mutation(service, AGENT_OK, "scene_progress", data);
+}
+
+static agent_error_t build_device_context(void *user_data,
+                                          const agent_context_request_t *request,
+                                          const agent_text_sink_t *output)
+{
+    char snapshot[2048];
+    int ret;
+    (void)request;
+    ret = smart_home_device_service_build_snapshot_json(user_data, snapshot, sizeof(snapshot));
+    if (ret != AGENT_OK) return (agent_error_t)ret;
+    return output->write(output->context, agent_string_view(snapshot, strlen(snapshot)));
+}
+
+int smart_home_device_service_register_context(agent_t *agent,
+                                                smart_home_device_service_t *service)
+{
+    const agent_context_provider_t provider = {
+        .name = AGENT_SV_LITERAL("smart_home_state"),
+        .priority = 80, .required = false,
+        .build = build_device_context, .user_data = service,
+        .max_bytes = AGENT_MAX_INPUT_BYTES < 2048u ? AGENT_MAX_INPUT_BYTES : 2048u,
+        .placement = AGENT_CONTEXT_REFERENCE
+    };
+    if (!agent || !service) return AGENT_ERROR_INVALID;
+    return agent_register_context(agent, &provider);
 }

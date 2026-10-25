@@ -116,6 +116,3 @@ int smart_home_ac_parse_fan_speed(const char *name);
 int smart_home_device_build_status_json(const smart_home_state_t *state,
                                         char *buffer,
                                         size_t buffer_size);
-
-int smart_home_device_register_context(agent_t *agent,
-                                       smart_home_state_t *state);

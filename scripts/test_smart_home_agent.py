@@ -38,7 +38,12 @@ def main():
         compiler = repo.parent / "prebuilts/gcc/linux-x86_64/riscv-none-elf/bin/riscv-none-elf-gcc"
         sources += sorted(package.glob("ports/*/src/*.c")) + application
         sources += [app / "src/tools/smart_home_tools.c",
-                    app / "src/miloco/smart_home_miloco_tools.c"]
+                    app / "src/miloco/smart_home_miloco_tools.c",
+                    app / "src/device/smart_home_device.c",
+                    app / "src/device/smart_home_device_service.c",
+                    app / "src/skills/smart_home_skill_loader.c",
+                    app / "src/skills/smart_home_skills.c",
+                    app / "src/skills/smart_home_scene_catalog.c"]
         native_includes = [repo.parent / "nuttx/include", repo.parent / "apps/include",
                            repo.parent / "apps/crypto/mbedtls/mbedtls/include", *includes]
         with tempfile.TemporaryDirectory(prefix="smart-home-agent-p4-") as temporary:

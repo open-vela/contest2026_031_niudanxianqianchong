@@ -438,7 +438,7 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     }
 
     smart_home_init_trace("device-context-begin", AGENT_OK);
-    ret = smart_home_device_register_context(app->agent, &app->device_state);
+    ret = smart_home_device_service_register_context(app->agent, &app->device_service);
     smart_home_init_trace("device-context-done", ret);
     if (ret != AGENT_OK) {
         app->system_status.agent_status = ret;
@@ -471,8 +471,11 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         smart_home_init_trace("scene-catalog-begin", AGENT_OK);
         scene_skill = smart_home_skill_store_find(&app->skill_store,
                                                   "smart_home_scenes");
-        ret = smart_home_scene_catalog_load(
-            scene_skill ? scene_skill->context_text : NULL, &scene_catalog);
+        ret = scene_skill ? smart_home_scene_catalog_load(
+            scene_skill->context_text, &scene_catalog) : AGENT_ERROR_NOT_FOUND;
+        /* Miloco scenes need no legacy virtual-device catalog. */
+        if (ret == AGENT_ERROR_NOT_FOUND) memset(&scene_catalog, 0, sizeof(scene_catalog));
+        if (ret == AGENT_ERROR_NOT_FOUND) ret = AGENT_OK;
         smart_home_init_trace("scene-catalog-load-done", ret);
         if (ret != AGENT_OK) {
             app->system_status.skills_status = ret;
@@ -482,8 +485,9 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         }
 
         smart_home_init_trace("scene-service-begin", AGENT_OK);
-        ret = smart_home_device_service_set_scene_catalog(&app->device_service,
-                                                           &scene_catalog);
+        ret = scene_catalog.scene_count ?
+            smart_home_device_service_set_scene_catalog(&app->device_service,
+                                                         &scene_catalog) : AGENT_OK;
         smart_home_init_trace("scene-service-done", ret);
         if (ret != AGENT_OK) {
             app->system_status.tools_status = ret;

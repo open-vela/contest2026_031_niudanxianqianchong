@@ -115,3 +115,6 @@ int smart_home_device_service_set_environment(smart_home_device_service_t *servi
                                               int ambient_light);
 int smart_home_device_service_run_scene(smart_home_device_service_t *service,
                                         const char *scene);
+
+int smart_home_device_service_register_context(agent_t *agent,
+                                                smart_home_device_service_t *service);

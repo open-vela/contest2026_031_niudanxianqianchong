@@ -128,7 +128,7 @@ void smart_home_device_init(smart_home_state_t *s) { memset(s, 0, sizeof(*s)); }
 int smart_home_device_service_init(smart_home_device_service_t *s, smart_home_state_t *state)
 { memset(s, 0, sizeof(*s)); s->state = state; return AGENT_OK; }
 void smart_home_device_service_deinit(smart_home_device_service_t *s) { (void)s; }
-int smart_home_device_register_context(agent_t *agent, smart_home_state_t *s)
+int smart_home_device_service_register_context(agent_t *agent, smart_home_device_service_t *s)
 { (void)agent; (void)s; return fail_context ? AGENT_ERROR_CONTEXT_OVERFLOW : AGENT_OK; }
 void smart_home_skill_store_init(smart_home_skill_store_t *s) { memset(s, 0, sizeof(*s)); }
 void smart_home_skill_store_deinit(smart_home_skill_store_t *s) { memset(s, 0, sizeof(*s)); }

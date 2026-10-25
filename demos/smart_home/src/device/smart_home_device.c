@@ -328,7 +328,7 @@ int smart_home_device_update_meta(smart_home_state_t *state,
 
     device = smart_home_device_find_by_id(state, device_id);
     if (!device) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     strncpy(device->room, room, sizeof(device->room) - 1);
@@ -347,7 +347,7 @@ int smart_home_device_remove(smart_home_state_t *state, int device_id)
 
     device = smart_home_device_find_by_id(state, device_id);
     if (!device) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     memset(device, 0, sizeof(*device));
@@ -484,7 +484,7 @@ int smart_home_device_set_light(smart_home_state_t *state,
                                           room,
                                           SMART_HOME_DEVICE_LIGHT);
     if (!device) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     level = clamp_brightness(brightness);
@@ -508,7 +508,7 @@ int smart_home_device_set_ac(smart_home_state_t *state,
 
     device = smart_home_device_find_first(state, room, SMART_HOME_DEVICE_AC);
     if (!device) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     device->on = on ? 1 : 0;
@@ -647,56 +647,6 @@ int smart_home_device_build_status_json(const smart_home_state_t *state,
     }
 
     return AGENT_OK;
-}
-
-static int build_device_context(char *buffer,
-                                size_t buffer_size,
-                                size_t *written,
-                                void *user_data)
-{
-    smart_home_state_t *state = (smart_home_state_t *)user_data;
-    char status[1024];
-    int ret;
-    int n;
-
-    if (!buffer || !written || !state) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    ret = smart_home_device_build_status_json(state, status, sizeof(status));
-    if (ret != AGENT_OK) {
-        return ret;
-    }
-
-    n = snprintf(buffer,
-                 buffer_size,
-                 "Current virtual home state JSON:\n%s\n",
-                 status);
-    if (n < 0 || (size_t)n >= buffer_size) {
-        return AGENT_ERROR_CONTEXT_OVERFLOW;
-    }
-
-    *written = (size_t)n;
-    return AGENT_OK;
-}
-
-int smart_home_device_register_context(agent_t *agent,
-                                       smart_home_state_t *state)
-{
-    agent_context_provider_t provider;
-
-    if (!agent || !state) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    memset(&provider, 0, sizeof(provider));
-    provider.name = "smart_home_state";
-    provider.priority = 80u;
-    provider.flags = AGENT_CONTEXT_FLAG_OPTIONAL;
-    provider.build = build_device_context;
-    provider.user_data = state;
-
-    return agent_register_context_provider(agent, &provider);
 }
 
 /* ── 序列化（state.json 持久化用） ── */
