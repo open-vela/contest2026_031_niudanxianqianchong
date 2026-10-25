@@ -1,70 +1,45 @@
 ############################################################################
 # packages/cAGENT/Makefile
 #
-# cAGENT core library for NuttX/openvela.
+# cAGENT: vendored snapshot of cAgentV2 (see V2_SNAPSHOT_COMMIT).
+#
+# 容量项不在此桥接：Kconfig 直接定义 CONFIG_AGENT_* 符号，经 NuttX 生成的
+# nuttx/config.h 传入，include/agent/config.h 会优先采用。
 ############################################################################
 
 include $(APPDIR)/Make.defs
 
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/include
 CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/codecs/json
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/codecs/json/vendor/jsmn
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/providers/model/openai/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/runtime/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/transport/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/tls/include
 
-CFLAGS += -DCAGENT_MAX_TOOLS=$(CONFIG_CAGENT_MAX_TOOLS)
-CFLAGS += -DCAGENT_MAX_SKILLS=$(CONFIG_CAGENT_MAX_SKILLS)
-CFLAGS += -DCAGENT_MAX_CONTEXT_PROVIDERS=$(CONFIG_CAGENT_MAX_CONTEXT_PROVIDERS)
-CFLAGS += -DCAGENT_MAX_SESSIONS=$(CONFIG_CAGENT_MAX_SESSIONS)
-CFLAGS += -DCAGENT_MAX_SESSION_MESSAGES=$(CONFIG_CAGENT_MAX_SESSION_MESSAGES)
-CFLAGS += -DCAGENT_CONTEXT_BUFFER_SIZE=$(CONFIG_CAGENT_CONTEXT_BUFFER_SIZE)
-CFLAGS += -DCAGENT_SYSTEM_CONTEXT_BUFFER_SIZE=$(CONFIG_CAGENT_SYSTEM_CONTEXT_BUFFER_SIZE)
-CFLAGS += -DCAGENT_TOOL_SCHEMA_BUFFER_SIZE=$(CONFIG_CAGENT_TOOL_SCHEMA_BUFFER_SIZE)
-CFLAGS += -DCAGENT_MESSAGES_BUFFER_SIZE=$(CONFIG_CAGENT_MESSAGES_BUFFER_SIZE)
-CFLAGS += -DCAGENT_HTTP_REQUEST_BUFFER_SIZE=$(CONFIG_CAGENT_HTTP_REQUEST_BUFFER_SIZE)
-CFLAGS += -DCAGENT_HTTP_RESPONSE_BUFFER_SIZE=$(CONFIG_CAGENT_HTTP_RESPONSE_BUFFER_SIZE)
-CFLAGS += -DCAGENT_REQUEST_ARENA_EXTRA_SIZE=$(CONFIG_CAGENT_REQUEST_ARENA_EXTRA_SIZE)
-CFLAGS += -DCAGENT_SESSION_CONTENT_MAX_SIZE=$(CONFIG_CAGENT_SESSION_CONTENT_MAX_SIZE)
-CFLAGS += -DCAGENT_SESSION_TOOL_CALL_MAX_SIZE=$(CONFIG_CAGENT_SESSION_TOOL_CALL_MAX_SIZE)
-CFLAGS += -DCAGENT_SESSION_MAX_TOOL_CALLS=$(CONFIG_CAGENT_SESSION_MAX_TOOL_CALLS)
-CFLAGS += -DCAGENT_TOOL_ARGS_MAX_SIZE=$(CONFIG_CAGENT_TOOL_ARGS_MAX_SIZE)
-CFLAGS += -DCAGENT_TOOL_OUTPUT_MAX_SIZE=$(CONFIG_CAGENT_TOOL_OUTPUT_MAX_SIZE)
-CFLAGS += -DCAGENT_DEFAULT_MAX_STEPS=$(CONFIG_CAGENT_DEFAULT_MAX_STEPS)
-CFLAGS += -DCAGENT_DEFAULT_TIMEOUT_MS=$(CONFIG_CAGENT_DEFAULT_TIMEOUT_MS)
-CFLAGS += -DCAGENT_DEFAULT_MODEL_TIMEOUT_MS=$(CONFIG_CAGENT_DEFAULT_MODEL_TIMEOUT_MS)
-CFLAGS += -DCAGENT_DEFAULT_TOOL_TIMEOUT_MS=$(CONFIG_CAGENT_DEFAULT_TOOL_TIMEOUT_MS)
-CFLAGS += -DCAGENT_DEFAULT_MAX_OUTPUT_TOKENS=$(CONFIG_CAGENT_DEFAULT_MAX_OUTPUT_TOKENS)
+# 可移植 Core + 私有 JSON codec（零 malloc，全部借用式缓冲）
+CSRCS += $(wildcard src/*/*.c)
+CSRCS += codecs/json/reader.c
+CSRCS += codecs/json/writer.c
 
-CSRCS += src/core/agent_core.c
-CSRCS += src/core/agent_event.c
-CSRCS += src/core/agent_loop.c
-CSRCS += src/core/context_builder.c
-CSRCS += src/llm/model.c
-CSRCS += src/llm/llm_parse.c
-CSRCS += src/llm/llm_router.c
-CSRCS += src/memory/memory_store.c
-CSRCS += src/memory/session_mgr.c
-CSRCS += src/runtime/runtime.c
-CSRCS += src/skills/skill_registry.c
-CSRCS += src/tools/tool_guard.c
-CSRCS += src/tools/tool_registry.c
-CSRCS += src/tools/tool_schema.c
-
-ifeq ($(CONFIG_CAGENT_MODEL_MOCK),y)
-CSRCS += src/llm/model_mock.c
+ifeq ($(CONFIG_CAGENT_PROVIDER_OPENAI),y)
+CSRCS += providers/model/openai/src/model_openai.c
+CSRCS += providers/model/openai/src/openai_request.c
+CSRCS += providers/model/openai/src/openai_response.c
 endif
 
-ifeq ($(CONFIG_CAGENT_MODEL_OPENAI),y)
-CSRCS += src/llm/model_openai.c
+ifeq ($(CONFIG_CAGENT_PORT_OPENVELA_RUNTIME),y)
+CSRCS += ports/runtime/src/runtime.c
 endif
 
-ifeq ($(CONFIG_CAGENT_RUNTIME_OPENVELA),y)
-CFLAGS += -DCAGENT_RUNTIME_OPENVELA=1
-ifeq ($(CONFIG_ARCH_CHIP_ESP32S3),y)
-CFLAGS += ${INCDIR_PREFIX}$(TOPDIR)/arch/xtensa/src/esp32s3
-endif
-CSRCS += src/runtime/runtime_openvela.c
+ifeq ($(CONFIG_CAGENT_PORT_OPENVELA_TRANSPORT),y)
+CSRCS += ports/transport/src/transport.c
 endif
 
-ifeq ($(CONFIG_CAGENT_RUNTIME_OPENVELA_TLS),y)
-CFLAGS += -DCAGENT_RUNTIME_OPENVELA_TLS=1
+ifeq ($(CONFIG_CAGENT_PORT_OPENVELA_TLS),y)
+CSRCS += ports/tls/src/tls_core.c
+CSRCS += ports/tls/src/tls_ops.c
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/mbedtls/include
 endif
 

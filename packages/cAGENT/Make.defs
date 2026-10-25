@@ -1,3 +1,9 @@
+############################################################################
+# packages/cAGENT/Make.defs
+#
+# cAGENT (vendored cAgentV2) NuttX package registration.
+############################################################################
+
 ifneq ($(CONFIG_CAGENT),)
 CONFIGURED_APPS += $(APPDIR)/packages/cAGENT
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
