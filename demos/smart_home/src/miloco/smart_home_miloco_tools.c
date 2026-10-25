@@ -9,8 +9,8 @@
 #include "../agent/smart_home_agent.h"
 #include "../config/cjson_compat.h"
 
-#include <cagent/types.h>
-#include <cagent/tools.h>
+#include <agent.h>
+#include "../tools/smart_home_tool_io.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -102,9 +102,9 @@ static size_t append_count(char *buf, size_t cap, size_t used,
     return used + (size_t)n;
 }
 
-static int miot_device_list_tool(const agent_tool_call_t *call,
-                                 agent_tool_result_t *result,
-                                 void *user_data)
+static agent_error_t miot_device_list_tool(void *user_data,
+                                         const agent_tool_context_t *context,
+                                         const agent_text_sink_t *sink)
 {
     static char output[MILOCO_TOOL_LIST_BUFFER_BYTES];
     smart_home_agent_app_t *app = user_data;
@@ -114,19 +114,18 @@ static int miot_device_list_tool(const agent_tool_call_t *call,
     size_t i;
     uint8_t k;
 
-    (void)call;
-    result->status = AGENT_ERROR;
-    result->content_json = output;
-    result->error_message = "gateway unavailable";
+    agent_error_t status = AGENT_ERROR_IO;
+
+    (void)context;
     if (!app || !app->miloco) {
         snprintf(output, sizeof(output),
                  "{\"ok\":false,\"error\":\"miloco_gateway_not_configured\"}");
-        return result->status;
+        return smart_home_tool_reply(sink, output, status);
     }
     if (!smart_home_miloco_reachable(app->miloco)) {
         snprintf(output, sizeof(output),
                  "{\"ok\":false,\"error\":\"miloco_gateway_unreachable\"}");
-        return result->status;
+        return smart_home_tool_reply(sink, output, status);
     }
 
     count = smart_home_miloco_list(app->miloco, devices,
@@ -164,106 +163,64 @@ static int miot_device_list_tool(const agent_tool_call_t *call,
         used = append_count(output, sizeof(output), used, "]}");
     }
     used = append_count(output, sizeof(output), used, "]}");
-    (void)used;
-    result->status = AGENT_OK;
-    result->error_message = NULL;
-    return AGENT_OK;
+    if (used >= sizeof(output) - 1u)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"device_list_capacity\"}", AGENT_ERROR_CAPACITY);
+    return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 
-static int miot_device_control_tool(const agent_tool_call_t *call,
-                                    agent_tool_result_t *result,
-                                    void *user_data)
+static agent_error_t miot_device_control_tool(void *user_data,
+                                             const agent_tool_context_t *context,
+                                             const agent_text_sink_t *sink)
 {
-    static char output[192];
     smart_home_agent_app_t *app = user_data;
+    char did[24], iid[16], operation[16] = "set";
+    int value = 0;
+    agent_error_t ret;
     cJSON *root;
-    const cJSON *did;
-    const cJSON *iid;
-    const cJSON *value;
-    const cJSON *operation;
+    const cJSON *item;
 
-    result->status = AGENT_ERROR;
-    result->content_json = output;
-    result->error_message = "control failed";
-    if (!app || !app->miloco || !call || !call->arguments_json) {
-        snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"miloco_gateway_not_configured\"}");
-        return result->status;
-    }
-
-    root = cJSON_Parse(call->arguments_json);
-    if (!root) {
-        snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"invalid_arguments\"}");
-        return result->status;
-    }
-    did = cJSON_GetObjectItemCaseSensitive(root, "did");
-    iid = cJSON_GetObjectItemCaseSensitive(root, "iid");
-    value = cJSON_GetObjectItemCaseSensitive(root, "value");
-    operation = cJSON_GetObjectItemCaseSensitive(root, "operation");
-    if (!cJSON_IsString(did) || !did->valuestring[0] ||
-        !cJSON_IsString(iid) || !iid->valuestring[0]) {
-        cJSON_Delete(root);
-        snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"invalid_arguments\","
-                 "\"hint\":\"run miot_device_list first to get valid iid\"}");
-        return result->status;
-    }
-
-    /* did/iid 的 valuestring 挂在 cJSON 树上，cJSON_Delete 后即释放。
-     * 曾在 delete 之后才格式化回执，读已释放内存（UAF）——free-list
-     * 指针字节（0x48b4.. 含孤立续字节）随会话进入请求体，被 LLM
-     * 服务端以 400 invalid unicode 拒绝，且间歇复现。先拷贝再释放。 */
-    {
-        char did_copy[24];
-        char iid_copy[16];
-
-        snprintf(did_copy, sizeof(did_copy), "%s", did->valuestring);
-        snprintf(iid_copy, sizeof(iid_copy), "%s", iid->valuestring);
-
-        result->status = smart_home_miloco_submit_control(
-            app->miloco, did_copy, iid_copy,
-            (cJSON_IsString(operation) &&
-             strcmp(operation->valuestring, "action") == 0) ?
-                "action" : "set",
-            cJSON_IsNumber(value) ? (int32_t)value->valueint :
-            cJSON_IsTrue(value) ? 1 : 0);
-        cJSON_Delete(root);
-        root = NULL;
-
-        if (result->status != AGENT_OK) {
-            snprintf(output, sizeof(output),
-                     "{\"ok\":false,\"error\":\"submit_failed\",\"code\":%d,"
-                     "\"hint\":\"iid must come from miot_device_list "
-                     "controls\"}",
-                     result->status);
-            result->status = AGENT_ERROR;
-            return result->status;
+    if (!app || !app->miloco)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"gateway_unavailable\"}", AGENT_ERROR_IO);
+    if (smart_home_tool_get_string(context->call.arguments_json, "did", did, sizeof(did)) ||
+        smart_home_tool_get_string(context->call.arguments_json, "iid", iid, sizeof(iid)) ||
+        !did[0] || !iid[0]) goto invalid;
+    ret = smart_home_tool_get_string(context->call.arguments_json, "operation", operation, sizeof(operation));
+    if ((ret && ret != AGENT_ERROR_NOT_FOUND) ||
+        (strcmp(operation, "set") && strcmp(operation, "action"))) goto invalid;
+    root = smart_home_tool_parse(context->call.arguments_json);
+    item = cJSON_GetObjectItemCaseSensitive(root, "value");
+    if (!strcmp(operation, "set")) {
+        if (cJSON_IsBool(item)) value = cJSON_IsTrue(item);
+        else if (smart_home_tool_get_int(context->call.arguments_json, "value", &value)) {
+            cJSON_Delete(root);
+            goto invalid;
         }
-        snprintf(output, sizeof(output),
-                 "{\"ok\":true,\"did\":\"%s\",\"iid\":\"%s\","
-                 "\"note\":\"control submitted; state updates on next "
-                 "poll\"}",
-                 did_copy, iid_copy);
     }
-    result->status = AGENT_OK;
-    result->error_message = NULL;
-    return result->status;
+    cJSON_Delete(root);
+    if (smart_home_miloco_submit_control(app->miloco, did, iid, operation, value))
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"submit_failed\"}", AGENT_ERROR_TOOL_FAILED);
+    return smart_home_tool_reply(sink,
+        "{\"ok\":true,\"note\":\"control submitted; state updates on next poll\"}", AGENT_OK);
+invalid:
+    return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"invalid_arguments\"}", AGENT_ERROR_TOOL_ARGUMENT);
 }
 
 static int register_tool(agent_t *agent,
                          const char *name,
                          const char *description,
                          const char *input_schema_json,
-                         agent_tool_fn execute,
+                         agent_tool_execute_fn execute,
                          void *user_data,
                          uint32_t flags)
 {
     agent_tool_t tool = {0};
 
-    tool.name = name;
-    tool.description = description;
-    tool.input_schema_json = input_schema_json;
+    tool.name = agent_string_view(name, strlen(name));
+    tool.group = agent_string_view("local", 5u);
+    tool.category = (flags & AGENT_TOOL_SIDE_EFFECT) ? agent_string_view("control", 7u) : agent_string_view("query", 5u);
+    tool.description = agent_string_view(description, strlen(description));
+    tool.input_schema_json = agent_string_view(input_schema_json, strlen(input_schema_json));
+    tool.validate = smart_home_tool_validate_object;
     tool.execute = execute;
     tool.user_data = user_data;
     tool.flags = flags;
@@ -283,18 +240,15 @@ int smart_home_miloco_tools_register(agent_t *agent,
                         "home-server gateway, with online and power state.",
                         SCHEMA_MIOT_DEVICE_LIST,
                         miot_device_list_tool, app,
-                        AGENT_TOOL_FLAG_LLM_VISIBLE |
-                            AGENT_TOOL_FLAG_READ_ONLY);
+                        AGENT_TOOL_READ_ONLY);
     if (ret != AGENT_OK) {
         return ret;
     }
     return register_tool(agent, "miot_device_control",
-                         "Unified Mi Home device control through the "
-                         "Miloco gateway: write a property (operation=set) "
-                         "or call an action (operation=action). Valid iid "
-                         "values are listed per device in the controls "
-                         "array of miot_device_list.",
+                         "Submit a Mi Home property write (set) or action. "
+                         "Use did and iid from miot_device_list controls. "
+                         "Success means queued; verify state on the next poll.",
                          SCHEMA_MIOT_DEVICE_CONTROL,
                          miot_device_control_tool, app,
-                         AGENT_TOOL_FLAG_LLM_VISIBLE);
+                         AGENT_TOOL_SIDE_EFFECT);
 }

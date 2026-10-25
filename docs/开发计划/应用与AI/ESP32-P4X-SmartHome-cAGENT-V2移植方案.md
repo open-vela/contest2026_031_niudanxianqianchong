@@ -1,6 +1,6 @@
 # SmartHome cAGENT V2 移植方案
 
-状态：Agent 层已适配并通过 Host/mock 验证和 P4 对象编译，其余模块待适配。
+状态：Agent、本地及米家工具已适配，通过 Host/mock 验证和 P4 对象编译；完整固件和真机待验收。
 分支：`feat/cagent-v2-migration`。移植起点：`8d344ee`。
 
 ## 范围

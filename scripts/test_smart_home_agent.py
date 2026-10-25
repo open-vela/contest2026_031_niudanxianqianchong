@@ -37,6 +37,8 @@ def main():
             raise SystemExit("P4 object check requires an existing ESP32-P4 NuttX configuration")
         compiler = repo.parent / "prebuilts/gcc/linux-x86_64/riscv-none-elf/bin/riscv-none-elf-gcc"
         sources += sorted(package.glob("ports/*/src/*.c")) + application
+        sources += [app / "src/tools/smart_home_tools.c",
+                    app / "src/miloco/smart_home_miloco_tools.c"]
         native_includes = [repo.parent / "nuttx/include", repo.parent / "apps/include",
                            repo.parent / "apps/crypto/mbedtls/mbedtls/include", *includes]
         with tempfile.TemporaryDirectory(prefix="smart-home-agent-p4-") as temporary:
