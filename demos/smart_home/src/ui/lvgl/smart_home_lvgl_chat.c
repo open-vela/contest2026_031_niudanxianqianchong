@@ -1,10 +1,5 @@
 /**
- * smart_home LVGL chat screen (read-only message flow).
- *
- * Input comes from NSH command line ("smart_home <text>").  This screen
- * displays the chat history with user bubbles, agent bubbles, tool-call
- * cards, and error bubbles.
- * bubbles, agent bubbles, tool-call cards, and error bubbles.
+ * smart_home LVGL chat screen: messages and optional operation summaries.
  */
 
 #include "smart_home_lvgl_internal.h"
@@ -23,11 +18,13 @@
 
 #define SMART_HOME_CHAT_INPUT_H 34
 #define SMART_HOME_CHAT_HEADER_H (SMART_HOME_TOPBAR_H + 12)
+#define SMART_HOME_CHAT_STATUS_H 22
 
 static int chat_list_height(int keyboard_visible)
 {
     int reserved = SMART_HOME_CHAT_HEADER_H + SMART_HOME_NAV_H +
-                   SMART_HOME_NAV_BOTTOM_PAD + SMART_HOME_CHAT_INPUT_H + 16;
+                   SMART_HOME_NAV_BOTTOM_PAD + SMART_HOME_CHAT_INPUT_H +
+                   SMART_HOME_CHAT_STATUS_H + 16;
     int list_h;
 
     if (keyboard_visible) {
@@ -80,6 +77,10 @@ static void layout_chat_controls(smart_home_lvgl_t *ui, int keyboard_visible)
         lv_obj_set_size(ui->chat_input_bar, content_w, SMART_HOME_CHAT_INPUT_H);
         lv_obj_align(ui->chat_input_bar, LV_ALIGN_BOTTOM_MID, 0, input_y);
     }
+    if (ui->chat_status && ui->chat_input_bar) {
+        lv_obj_align_to(ui->chat_status, ui->chat_input_bar,
+                         LV_ALIGN_OUT_TOP_LEFT, 0, -6);
+    }
 }
 
 static void scroll_chat_to_bottom(smart_home_lvgl_t *ui)
@@ -117,7 +118,7 @@ static void submit_chat_input(smart_home_lvgl_t *ui)
     const char *text;
     char input[SMART_HOME_INPUT_SIZE];
 
-    if (!ui || !ui->chat_input) {
+    if (!ui || !ui->chat_input || ui->request_inflight) {
         return;
     }
 
@@ -294,12 +295,42 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
 static const char *tool_status_text(int ok)
 {
     if (ok > 0) {
-        return "OK";
+        return "已返回";
     }
     if (ok == 0) {
-        return "Failed";
+        return "未完成";
     }
-    return "Running";
+    return ok == -2 ? "未确认" : "处理中…";
+}
+
+/* Protocol names and call IDs remain internal to event matching. */
+static const char *tool_display_name(const char *name)
+{
+    static const struct {
+        const char *name;
+        const char *title;
+    } titles[] = {
+        {"get_home_status", "查看家庭状态"},
+        {"get_indoor_environment", "查看室内环境"},
+        {"get_weather", "查询天气"},
+        {"set_light", "调整灯光"},
+        {"set_ac", "调整空调"},
+        {"run_scene", "提交场景操作"},
+        {"set_timer", "设置提醒"},
+        {"list_timers", "查看提醒"},
+        {"cancel_timer", "取消提醒"},
+        {"read_skill", "查阅操作说明"},
+        {"miot_device_list", "查看米家设备"},
+        {"miot_device_control", "提交米家控制"},
+    };
+    size_t i;
+
+    for (i = 0; name && i < sizeof(titles) / sizeof(titles[0]); i++) {
+        if (strcmp(name, titles[i].name) == 0) {
+            return titles[i].title;
+        }
+    }
+    return "扩展服务操作";
 }
 
 static lv_color_t tool_status_color(int ok)
@@ -317,44 +348,39 @@ static void refresh_trace_header(smart_home_lvgl_t *ui)
 {
     int has_running = 0;
     int has_failed = 0;
+    int has_unknown = 0;
 
     if (!ui || !ui->chat_trace_status) {
         return;
     }
 
     for (int i = 0; i < ui->chat_trace_tool_count; i++) {
-        if (ui->chat_trace_tools[i].state < 0) {
+        if (ui->chat_trace_tools[i].state == -1) {
             has_running = 1;
         } else if (ui->chat_trace_tools[i].state == 0) {
             has_failed = 1;
+        } else if (ui->chat_trace_tools[i].state == -2) {
+            has_unknown = 1;
         }
     }
 
     if (has_running) {
-        lv_label_set_text(ui->chat_trace_status, "Running");
+        lv_label_set_text(ui->chat_trace_status, "处理中…");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_WARNING,
                                     0);
     } else if (has_failed) {
-        lv_label_set_text(ui->chat_trace_status, "Failed");
+        lv_label_set_text(ui->chat_trace_status, "有操作未完成");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_DANGER,
                                     0);
-    } else if (ui->chat_trace_tool_count > 0) {
-        lv_label_set_text(ui->chat_trace_status, "OK");
-        lv_obj_set_style_text_color(ui->chat_trace_status,
-                                    SMART_HOME_UI_COLOR_SUCCESS,
-                                    0);
-    } else if (ui->chat_trace_active) {
-        lv_label_set_text(ui->chat_trace_status, "Running");
+    } else if (has_unknown) {
+        lv_label_set_text(ui->chat_trace_status, "结果待确认");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_WARNING,
                                     0);
     } else {
-        if (ui->chat_trace_title) {
-            lv_label_set_text(ui->chat_trace_title, "Thinking...done");
-        }
-        lv_label_set_text(ui->chat_trace_status, "Done");
+        lv_label_set_text(ui->chat_trace_status, "已返回");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_SUCCESS,
                                     0);
@@ -425,7 +451,7 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
         return;
     }
 
-    ui->chat_trace_collapsed = 0;
+    ui->chat_trace_collapsed = 1;
     ui->chat_trace_active = 1;
 
     row = create_chat_row(ui, 0);
@@ -456,14 +482,14 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
 
-    smart_home_lvgl_icon_create(header, ICON_LOADING, 14, 14);
+    smart_home_lvgl_icon_create(header, ICON_TOOL, 14, 14);
     ui->chat_trace_title = smart_home_lvgl_label_create(header,
-                                                        "Thinking...",
+                                                        "操作记录 · 点按查看",
                                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                                         12);
     lv_obj_set_flex_grow(ui->chat_trace_title, 1);
     ui->chat_trace_status = smart_home_lvgl_label_create(header,
-                                                         "Running",
+                                                         "处理中…",
                                                          SMART_HOME_UI_COLOR_WARNING,
                                                          12);
 
@@ -475,6 +501,7 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
     lv_obj_set_style_pad_all(body, 0, 0);
     lv_obj_set_style_pad_row(body, 5, 0);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_add_event_cb(header, trace_header_event_cb, LV_EVENT_CLICKED, body);
 
@@ -486,7 +513,10 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
 
 void smart_home_lvgl_show_thinking(smart_home_lvgl_t *ui)
 {
-    ensure_trace_card(ui);
+    if (ui && ui->chat_status) {
+        lv_label_set_text(ui->chat_status, "正在思考…");
+        lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void smart_home_lvgl_finish_thinking(smart_home_lvgl_t *ui)
@@ -497,12 +527,13 @@ void smart_home_lvgl_finish_thinking(smart_home_lvgl_t *ui)
 
     for (int i = 0; i < ui->chat_trace_tool_count; i++) {
         smart_home_lvgl_trace_tool_t *tool = &ui->chat_trace_tools[i];
-        if (tool->state < 0) {
-            tool->state = 1;
+        if (tool->state == -1) {
+            /* A missing result is not evidence of a successful operation. */
+            tool->state = -2;
             if (tool->status_label) {
-                lv_label_set_text(tool->status_label, tool_status_text(1));
+                lv_label_set_text(tool->status_label, tool_status_text(-2));
                 lv_obj_set_style_text_color(tool->status_label,
-                                            tool_status_color(1),
+                                            tool_status_color(-2),
                                             0);
                 lv_obj_invalidate(tool->status_label);
             }
@@ -510,18 +541,15 @@ void smart_home_lvgl_finish_thinking(smart_home_lvgl_t *ui)
     }
 
     ui->chat_trace_active = 0;
-    ui->chat_trace_collapsed = 0;
     refresh_trace_header(ui);
 
-    /* Unhide the trace card body so tool call details are visible */
-    if (ui->chat_trace_body) {
-        lv_obj_clear_flag(ui->chat_trace_body, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_invalidate(ui->chat_trace_body);
+    if (ui->chat_status) {
+        lv_obj_add_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
     }
 
     scroll_chat_to_bottom(ui);
 
-    /* Invalidate the trace card so the "Done" status is visible.
+    /* Invalidate the operation summary so its final status is visible.
      * The caller (agent_done_async_cb) calls lv_refr_now() after
      * appending the response bubble. */
     if (ui->chat_trace_row) {
@@ -539,7 +567,6 @@ void smart_home_lvgl_trace_tool(smart_home_lvgl_t *ui,
     smart_home_lvgl_trace_tool_t *tool;
     const char *id = call_id && call_id[0] ? call_id : "-";
     const char *tool_name = name && name[0] ? name : "tool";
-    char text[128];
     int slot = -1;
 
     if (!ui || !ui->chat_list) {
@@ -613,13 +640,8 @@ void smart_home_lvgl_trace_tool(smart_home_lvgl_t *ui,
     tool->row = tool_row;
 
     smart_home_lvgl_icon_create(tool_row, ICON_TOOL, 14, 14);
-    snprintf(text,
-             sizeof(text),
-             "%s  %s",
-             tool_name,
-             id);
     label = smart_home_lvgl_label_create(tool_row,
-                                         text,
+                                         tool_display_name(tool_name),
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                          12);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
@@ -639,96 +661,7 @@ void smart_home_lvgl_append_tool_card(smart_home_lvgl_t *ui,
                                       const char *call_id,
                                       int ok)
 {
-    const char *status_text;
-    const char *status_icon;
-    lv_color_t status_color;
-    lv_obj_t *row;
-    lv_obj_t *card;
-    lv_obj_t *header;
-    lv_obj_t *icon;
-    lv_obj_t *label;
-    lv_obj_t *id_label;
-    char text[256];
-    int width;
-
-    if (!ui || !ui->chat_list) {
-        return;
-    }
-
-    if (ok > 0) {
-        status_text = "OK";
-        status_icon = ICON_STATUS_OK;
-        status_color = SMART_HOME_UI_COLOR_SUCCESS;
-    } else if (ok == 0) {
-        status_text = "Failed";
-        status_icon = ICON_STATUS_FAIL;
-        status_color = SMART_HOME_UI_COLOR_DANGER;
-    } else {
-        status_text = "Running";
-        status_icon = ICON_LOADING;
-        status_color = SMART_HOME_UI_COLOR_WARNING;
-    }
-
-    row = create_chat_row(ui, 0);
-    width = smart_home_lvgl_content_w() * 78 / 100;
-    card = lv_obj_create(row);
-    lv_obj_remove_style_all(card);
-    lv_obj_set_width(card, width);
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_pad_all(card, 10, 0);
-    smart_home_lvgl_card_style(card);
-    smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_TOOL_CARD_BG);
-    lv_obj_set_style_border_side(card, LV_BORDER_SIDE_LEFT, 0);
-    lv_obj_set_style_border_width(card, 3, 0);
-    lv_obj_set_style_border_color(card,
-                                  ok == 0 ? SMART_HOME_UI_COLOR_DANGER :
-                                            SMART_HOME_UI_COLOR_WARNING,
-                                  0);
-
-    /* Header row: tool icon + name + status icon + status text */
-    header = lv_obj_create(card);
-    lv_obj_remove_style_all(header);
-    lv_obj_set_size(header, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(header, 0, 0);
-    lv_obj_set_style_pad_all(header, 0, 0);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(header,
-                          LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(header, 6, 0);
-
-    icon = smart_home_lvgl_icon_create(header, ICON_TOOL, 16, 16);
-    (void)icon;
-
-    snprintf(text, sizeof(text), "%s", name ? name : "tool");
-    label = smart_home_lvgl_label_create(header,
-                                         text,
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         12);
-    lv_obj_set_flex_grow(label, 1);
-
-    icon = smart_home_lvgl_icon_create(header, status_icon, 14, 14);
-    (void)icon;
-
-    label = smart_home_lvgl_label_create(header,
-                                         status_text,
-                                         status_color,
-                                         12);
-
-    /* Call ID line */
-    if (call_id && call_id[0]) {
-        snprintf(text, sizeof(text), "id: %s", call_id);
-        id_label = smart_home_lvgl_label_create(card,
-                                                 text,
-                                                 SMART_HOME_UI_COLOR_TEXT_MUTED,
-                                                 12);
-        (void)id_label;
-    }
-
-    scroll_chat_to_bottom(ui);
+    smart_home_lvgl_trace_tool(ui, name, call_id, ok);
 }
 
 void smart_home_lvgl_append_error_bubble(smart_home_lvgl_t *ui,
@@ -757,7 +690,8 @@ void smart_home_lvgl_append_error_bubble(smart_home_lvgl_t *ui,
     lv_obj_set_style_border_width(bubble, 3, 0);
     lv_obj_set_style_border_color(bubble, SMART_HOME_UI_COLOR_WARNING, 0);
 
-    snprintf(text, sizeof(text), "Error: %s", msg ? msg : "no detail");
+    snprintf(text, sizeof(text), "%s",
+             msg && msg[0] ? msg : "暂时无法处理，请稍后重试。");
     label = smart_home_lvgl_label_create(bubble,
                                          text,
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
@@ -767,11 +701,18 @@ void smart_home_lvgl_append_error_bubble(smart_home_lvgl_t *ui,
     scroll_chat_to_bottom(ui);
 }
 
-/* ── chat_send_text: used by NSH command-line input path ───── */
+/* ── Submit a message from the UI or a native input source ───── */
 
 void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
 {
     if (!ui || !text || !text[0]) {
+        return;
+    }
+
+    /* Preserve this turn's operation summary while a request is running. */
+    if (ui->request_inflight) {
+        smart_home_lvgl_append_error_bubble(ui,
+                                           "正在处理上一条消息，请稍候。");
         return;
     }
 
@@ -794,12 +735,17 @@ void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
     smart_home_lvgl_append_msg_bubble(ui, text, 1);
 
     /* Submit to worker thread */
-    smart_home_lvgl_submit_agent_job(ui, text);
+    if (smart_home_lvgl_submit_agent_job(ui, text) != AGENT_OK) {
+        return;
+    }
+    if (ui->chat_send_btn) {
+        lv_obj_add_state(ui->chat_send_btn, LV_STATE_DISABLED);
+    }
 
     /* Update status hint */
     if (ui->chat_status) {
         lv_label_set_text(ui->chat_status,
-                          "正在请求智能管家…");
+                          "正在思考…");
         lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -886,6 +832,10 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     lv_obj_set_size(ui->chat_send_btn, 62, SMART_HOME_CHAT_INPUT_H);
     lv_obj_set_style_radius(ui->chat_send_btn, 8, 0);
     smart_home_lvgl_set_bg(ui->chat_send_btn, SMART_HOME_UI_COLOR_PRIMARY);
+    lv_obj_set_style_bg_color(ui->chat_send_btn,
+                               SMART_HOME_UI_COLOR_PRIMARY_DARK,
+                               LV_STATE_PRESSED);
+    lv_obj_set_style_opa(ui->chat_send_btn, LV_OPA_50, LV_STATE_DISABLED);
     lv_obj_add_event_cb(ui->chat_send_btn,
                         chat_send_event_cb,
                         LV_EVENT_CLICKED,
@@ -909,10 +859,6 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
                                                     "",
                                                     SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                                     12);
-    lv_obj_align(ui->chat_status,
-                 LV_ALIGN_BOTTOM_MID,
-                 0,
-                 -SMART_HOME_NAV_H - SMART_HOME_NAV_BOTTOM_PAD - 44);
     lv_obj_add_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
 
     /* Nav bar */

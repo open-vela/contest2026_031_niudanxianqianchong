@@ -40,7 +40,7 @@ typedef struct {
     lv_obj_t *status_label;
     char id[64];
     char name[64];
-    int state; /* -1 running, 0 failed, 1 ok */
+    int state; /* -2 unconfirmed, -1 running, 0 failed, 1 result returned */
 } smart_home_lvgl_trace_tool_t;
 
 typedef struct {

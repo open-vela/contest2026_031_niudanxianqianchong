@@ -189,6 +189,29 @@ static int agent_ui_enqueue(smart_home_lvgl_t *ui, ui_pending_item_t *item)
     return 0;
 }
 
+static const char *chat_request_error(int code, int has_operations)
+{
+    if (has_operations) {
+        return "本次对话未完成，部分操作可能已提交。请先查看设备状态。";
+    }
+    switch (code) {
+    case AGENT_ERROR_TIMEOUT:
+        return "等待回复超时，请稍后重试。";
+    case AGENT_ERROR_NETWORK:
+        return "暂时无法连接服务，请检查网络后重试。";
+    case AGENT_ERROR_MODEL:
+        return "智能管家暂时不可用，请检查模型服务设置。";
+    case AGENT_ERROR_POLICY_DENIED:
+        return "此操作尚未获得授权，请在设置中检查操作权限。";
+    case AGENT_ERROR_CANCELLED:
+        return "本次请求已取消。";
+    case AGENT_ERROR_NOMEM:
+        return "设备暂时繁忙，请稍后重试。";
+    default:
+        return "暂时无法完成请求，请稍后重试。";
+    }
+}
+
 static void agent_done_apply(agent_done_t *done)
 {
     smart_home_lvgl_t *ui = done ? done->ui : NULL;
@@ -203,6 +226,9 @@ static void agent_done_apply(agent_done_t *done)
             ui->agent_worker_active = 0;
         }
         ui->request_inflight = 0;
+        if (ui->chat_send_btn) {
+            lv_obj_remove_state(ui->chat_send_btn, LV_STATE_DISABLED);
+        }
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
         printf("[agent] reply(%d): %.200s\n",
                done->ret,
@@ -222,20 +248,14 @@ static void agent_done_apply(agent_done_t *done)
             }
 #endif
         } else {
-            char message[160];
-            snprintf(message,
-                     sizeof(message),
-                     "Agent call failed (%d): %.96s",
-                     done->ret,
-                     done->output[0] ? done->output : "no detail");
             smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, message);
+            smart_home_lvgl_append_error_bubble(
+                ui, chat_request_error(done->ret,
+                                        ui->chat_trace_tool_count > 0));
         }
         /* Update status hint */
         if (ui->chat_status) {
-            lv_label_set_text(ui->chat_status,
-                              "Done.  (NSH: smart_home \"...\")");
-            lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
         }
         /* Force display refresh so the response appears immediately
          * without waiting for a user touch event. */
@@ -302,20 +322,20 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
     }
 
     if (ui->request_inflight) {
-        smart_home_lvgl_append_error_bubble(ui, "Previous request is still running.");
+        smart_home_lvgl_append_error_bubble(ui, "正在处理上一条消息，请稍候。");
         return AGENT_ERROR_BUSY;
     }
 
     job = (agent_job_t *)calloc(1, sizeof(*job));
     if (!job) {
-        smart_home_lvgl_append_error_bubble(ui, "Not enough memory to submit request.");
+        smart_home_lvgl_append_error_bubble(ui, "设备暂时繁忙，请稍后重试。");
         return AGENT_ERROR_NOMEM;
     }
 
     done = (agent_done_t *)calloc(1, sizeof(*done));
     if (!done) {
         free(job);
-        smart_home_lvgl_append_error_bubble(ui, "Not enough memory to start Agent worker.");
+        smart_home_lvgl_append_error_bubble(ui, "设备暂时繁忙，请稍后重试。");
         return AGENT_ERROR_NOMEM;
     }
 
@@ -337,7 +357,7 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
                 free(done);
                 free(job);
                 smart_home_lvgl_append_error_bubble(
-                    ui, "Not enough PSRAM to start Agent worker.");
+                    ui, "设备暂时繁忙，请稍后重试。");
                 return AGENT_ERROR_NOMEM;
             }
 
@@ -366,7 +386,7 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
         ui->request_inflight = 0;
         free(done);
         free(job);
-        smart_home_lvgl_append_error_bubble(ui, "Failed to create Agent worker.");
+        smart_home_lvgl_append_error_bubble(ui, "暂时无法发送消息，请稍后重试。");
         return AGENT_ERROR;
     }
 
@@ -529,14 +549,9 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
         break;
     case AGENT_EVENT_ERROR:
     case AGENT_EVENT_TIMEOUT:
-        smart_home_lvgl_finish_thinking(ui);
-        smart_home_lvgl_append_error_bubble(ui, payload->message);
-        break;
     case AGENT_EVENT_RUN_DONE:
-        if (payload->error_code != AGENT_OK) {
-            smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, payload->message);
-        }
+        /* The worker completion emits one user-facing result. Raw event
+         * diagnostics stay in the serial log, avoiding duplicate errors. */
         break;
     default:
         break;
