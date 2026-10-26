@@ -212,29 +212,39 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
                                     const char *system_prompt,
                                     const smart_home_model_config_t *config)
 {
-    smart_home_agent_backend_t *backend;
+    smart_home_agent_backend_t *backend = NULL;
     agent_port_openvela_tls_config_t tls = {0};
     agent_port_openvela_transport_config_t transport = {0};
     agent_config_t core = agent_config_default();
     const agent_model_ops_t model = {.complete = model_complete};
+    const char *stage = "config";
     int ret;
 
     if (!out || !agent || !system_prompt) return AGENT_ERROR_INVALID;
     *out = NULL;
     *agent = NULL;
+    ret = validate_config(config);
+    if (ret != AGENT_OK) goto fail;
+    stage = "allocation";
     backend = smart_home_bulk_alloc(sizeof(*backend));
-    if (!backend) return AGENT_ERROR_NOMEM;
+    if (!backend) {
+        ret = AGENT_ERROR_NOMEM;
+        goto fail;
+    }
     memset(backend, 0, sizeof(*backend));
     core.limits.max_history_turns = CONFIG_SMART_HOME_SESSION_HISTORY_TURNS;
     backend->limits = core.limits;
+    stage = "runtime";
     ret = agent_port_openvela_runtime_init(&backend->runtime);
     if (ret != AGENT_OK) goto fail;
-    tls.io_timeout_ms = config ? (uint32_t)config->timeout_ms : 0u;
+    stage = "tls";
+    tls.io_timeout_ms = (uint32_t)config->timeout_ms;
     ret = agent_port_openvela_tls_init(&backend->tls, &tls);
     if (ret != AGENT_OK) goto fail;
     transport.runtime = backend->runtime;
     transport.tls_ops = backend->tls.ops;
     transport.tls_context = &backend->tls;
+    transport.request_timeout_ms = (uint32_t)config->timeout_ms;
     transport.url_buffer = backend->url;
     transport.url_buffer_size = sizeof(backend->url);
     transport.request_header_buffer = backend->request_header_text;
@@ -247,13 +257,16 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
     transport.response_header_capacity = 16u;
     transport.response_header_buffer = backend->response_header_text;
     transport.response_header_buffer_size = sizeof(backend->response_header_text);
+    stage = "transport";
     ret = agent_port_openvela_transport_init(&backend->transport,
                                              &backend->transport_state, &transport);
     if (ret != AGENT_OK) goto fail;
     core.runtime = backend->runtime;
     core.system_prompt = agent_string_view(system_prompt, strlen(system_prompt));
+    stage = "core";
     ret = agent_init(&backend->agent, &backend->core_storage, &core);
     if (ret != AGENT_OK) goto fail;
+    stage = "session";
     {
         agent_session_storage_t storage;
         const agent_session_ram_config_t ram = {
@@ -269,11 +282,13 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
         if (ret == AGENT_OK) ret = agent_set_session_storage(backend->agent, &storage);
         if (ret != AGENT_OK) goto fail;
     }
+    stage = "model-bind";
     ret = agent_model_init(&backend->model, &backend->model_storage,
                            &model, backend);
     if (ret != AGENT_OK) goto fail;
     ret = agent_set_model(backend->agent, backend->model);
     if (ret != AGENT_OK) goto fail;
+    stage = "model-config";
     ret = smart_home_agent_backend_apply(backend, config);
     if (ret != AGENT_OK) goto fail;
     *agent = backend->agent;
@@ -281,6 +296,8 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
     return AGENT_OK;
 
 fail:
+    printf("[smart_home_init] stage=backend-%s ret=%d (%s)\n",
+           stage, ret, agent_error_str((agent_error_t)ret));
     smart_home_agent_backend_destroy(&backend);
     return ret;
 }

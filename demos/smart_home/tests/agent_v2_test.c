@@ -125,7 +125,10 @@ agent_error_t agent_port_openvela_transport_init(agent_transport_t *out,
 {
     static const agent_transport_ops_t ops = {.request = http_request};
     if (fail_transport_init) return AGENT_ERROR_IO;
+    if (!config->request_timeout_ms) return AGENT_ERROR_INVALID;
     assert(config->runtime.now_ms && config->tls_ops && config->tls_context);
+    assert(config->request_timeout_ms ==
+           ((agent_port_openvela_tls_t *)config->tls_context)->config.io_timeout_ms);
     assert(config->url_buffer && config->io_buffer && config->response_header_buffer);
     state->config = *config;
     out->ops = &ops;
@@ -315,7 +318,29 @@ static void initialization_failures(void)
     missing_key = 0;
     assert(smart_home_agent_app_apply_model_config(&app, &app.model_config) == AGENT_OK);
     expect_run(&app);
-    smart_home_agent_app_deinit(&app);
+    {
+        const int invalid_timeouts[] = {0, -1, 4999, 60001};
+        smart_home_model_config_t config = app.model_config;
+        smart_home_agent_backend_t *backend;
+        agent_t *agent;
+        size_t before = allocations;
+        smart_home_agent_app_deinit(&app);
+        assert(smart_home_agent_backend_create(&backend, &agent, "test", NULL) ==
+               AGENT_ERROR_INVALID);
+        assert(!backend && !agent && allocations == before);
+        for (size_t i = 0; i < sizeof(invalid_timeouts) / sizeof(invalid_timeouts[0]); ++i) {
+            config.timeout_ms = invalid_timeouts[i];
+            assert(smart_home_agent_backend_create(&backend, &agent, "test", &config) ==
+                   AGENT_ERROR_INVALID);
+            assert(!backend && !agent && allocations == before);
+        }
+        for (int timeout = 5000; timeout <= 60000; timeout += 55000) {
+            config.timeout_ms = timeout;
+            assert(smart_home_agent_backend_create(&backend, &agent, "test", &config) == AGENT_OK);
+            smart_home_agent_backend_destroy(&backend);
+            assert(!live_allocations);
+        }
+    }
     fail_transport_init = 1;
     assert(smart_home_agent_app_init(&app) == AGENT_ERROR_IO);
     assert(!app.agent && !app.backend && !live_allocations);

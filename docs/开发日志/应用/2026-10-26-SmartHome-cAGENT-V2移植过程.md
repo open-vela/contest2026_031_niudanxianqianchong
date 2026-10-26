@@ -1,6 +1,6 @@
 # SmartHome cAGENT V2 移植过程
 
-分支：`feat/cagent-v2-migration`。代码记录截至：`6397f6b`。
+分支：`feat/cagent-v2-migration`。标准固件阶段：`6397f6b`；追加启动超时修复。
 范围：P4 标准 `smart_home`；使用 V2 原生接口，不增加 V1 兼容层。
 下文应用源码路径均相对于 `demos/smart_home/src/`。
 
@@ -53,7 +53,14 @@
 - 容量：16 个工具、48 条投影消息、8 KiB 上下文、64 KiB scratch、64 KiB 模型请求缓冲、96 KiB Core 工作区；RAM 会话载荷 64 KiB。
 - 问题与处理：旧生成配置残留，重新配置后构建；P4 对象检查改为与完整固件一致的 `ilp32` ABI；标准联测增加鉴权失败、请求容量不足与恢复场景。
 
-## 验证结果
+## 8. 修复板端 Agent 创建失败
+
+- 现象：`agent-create-done ret=-3`，应用退出。
+- 原因：Transport 初始化时漏设 `request_timeout_ms`，真实端口拒绝零值；Host mock 未校验该字段，遗漏此问题。
+- 修改：创建前校验模型配置，TLS 与 Transport 使用同一超时值；失败时输出具体创建阶段和错误名称。
+- 回归：mock 补齐零超时拒绝及 TLS/Transport 超时一致性检查；非法超时在分配前拒绝，5 秒和 60 秒边界创建通过。Agent 与标准应用联测通过 ASan/UBSan；P4 标准固件重新构建及镜像校验通过，板端启动待复验。
+
+## 标准固件阶段验证结果（6397f6b）
 
 - Host：`scripts/test_smart_home_{agent,tools,context,ui,standard}.py` 五个脚本均通过 ASan/UBSan；HTTP/TLS、米家网关和部分 UI 控件使用 mock。
 - 回归：现有 CMake/CTest 五项业务测试通过；`test_smart_home_agent.py --p4` 的 47 个目标对象交叉编译通过。

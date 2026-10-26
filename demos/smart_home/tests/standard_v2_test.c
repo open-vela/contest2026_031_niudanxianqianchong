@@ -108,6 +108,9 @@ agent_error_t agent_port_openvela_transport_init(agent_transport_t *out,
     agent_port_openvela_transport_t *s, const agent_port_openvela_transport_config_t *config)
 {
     static const agent_transport_ops_t ops = {.request = http_request};
+    if (!config->request_timeout_ms) return AGENT_ERROR_INVALID;
+    assert(config->request_timeout_ms ==
+           ((agent_port_openvela_tls_t *)config->tls_context)->config.io_timeout_ms);
     s->config = *config; out->context = s; out->ops = &ops; return AGENT_OK;
 }
 static void expect_run(smart_home_agent_app_t *app, const char *input)
