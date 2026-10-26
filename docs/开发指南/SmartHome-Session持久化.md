@@ -1,5 +1,7 @@
 # SmartHome Session 持久化
 
+实现文件、接口与流程见[修改说明](SmartHome-Session持久化修改说明.md)。
+
 P4 标准 `smart_home` 启用 `CONFIG_SMART_HOME_SESSION_PERSIST`，保存于：
 
 ```text
