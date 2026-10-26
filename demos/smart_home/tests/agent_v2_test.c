@@ -5,6 +5,7 @@
 #include "skills/smart_home_skills.h"
 #include "tools/smart_home_tools.h"
 #include "ui/smart_home_ui.h"
+#include "ui/smart_home_ui_event.h"
 #include "miloco/smart_home_miloco.h"
 #include <agent_openvela_tls.h>
 #include <agent_session_ram.h>
@@ -435,8 +436,60 @@ static void session_capacity(void)
     puts("PASS: RAM capacity failure is atomic and aborted payload is reclaimed");
 }
 
+static smart_home_ui_event_t last_tool_event;
+static int observed_ends;
+static agent_error_t observed_status;
+static void queued_observer(void *data, const agent_event_t *event)
+{
+    assert(data == &last_tool_event);
+    if (event->type == AGENT_EVENT_TOOL_END) smart_home_ui_event_copy(data, event);
+    if (event->type == AGENT_EVENT_TURN_END) {
+        ++observed_ends;
+        observed_status = event->status;
+    }
+}
+static int inspect_access(const smart_home_tool_info_t *tool, void *data)
+{
+    int *allowed = data;
+    assert(!strcmp(tool->name, "set_light"));
+    *allowed = tool->access_allowed;
+    return AGENT_OK;
+}
+static void observer_and_access(void)
+{
+    smart_home_agent_app_t app;
+    char output[64];
+    int access = -1, old_console_events;
+    assert(!smart_home_agent_app_init(&app));
+    assert(!smart_home_agent_app_set_observer(&app, queued_observer, &last_tool_event));
+    old_console_events = events;
+    observed_ends = 0;
+    tool_flow = 1;
+    expect_run(&app);
+    assert(observed_ends == 1 && observed_status == AGENT_OK && events == old_console_events);
+    assert(!strcmp(last_tool_event.tool_name, "set_light") && !strcmp(last_tool_event.tool_call_id, "call1"));
+    assert(last_tool_event.type == AGENT_EVENT_TOOL_END && last_tool_event.status == AGENT_OK);
+    tool_flow = 0;
+    expect_run(&app);
+    assert(observed_ends == 2 && !strcmp(last_tool_event.tool_name, "set_light"));
+    assert(!smart_home_agent_app_set_local_tool_access(&app, "set_light", 0));
+    assert(!smart_home_agent_app_enumerate_tools(&app, inspect_access, &access) && access == 0);
+    http_status = 401;
+    assert(smart_home_agent_run(&app, "hello", output, sizeof(output)) == AGENT_ERROR_AUTH);
+    http_status = 200;
+    assert(observed_ends == 3 && observed_status == AGENT_ERROR_AUTH);
+    assert(!smart_home_agent_app_set_observer(&app, NULL, NULL));
+    expect_run(&app);
+    assert(events > old_console_events && observed_ends == 3);
+    smart_home_agent_app_deinit(&app);
+    effects = 0;
+    assert(!live_allocations);
+    puts("PASS: observer terminal events, retained tool trace, permission snapshot and observer removal");
+}
+
 int main(void)
 {
+    observer_and_access();
     session_history();
     session_capacity();
 #ifdef CONFIG_AGENT_MAX_TOOLS

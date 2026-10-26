@@ -44,9 +44,17 @@ def main():
                     app / "src/device/smart_home_device_service.c",
                     app / "src/skills/smart_home_skill_loader.c",
                     app / "src/skills/smart_home_skills.c",
-                    app / "src/skills/smart_home_scene_catalog.c"]
+                    app / "src/skills/smart_home_scene_catalog.c",
+                    app / "src/ui/smart_home_ui.c",
+                    app / "src/ui/lvgl/smart_home_lvgl.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_agent.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_settings.c",
+                    app / "src/app/smart_home_main.c",
+                    app / "src/smart_home_memory.c"]
         native_includes = [repo.parent / "nuttx/include", repo.parent / "apps/include",
-                           repo.parent / "apps/crypto/mbedtls/mbedtls/include", *includes]
+                           repo.parent / "apps/crypto/mbedtls/mbedtls/include",
+                           repo.parent / "apps/graphics/lvgl",
+                           repo.parent / "apps/graphics/lvgl/lvgl", *includes]
         with tempfile.TemporaryDirectory(prefix="smart-home-agent-p4-") as temporary:
             for index, source in enumerate(sources):
                 command = [str(compiler), "-std=c99", "-Wall", "-Wextra", "-Werror",

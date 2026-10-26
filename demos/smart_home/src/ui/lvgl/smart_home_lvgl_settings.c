@@ -253,7 +253,7 @@ static void show_backend_key_status(smart_home_lvgl_t *ui,
         snprintf(message, sizeof(message), "%s key is configured in secrets.json.",
                  preset->name);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_SUCCESS);
-    } else if (ret == AGENT_ERROR_NOTFOUND) {
+    } else if (ret == AGENT_ERROR_NOT_FOUND) {
         snprintf(message, sizeof(message), "%s API key is not configured.",
                  preset->name);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_WARNING);
@@ -611,7 +611,7 @@ static void local_tool_switch_event(lv_event_t *event)
 
 static void create_local_tool_switch(lv_obj_t *parent,
                                      smart_home_lvgl_t *ui,
-                                     const agent_tool_info_t *tool)
+                                     const smart_home_tool_info_t *tool)
 {
     local_tool_switch_context_t *context;
     lv_obj_t *sw;
@@ -633,18 +633,14 @@ static void create_local_tool_switch(lv_obj_t *parent,
     memcpy(context->name, tool->name, name_length + 1u);
     sw = lv_switch_create(parent);
     lv_obj_set_size(sw, 44, 24);
-    if (smart_home_agent_app_local_tool_access_allowed(ui->app,
-                                                        tool->name,
-                                                        &allowed) != AGENT_OK) {
-        allowed = 1;
-    }
+    allowed = tool->access_allowed;
     set_tool_switch_state(sw, allowed);
     lv_obj_add_event_cb(sw, local_tool_switch_event, LV_EVENT_ALL, context);
 }
 
 static void create_tool_directory_row(lv_obj_t *parent,
                                       smart_home_lvgl_t *ui,
-                                      const agent_tool_info_t *tool)
+                                      const smart_home_tool_info_t *tool)
 {
     lv_obj_t *row;
     lv_obj_t *title_row;
@@ -681,11 +677,8 @@ static void create_tool_directory_row(lv_obj_t *parent,
 
     create_local_tool_switch(title_row, ui, tool);
 
-    if (tool && tool->group_id == SMART_HOME_TOOL_GROUP_LOCAL) {
-        (void)smart_home_agent_app_local_tool_access_allowed(ui->app,
-                                                              tool->name,
-                                                              &access_allowed);
-    }
+    if (tool && tool->group_id == SMART_HOME_TOOL_GROUP_LOCAL)
+        access_allowed = tool->access_allowed;
     snprintf(status, sizeof(status), "%s | %s%s",
              tool_source_name(tool ? tool->group_id : 0u),
              tool && tool->enabled
@@ -709,7 +702,7 @@ static void create_tool_directory_row(lv_obj_t *parent,
     }
 }
 
-static int append_tool_directory_entry(const agent_tool_info_t *tool,
+static int append_tool_directory_entry(const smart_home_tool_info_t *tool,
                                        void *user_data)
 {
     tool_directory_builder_t *builder = user_data;
@@ -763,72 +756,6 @@ void smart_home_lvgl_refresh_tool_directory(smart_home_lvgl_t *ui)
 
 
 
-
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-/* 天气城市：设置页输入英文/拼音城市名，保存后 worker 立即拉取。 */
-static void weather_city_save_cb(lv_event_t *event)
-{
-    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
-    char city[24];
-    const char *text;
-
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui ||
-        !ui->settings_weather_city_input || !ui->app || !ui->app->miloco) {
-        return;
-    }
-    text = lv_textarea_get_text(ui->settings_weather_city_input);
-    snprintf(city, sizeof(city), "%s", text ? text : "");
-    if (!city[0]) {
-        set_settings_status(ui, "城市不能为空",
-                            SMART_HOME_UI_COLOR_WARNING);
-        return;
-    }
-    smart_home_miloco_set_weather_city(ui->app->miloco, city);
-    set_settings_status(ui, "天气城市已切换，即将刷新",
-                        SMART_HOME_UI_COLOR_SUCCESS);
-}
-
-static void create_weather_card(lv_obj_t *content, smart_home_lvgl_t *ui)
-{
-    lv_obj_t *card;
-    lv_obj_t *label;
-    lv_obj_t *button;
-    smart_home_miloco_weather_t wx;
-    char buf[64];
-
-    card = lv_obj_create(content);
-    lv_obj_set_size(card, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(card, 6, 0);
-    smart_home_lvgl_card_style(card);
-
-    smart_home_lvgl_icon_create(card, ICON_SUN, 18, 18);
-    label = smart_home_lvgl_label_create(card, "天气城市",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
-
-    /* 当前城市与天气摘要。 */
-    if (ui->app && ui->app->miloco &&
-        smart_home_miloco_get_weather(ui->app->miloco, &wx)) {
-        snprintf(buf, sizeof(buf), "当前 %s · %s %d°C",
-                 wx.city, wx.condition_cn, wx.temperature);
-    } else {
-        snprintf(buf, sizeof(buf), "尚未获取");
-    }
-    label = smart_home_lvgl_label_create(card, buf,
-                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 12);
-
-    ui->settings_weather_city_input = create_settings_input(
-        card, ui, "城市名（英文/拼音，如 Shenzhen）",
-        "Shenzhen", 23, 0);
-
-    button = lv_btn_create(card);
-    lv_obj_set_size(button, 100, 32);
-    label = smart_home_lvgl_label_create(button, "切换城市",
-                                         lv_color_white(), 12);
-    lv_obj_center(label);
-    lv_obj_add_event_cb(button, weather_city_save_cb, LV_EVENT_CLICKED, ui);
-}
-#endif
 
 static void create_tool_directory_card(lv_obj_t *content,
                                        smart_home_lvgl_t *ui)
@@ -1052,7 +979,7 @@ static const char *skills_status_text(const smart_home_agent_app_t *app,
     if (status == SMART_HOME_STATUS_UNKNOWN) {
         return "Not checked";
     }
-    if (status == AGENT_ERROR_NOTFOUND) {
+    if (status == AGENT_ERROR_NOT_FOUND) {
         return "Not found";
     }
 

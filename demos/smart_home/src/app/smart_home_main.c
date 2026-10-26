@@ -2,11 +2,11 @@
 #include "../net/smart_home_network.h"
 #include "../config/smart_home_secrets.h"
 #include "../smart_home_cpu_debug.h"
+#include "../smart_home_memory.h"
 #include "../ui/smart_home_ui.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../miloco/smart_home_miloco.h"
 #endif
-#include <cagent/runtime_openvela.h>
 #ifdef CONFIG_SMART_HOME_APP_BRIDGE
 #include "../addons/smart_home_app_bridge.h"
 #endif
@@ -91,8 +91,8 @@ int main(int argc, char *argv[])
     }
 #endif
     smart_home_cpu_debug_log("main-network-ready");
-    ov_mem_region_log("main-stack", &stack_marker);
-    ov_mem_region_log("smart-home-app", &app);
+    smart_home_memory_log_region("main-stack", &stack_marker);
+    smart_home_memory_log_region("smart-home-app", &app);
 
     ret = smart_home_agent_app_init(&app);
     if (ret != AGENT_OK) {

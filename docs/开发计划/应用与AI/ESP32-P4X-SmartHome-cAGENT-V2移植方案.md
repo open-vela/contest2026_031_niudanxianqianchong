@@ -1,6 +1,6 @@
 # SmartHome cAGENT V2 移植方案
 
-状态：Agent、工具、上下文、Skill 与 RAM 会话已适配，通过 Host/mock 验证和 P4 对象编译；完整固件和真机待验收。
+状态：Agent、工具、上下文、Skill、RAM 会话与 UI 事件已适配，通过 Host/mock 验证和 P4 对象编译；完整固件和真机待验收。
 分支：`feat/cagent-v2-migration`。移植起点：`8d344ee`。
 
 ## 范围

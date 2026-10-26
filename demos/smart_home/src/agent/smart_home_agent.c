@@ -128,7 +128,9 @@ static agent_policy_decision_t smart_home_local_tool_policy(
 static void smart_home_agent_event(void *user_data, const agent_event_t *event)
 {
     smart_home_agent_app_t *app = user_data;
-    smart_home_ui_event_cb(event, &app->run_start_ms);
+    if (event->type == AGENT_EVENT_TURN_BEGIN) app->run_start_ms = event->timestamp_ms;
+    if (app->observer) app->observer(app->observer_user_data, event);
+    else smart_home_ui_event_cb(event, &app->run_start_ms);
 }
 
 static void set_empty_reply_fallback(char *output, size_t output_size)
@@ -754,6 +756,7 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
 typedef struct {
     smart_home_tool_visit_fn callback;
     void *user_data;
+    const smart_home_agent_app_t *app;
 } tool_visit_t;
 
 static agent_error_t visit_tool(void *user_data, const agent_tool_t *tool)
@@ -779,13 +782,15 @@ static agent_error_t visit_tool(void *user_data, const agent_tool_t *tool)
     info.flags = tool->flags;
     info.enabled = (tool->flags & AGENT_TOOL_DISABLED) == 0u;
     info.llm_visible = (tool->flags & (AGENT_TOOL_DISABLED | AGENT_TOOL_HIDDEN)) == 0u;
+    info.access_allowed = info.group_id != SMART_HOME_TOOL_GROUP_LOCAL ||
+                          local_tool_access_allowed(visit->app, name);
     return (agent_error_t)visit->callback(&info, visit->user_data);
 }
 
 static int enumerate_tools_locked(const smart_home_agent_app_t *app,
                                    smart_home_tool_visit_fn callback, void *user_data)
 {
-    tool_visit_t visit = {callback, user_data};
+    tool_visit_t visit = {callback, user_data, app};
     return agent_tool_enumerate(app->agent, visit_tool, &visit);
 }
 
@@ -904,4 +909,15 @@ int smart_home_agent_app_clear_session(smart_home_agent_app_t *app)
     ret = app->agent ? agent_session_clear_all(app->agent) : AGENT_ERROR_STATE;
     pthread_mutex_unlock(&app->agent_mutex);
     return ret;
+}
+
+int smart_home_agent_app_set_observer(smart_home_agent_app_t *app,
+                                      agent_event_callback_t callback, void *user_data)
+{
+    if (!app || !app->agent_mutex_initialized) return AGENT_ERROR_STATE;
+    pthread_mutex_lock(&app->agent_mutex);
+    app->observer = callback;
+    app->observer_user_data = user_data;
+    pthread_mutex_unlock(&app->agent_mutex);
+    return AGENT_OK;
 }

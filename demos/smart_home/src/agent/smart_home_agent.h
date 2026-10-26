@@ -66,6 +66,8 @@ typedef struct smart_home_agent_app {
         local_tool_access[SMART_HOME_LOCAL_TOOL_ACCESS_MAX];
     size_t local_tool_access_count;
     uint64_t run_start_ms;
+    agent_event_callback_t observer;
+    void *observer_user_data;
     pthread_mutex_t agent_mutex;
     int agent_mutex_initialized;
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
@@ -100,7 +102,7 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
                          const char *input,
                          char *output,
                          size_t output_size);
-/** 遍历当前 agent registry；回调内不得修改 agent 或保存字符串指针。 */
+/** 遍历当前 agent registry；回调内不得调用 Agent/应用接口或保存字符串指针。 */
 int smart_home_agent_app_enumerate_tools(
     const smart_home_agent_app_t *app,
     smart_home_tool_visit_fn callback,
@@ -114,3 +116,6 @@ int smart_home_agent_app_local_tool_access_allowed(
     const smart_home_agent_app_t *app, const char *tool_name, int *allowed);
 
 int smart_home_agent_app_clear_session(smart_home_agent_app_t *app);
+
+int smart_home_agent_app_set_observer(smart_home_agent_app_t *app,
+                                      agent_event_callback_t callback, void *user_data);

@@ -148,6 +148,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         pthread_join(ui->network_worker, NULL);
         ui->network_worker_active = 0;
     }
+    (void)smart_home_agent_app_set_observer(ui->app, NULL, NULL);
     smart_home_lvgl_discard_pending(ui);
     smart_home_lvgl_settings_deinit();
     if (ui->network_status_timer) {
@@ -323,7 +324,7 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
     printf("[lvgl] ui init done\n");
 #endif
 
-    agent_set_event_callback(app->agent, smart_home_lvgl_event_cb, ui);
+    smart_home_agent_app_set_observer(app, smart_home_lvgl_event_cb, ui);
     smart_home_lvgl_show(ui);
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     printf("[lvgl] show done, entering run loop\n");

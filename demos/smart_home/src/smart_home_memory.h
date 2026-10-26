@@ -21,6 +21,7 @@ extern "C" {
 void *smart_home_bulk_alloc(size_t size);
 void smart_home_bulk_free(void *pointer);
 void smart_home_bulk_diag(const char *point);
+void smart_home_memory_log_region(const char *label, const void *pointer);
 
 #ifdef __cplusplus
 }

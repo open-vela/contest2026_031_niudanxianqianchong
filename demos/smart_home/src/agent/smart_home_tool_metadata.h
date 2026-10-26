@@ -33,6 +33,7 @@ typedef struct {
     uint32_t flags; /* Native V2 flags. */
     int enabled;
     int llm_visible;
+    int access_allowed;
 } smart_home_tool_info_t;
 
 /* Strings expire when the visitor returns. */

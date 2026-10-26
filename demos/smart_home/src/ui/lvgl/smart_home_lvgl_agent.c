@@ -7,7 +7,7 @@
 #include "../../config/smart_home_config.h"
 #include "../../smart_home_cpu_debug.h"
 #include "../../smart_home_memory.h"
-#include <cagent/runtime_openvela.h>
+#include "../smart_home_ui_event.h"
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
 #include "../../voice/smart_home_asr.h"
 #include "../../voice/smart_home_voice_capture.h"
@@ -47,17 +47,11 @@ typedef struct {
 typedef struct {
     smart_home_lvgl_t *ui;
     agent_done_t *done;
+    struct ui_pending_item *completion;
     char input[SMART_HOME_INPUT_SIZE];
 } agent_job_t;
 
-typedef struct {
-    agent_event_type_t type;
-    uint32_t iteration;
-    int error_code;
-    char message[128];
-    char tool_name[64];
-    char tool_call_id[64];
-} ui_event_payload_t;
+typedef smart_home_ui_event_t ui_event_payload_t;
 
 typedef enum {
     UI_PENDING_EVENT = 0,
@@ -208,14 +202,16 @@ static void agent_done_apply(agent_done_t *done)
                done->ret,
                done->output[0] ? done->output : "(empty)");
 #endif
-        if (done->ret == AGENT_OK) {
+        if (done->ret == AGENT_OK || done->ret == AGENT_ERROR_TRUNCATED) {
             smart_home_lvgl_finish_thinking(ui);
             smart_home_lvgl_append_msg_bubble(ui, done->output, 0);
             smart_home_lvgl_refresh_cards(ui);
+            if (done->ret == AGENT_ERROR_TRUNCATED)
+                smart_home_lvgl_append_error_bubble(ui, "回复超出显示容量，以上内容已截断。");
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
             /* 语音播报在独立 worker 中合成与播放；开关关闭或服务
              * 未就绪时静默跳过，不影响气泡展示路径。 */
-            if (voice_play_announce_enabled()) {
+            if (done->ret == AGENT_OK && voice_play_announce_enabled()) {
                 if (voice_play_text(done->output) != 0) {
                     printf("[voice] announce enqueue failed\n");
                 }
@@ -257,7 +253,7 @@ static void *agent_worker_main(void *arg)
     }
 
     smart_home_cpu_debug_log("lvgl-agent-worker-start");
-    ov_mem_region_log("lvgl-agent-worker-stack", &stack_marker);
+    smart_home_memory_log_region("lvgl-agent-worker-stack", &stack_marker);
 
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     agent_worker_log_context("start", job->ui ? job->ui->app : NULL);
@@ -272,20 +268,15 @@ static void *agent_worker_main(void *arg)
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     agent_worker_log_context("done", job->ui ? job->ui->app : NULL);
 #endif
-    item = (ui_pending_item_t *)calloc(1, sizeof(*item));
-    if (item) {
-        item->type = UI_PENDING_DONE;
-        item->data.done = done;
-        if (agent_ui_enqueue(job->ui, item) == 0) {
-            free(job);
-            return NULL;
-        }
-
-        free(item);
+    item = job->completion;
+    item->type = UI_PENDING_DONE;
+    item->data.done = done;
+    if (agent_ui_enqueue(job->ui, item) == 0) {
+        free(job);
+        return NULL;
     }
+    free(item);
 
-    /* No LVGL call is permitted from this worker.  The only failure path
-     * here is heap/mutex exhaustion, where a UI completion cannot be queued. */
     free(done);
     free(job);
     return NULL;
@@ -319,6 +310,12 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
         return AGENT_ERROR_NOMEM;
     }
 
+    job->completion = calloc(1, sizeof(*job->completion));
+    if (!job->completion) {
+        free(done);
+        free(job);
+        return AGENT_ERROR_NOMEM;
+    }
     job->ui = ui;
     job->done = done;
     strncpy(job->input, text, sizeof(job->input) - 1);
@@ -334,6 +331,7 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
                 SMART_HOME_AGENT_WORKER_STACK_SIZE + STACK_ALIGNMENT - 1u);
             if (!ui->agent_worker_stack_alloc) {
                 ui->request_inflight = 0;
+                free(job->completion);
                 free(done);
                 free(job);
                 smart_home_lvgl_append_error_bubble(
@@ -343,7 +341,7 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
 
             ui->agent_worker_stack = (void *)STACK_ALIGN_UP(
                 (uintptr_t)ui->agent_worker_stack_alloc);
-            ov_mem_region_log("lvgl-agent-worker-stack-base",
+            smart_home_memory_log_region("lvgl-agent-worker-stack-base",
                               ui->agent_worker_stack);
             smart_home_bulk_diag("lvgl-agent-worker-stack-reserved");
         }
@@ -364,6 +362,7 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
     }
     if (ret != 0) {
         ui->request_inflight = 0;
+        free(job->completion);
         free(done);
         free(job);
         smart_home_lvgl_append_error_bubble(ui, "Failed to create Agent worker.");
@@ -507,16 +506,16 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
     }
 
     switch (payload->type) {
-    case AGENT_EVENT_MODEL_REQUEST:
+    case AGENT_EVENT_MODEL_BEGIN:
         smart_home_lvgl_show_thinking(ui);
         break;
-    case AGENT_EVENT_TOOL_CALL:
+    case AGENT_EVENT_TOOL_BEGIN:
         smart_home_lvgl_trace_tool(ui,
                                    payload->tool_name,
                                    payload->tool_call_id,
                                    -1);
         break;
-    case AGENT_EVENT_TOOL_RESULT:
+    case AGENT_EVENT_TOOL_END:
         if (strcmp(payload->tool_name, "set_light") == 0 ||
             strcmp(payload->tool_name, "set_ac") == 0 ||
             strcmp(payload->tool_name, "run_scene") == 0) {
@@ -525,18 +524,10 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
         smart_home_lvgl_trace_tool(ui,
                                    payload->tool_name,
                                    payload->tool_call_id,
-                                   payload->error_code == AGENT_OK ? 1 : 0);
+                                   payload->status == AGENT_OK ? 1 : 0);
         break;
-    case AGENT_EVENT_ERROR:
-    case AGENT_EVENT_TIMEOUT:
+    case AGENT_EVENT_TURN_END:
         smart_home_lvgl_finish_thinking(ui);
-        smart_home_lvgl_append_error_bubble(ui, payload->message);
-        break;
-    case AGENT_EVENT_RUN_DONE:
-        if (payload->error_code != AGENT_OK) {
-            smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, payload->message);
-        }
         break;
     default:
         break;
@@ -544,7 +535,7 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
 
 }
 
-void smart_home_lvgl_event_cb(const agent_event_t *event, void *user_data)
+void smart_home_lvgl_event_cb(void *user_data, const agent_event_t *event)
 {
     smart_home_lvgl_t *ui = (smart_home_lvgl_t *)user_data;
     ui_pending_item_t *item;
@@ -553,40 +544,13 @@ void smart_home_lvgl_event_cb(const agent_event_t *event, void *user_data)
         return;
     }
 
-#ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
-    printf("[agent_event] type=%d iter=%" PRIu32 " err=%d tool=%s msg=%s\n",
-           (int)event->type,
-           event->iteration,
-           event->error_code,
-           event->tool_name ? event->tool_name : "-",
-           event->message ? event->message : "-");
-#endif
-
     item = (ui_pending_item_t *)calloc(1, sizeof(*item));
     if (!item) {
         return;
     }
 
     item->type = UI_PENDING_EVENT;
-    item->data.event.type = event->type;
-    item->data.event.iteration = event->iteration;
-    item->data.event.error_code = event->error_code;
-
-    if (event->message) {
-        strncpy(item->data.event.message,
-                event->message,
-                sizeof(item->data.event.message) - 1);
-    }
-    if (event->tool_name) {
-        strncpy(item->data.event.tool_name,
-                event->tool_name,
-                sizeof(item->data.event.tool_name) - 1);
-    }
-    if (event->tool_call_id) {
-        strncpy(item->data.event.tool_call_id,
-                event->tool_call_id,
-                sizeof(item->data.event.tool_call_id) - 1);
-    }
+    smart_home_ui_event_copy(&item->data.event, event);
 
     if (agent_ui_enqueue(ui, item) != 0) {
         free(item);

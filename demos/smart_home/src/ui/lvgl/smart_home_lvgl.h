@@ -10,7 +10,7 @@
  *
  * Usage:
  *   smart_home_lvgl_t *ui = smart_home_lvgl_init(&app);
- *   agent_set_event_callback(app->agent, smart_home_lvgl_event_cb, ui);
+ *   smart_home_agent_app_set_observer(app, smart_home_lvgl_event_cb, ui);
  *   smart_home_lvgl_show(ui);   // load screensaver, then enter Home by touch
  *   smart_home_lvgl_deinit(ui); // cleanup
  */
@@ -289,7 +289,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui);
 void smart_home_lvgl_refresh_cards(smart_home_lvgl_t *ui);
 
 /** cAGENT event callback — queues an update for the LVGL thread. */
-void smart_home_lvgl_event_cb(const agent_event_t *event, void *user_data);
+void smart_home_lvgl_event_cb(void *user_data, const agent_event_t *event);
 
 /** Apply queued worker updates.  Must be called by the LVGL owner thread. */
 void smart_home_lvgl_process_pending(smart_home_lvgl_t *ui);
