@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Exercise the real SmartHome application with the generated P4 standard capacities."""
 from pathlib import Path
+import argparse
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--persistent", action="store_true", help="Use real filesystem Session storage")
+persistent = parser.parse_args().persistent
 repo = Path(__file__).resolve().parents[1]
 package = repo / "packages/cAGENT"
 app = repo / "demos/smart_home"
@@ -31,6 +35,8 @@ with tempfile.TemporaryDirectory(prefix="smart-home-standard-") as temporary:
     (data / "settings.json").write_text('{"version":1,"active_backend_id":"deepseek"}')
     (data / "secrets.json").write_text('{"version":1,"model_api_keys":{"deepseek":"mock-test-key"}}')
     profile = "#pragma once\n#define FAR\n#define CONFIG_SMART_HOME_MILOCO_BRIDGE 1\n"
+    if persistent:
+        profile += "#define CONFIG_SMART_HOME_SESSION_PERSIST 1\n"
     for name, value in re.findall(r'^CONFIG_((?:AGENT_|SMART_HOME_MODEL_|SMART_HOME_SESSION_)[A-Z0-9_]+)=(\d+)$', configuration, re.M):
         profile += f"#define CONFIG_{name} {value}\n"
     profile += f'#define CONFIG_SMART_HOME_MODEL_SECRETS_PATH "{data}/secrets.json"\n'
@@ -43,12 +49,17 @@ with tempfile.TemporaryDirectory(prefix="smart-home-standard-") as temporary:
     sources += sorted(package.glob("providers/model/openai/src/*.c"))
     sources += [package / "codecs/json/reader.c", package / "codecs/json/writer.c",
                 package / "providers/storage/ram/src/session_ram.c", package / "ports/runtime/src/runtime.c", cjson / "cJSON.c"]
+    sources += sorted(package.glob("providers/storage/jsonl/src/*.c"))
+    sources += sorted(package.glob("providers/storage/files/src/*.c"))
+    sources += [package / "ports/posix/storage/src/file_store.c", package / "ports/openvela/storage/src/file_store.c"]
     for directory in ("agent", "config", "device", "skills", "tools"):
         sources += [p for p in (app / "src" / directory).glob("*.c") if p.name != "smart_home_agent_run_service.c"]
     sources += [app / "src/miloco/smart_home_miloco_tools.c", app / "tests/standard_v2_test.c"]
     includes = [work, app / "src", package / "include", package / "src", package / "codecs/json",
                 package / "codecs/json/vendor/jsmn", cjson, package / "providers/model/openai/include",
-                package / "providers/storage/ram/include", *sorted(package.glob("ports/*/include"))]
+                package / "providers/storage/ram/include", *sorted(package.glob("ports/*/include")),
+                package / "providers/storage/jsonl/include", package / "providers/storage/files/include",
+                package / "ports/posix/storage/include", package / "ports/openvela/storage/include"]
     executable = work / "standard"
     command = [os.environ.get("CC", "cc"), "-std=c11", "-D_POSIX_C_SOURCE=200809L",
                "-include", str(work / "nuttx/config.h"),
@@ -58,3 +69,6 @@ with tempfile.TemporaryDirectory(prefix="smart-home-standard-") as temporary:
     subprocess.run([*command, *map(str, sources), "-lm", "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True, timeout=30,
                    env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1", UBSAN_OPTIONS="halt_on_error=1"))
+    if persistent:
+        subprocess.run([str(executable), "--resume"], check=True, timeout=30,
+                       env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1", UBSAN_OPTIONS="halt_on_error=1"))

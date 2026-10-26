@@ -5,6 +5,7 @@
 
 #include <agent/model.h>
 #include <agent_session_ram.h>
+#include "smart_home_session.h"
 #include <agent_openai_model.h>
 #include <agent_openvela_runtime.h>
 #include <agent_openvela_tls.h>
@@ -38,6 +39,9 @@ struct smart_home_agent_backend {
     agent_port_openvela_tls_t tls;
     agent_limits_t limits;
     smart_home_model_state_t *active;
+#ifdef CONFIG_SMART_HOME_SESSION_PERSIST
+    smart_home_session_t *persistent;
+#else
     agent_session_ram_t session;
     agent_session_ram_turn_t turns[CONFIG_SMART_HOME_SESSION_HISTORY_TURNS + 1u];
     agent_session_ram_message_t messages[(CONFIG_SMART_HOME_SESSION_HISTORY_TURNS + 1u) * AGENT_MAX_PROJECTED_MESSAGES];
@@ -45,6 +49,7 @@ struct smart_home_agent_backend {
     agent_message_view_t read_messages[AGENT_MAX_PROJECTED_MESSAGES];
     agent_tool_call_view_t read_calls[AGENT_MAX_PROJECTED_MESSAGES];
     char session_payload[CONFIG_SMART_HOME_SESSION_PAYLOAD_BYTES];
+#endif
     char url[512];
     char request_header_text[2048];
     const char *request_headers[16];
@@ -269,6 +274,9 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
     stage = "session";
     {
         agent_session_storage_t storage;
+#ifdef CONFIG_SMART_HOME_SESSION_PERSIST
+        ret = smart_home_session_open(&backend->persistent, &storage);
+#else
         const agent_session_ram_config_t ram = {
             backend->turns, CONFIG_SMART_HOME_SESSION_HISTORY_TURNS + 1u,
             backend->messages, sizeof(backend->messages) / sizeof(backend->messages[0]),
@@ -279,6 +287,7 @@ int smart_home_agent_backend_create(smart_home_agent_backend_t **out,
         };
         ret = agent_session_ram_init(&backend->session, &ram);
         if (ret == AGENT_OK) ret = agent_session_ram_bind(&backend->session, &storage);
+#endif
         if (ret == AGENT_OK) ret = agent_set_session_storage(backend->agent, &storage);
         if (ret != AGENT_OK) goto fail;
     }
@@ -309,6 +318,9 @@ void smart_home_agent_backend_destroy(smart_home_agent_backend_t **ptr)
     agent_destroy(backend->agent);
     agent_model_destroy(backend->model);
     model_state_destroy(backend->active);
+#ifdef CONFIG_SMART_HOME_SESSION_PERSIST
+    smart_home_session_close(&backend->persistent);
+#endif
     secure_clear(backend, sizeof(*backend));
     smart_home_bulk_free(backend);
     *ptr = NULL;
@@ -316,6 +328,9 @@ void smart_home_agent_backend_destroy(smart_home_agent_backend_t **ptr)
 
 int smart_home_agent_backend_prepare_turn(smart_home_agent_backend_t *backend)
 {
+#ifdef CONFIG_SMART_HOME_SESSION_PERSIST
+    return backend ? smart_home_session_prepare(backend->persistent) : AGENT_ERROR_INVALID;
+#else
     size_t keep = CONFIG_SMART_HOME_SESSION_HISTORY_TURNS;
     int ret;
     if (!backend) return AGENT_ERROR_INVALID;
@@ -326,4 +341,19 @@ int smart_home_agent_backend_prepare_turn(smart_home_agent_backend_t *backend)
         ret = agent_session_ram_trim(&backend->session, --keep);
     }
     return ret;
+#endif
+}
+
+int smart_home_agent_backend_visit_history(smart_home_agent_backend_t *backend,
+                                            agent_session_visit_fn visit, void *context)
+{
+    if (!backend || !visit) return AGENT_ERROR_INVALID;
+#ifdef CONFIG_SMART_HOME_SESSION_PERSIST
+    return smart_home_session_visit(backend->persistent, visit, context);
+#else
+    agent_session_storage_t storage;
+    int ret = agent_session_ram_bind(&backend->session, &storage);
+    return ret == AGENT_OK ? storage.ops.recent(storage.context,
+        agent_string_view("home", 4u), CONFIG_SMART_HOME_SESSION_HISTORY_TURNS, visit, context) : ret;
+#endif
 }

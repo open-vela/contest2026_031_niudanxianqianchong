@@ -94,6 +94,7 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
 
     smart_home_lvgl_log_build_stage("chat", "begin");
     smart_home_lvgl_build_chat_screen(ui);
+    (void)smart_home_lvgl_chat_restore(ui);
     smart_home_lvgl_log_build_stage("chat", "done");
 
     smart_home_lvgl_log_build_stage("settings", "begin");

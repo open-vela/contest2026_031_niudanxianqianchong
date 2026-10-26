@@ -13,6 +13,9 @@ cAGENT（V2 内核）
     codecs/json/                 私有有界 JSON 读写器（内嵌 jsmn）
     providers/model/openai/      OpenAI 兼容 Chat Completions provider
     providers/storage/ram/       有界 RAM 会话及按完整回合淘汰
+    providers/storage/files/     共享字节文件接口
+    providers/storage/jsonl/     JSONL 会话持久化
+    ports/posix|openvela/storage/ 文件系统端口
     ports/runtime|transport|tls/ openvela 三件套 + mbedTLS TLS 后端
 
 旧版 cAGENT 的源码、公共头文件、构建配置和文档已从本目录移除。
@@ -23,7 +26,7 @@ cAGENT（V2 内核）
 
 - `Make.defs` 注册 CONFIGURED_APPS 并对外暴露 `include/`；
 - 总开关为 `CONFIG_CAGENT`；组件开关为 `CONFIG_CAGENT_PROVIDER_OPENAI`
-  、`CONFIG_CAGENT_SESSION_RAM` 和 `CONFIG_CAGENT_PORT_OPENVELA_RUNTIME|TRANSPORT|TLS`；
+  、`CONFIG_CAGENT_SESSION_RAM`、`CONFIG_CAGENT_SESSION_JSONL`、`CONFIG_CAGENT_FILE_STORE` 和 `CONFIG_CAGENT_PORT_OPENVELA_RUNTIME|TRANSPORT|TLS`；
 - `Makefile` 按以上组件开关组装源文件；
 - `Kconfig` 提供总开关、组件开关与容量项；
 - CMake 构建路径暂不提供（Make 为权威路径）。
@@ -40,11 +43,13 @@ cAGENT（V2 内核）
   Demo 名称及 `CONFIG_CAGENT2_CHAT` 保持不变。
 - SmartHome Agent 层已接入 V2 生命周期及模型后端；通过 Host/mock 验证和
   P4 对象编译。模型配置与缓冲区由应用持有，运行与配置切换串行执行。
-- 本地/Miloco 工具、设备参考上下文和按需 Skill 已适配；RAM 会话默认保留
-  最近三个完整回合，重启清空。容量不足返回错误，可清空会话后重试。
+- 本地/Miloco 工具、设备参考上下文和按需 Skill 已适配。P4 标准配置启用
+  JSONL Session，最多保留二十回合/1 MiB，重启恢复聊天；模型使用最近三个
+  完整回合。未启用持久化的配置继续使用 RAM，会话重启清空。
 - P4 标准 SmartHome 的 UI、事件、网络/配置依赖及容量配置已适配，
   聊天页提供“新对话”清空入口，未确认的工具不显示成功。
-  Make 完整固件已编译链接，镜像头与校验通过；尚未烧录或进行真机验收。
+  Make 完整固件已编译链接；Session 已完成真实文件/独立进程与 UI 恢复
+  Host 测试，板端重启和断电仍待验收。
 - 语音、Node/MCP/App Bridge 和其他板级配置仍待后续适配。
 - 此快照仅提供 Make 接入；CMakeLists.txt 是占位文件，不提供 V2 库目标。
 - Make 通过 `AGENT_BUILD_CONFIG_HEADER` 为库和调用方统一加载
@@ -69,6 +74,8 @@ python3 scripts/test_smart_home_tools.py
 python3 scripts/test_smart_home_context.py
 python3 scripts/test_smart_home_ui.py
 python3 scripts/test_smart_home_standard.py
+python3 scripts/test_smart_home_standard.py --persistent
+python3 scripts/test_smart_home_session.py
 cmake -S demos/smart_home/tests -B /tmp/smart-home-v2-tests
 cmake --build /tmp/smart-home-v2-tests -j4
 ctest --test-dir /tmp/smart-home-v2-tests --output-on-failure
@@ -84,3 +91,6 @@ scratch 峰值 40382 字节，均低于 65536 字节配置；此数值不代表�
 V2 Core、Provider 和大部分端口保留 MIT 许可证（见 `LICENSE`）。
 `ports/tls/src/tls_core.c` 保留 Apache-2.0 声明；其源码血缘见
 `ports/tls/README.md`，归属声明见 `NOTICE`，Apache-2.0 全文见仓库根目录 `LICENSE`。
+
+Session 文件组件来源与引入时哈希见 `SESSION_STORAGE_SNAPSHOT.md`。使用与验收见
+[Session 持久化](../../docs/开发指南/SmartHome-Session持久化.md)。

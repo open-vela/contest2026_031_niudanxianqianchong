@@ -17,6 +17,7 @@ if(CONFIG_SMART_HOME_DEMO)
     src/smart_home_memory.c
     src/agent/smart_home_agent.c
     src/agent/smart_home_agent_backend.c
+    src/agent/smart_home_session.c
     src/config/smart_home_backends.c
     src/config/smart_home_config_store.c
     src/config/smart_home_secrets.c
@@ -32,6 +33,10 @@ if(CONFIG_SMART_HOME_DEMO)
   include_directories(
     ${NUTTX_APPS_DIR}/packages/cAGENT/providers/model/openai/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/ram/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/files/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/jsonl/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/posix/storage/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/openvela/storage/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/runtime/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/transport/include
     ${NUTTX_APPS_DIR}/packages/cAGENT/ports/tls/include
@@ -97,6 +102,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl.c
       src/ui/lvgl/smart_home_lvgl_agent.c
       src/ui/lvgl/smart_home_lvgl_chat.c
+      src/ui/lvgl/smart_home_lvgl_history.c
       src/ui/lvgl/smart_home_lvgl_home.c
       src/ui/lvgl/smart_home_lvgl_nav.c
       src/ui/lvgl/smart_home_lvgl_panel.c

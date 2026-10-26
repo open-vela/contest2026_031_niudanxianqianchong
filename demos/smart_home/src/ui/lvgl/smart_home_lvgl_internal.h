@@ -128,6 +128,7 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui);
 
 void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui);
+int smart_home_lvgl_chat_restore(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui);
 /* 服务管理独立屏（更多页第二行卡片入口）。 */
 void smart_home_lvgl_build_model_screen(smart_home_lvgl_t *ui);

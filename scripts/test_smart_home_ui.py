@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix="smart-home-ui-") as temporary:
                "-Wall", "-Wextra", "-Werror", "-g", "-pthread", "-ffunction-sections", "-fdata-sections",
                "-Wl,--gc-sections", "-fsanitize=address,undefined", "-no-pie"]
     command += [item for path in includes for item in ["-I", str(path)]]
-    for test in ("ui", "chat"):
+    for test in ("ui", "chat", "history"):
         executable = work / test
         subprocess.run([*command, str(app / f"tests/{test}_v2_test.c"), "-o", str(executable)], check=True)
         subprocess.run([str(executable)], check=True, timeout=30,

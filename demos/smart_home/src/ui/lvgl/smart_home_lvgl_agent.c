@@ -219,13 +219,21 @@ static void agent_done_apply(agent_done_t *done)
 #endif
         } else {
             char message[160];
-            snprintf(message,
-                     sizeof(message),
-                     "Agent call failed (%d): %.96s",
-                     done->ret,
-                     done->output[0] ? done->output : "no detail");
-            smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, message);
+            if (done->output[0] && ui->app &&
+                ui->app->system_status.session_status != AGENT_OK) {
+                smart_home_lvgl_finish_thinking(ui);
+                smart_home_lvgl_append_msg_bubble(ui, done->output, 0);
+                smart_home_lvgl_append_error_bubble(ui, "回复已显示，历史保存失败。控制可能已执行，请先确认设备状态。");
+                smart_home_lvgl_refresh_cards(ui);
+            } else {
+                snprintf(message,
+                         sizeof(message),
+                         "Agent call failed (%d): %.96s",
+                         done->ret,
+                         done->output[0] ? done->output : "no detail");
+                smart_home_lvgl_finish_thinking(ui);
+                smart_home_lvgl_append_error_bubble(ui, message);
+            }
         }
         /* Update status hint */
         if (ui->chat_status) {

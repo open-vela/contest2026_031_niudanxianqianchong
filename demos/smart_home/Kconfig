@@ -51,7 +51,7 @@ config SMART_HOME_MODEL_JSON_TOKENS
     range 128 2048
 
 config SMART_HOME_SESSION_HISTORY_TURNS
-    int "Recent complete turns retained in RAM"
+    int "Recent complete turns projected to model"
     default 3
     range 1 6
 
@@ -59,6 +59,34 @@ config SMART_HOME_SESSION_PAYLOAD_BYTES
     int "RAM session payload capacity"
     default 65536
     range 16384 262144
+
+config SMART_HOME_SESSION_PERSIST
+    bool "Persist conversations and restore chat history"
+    select CAGENT_SESSION_JSONL
+    select CAGENT_FILE_STORE
+    default n
+    help
+      Store completed turns in /data/smart_home/sessions. Restore chat
+      history on startup; New conversation also removes the saved records.
+
+if SMART_HOME_SESSION_PERSIST
+
+config SMART_HOME_SESSION_RETAIN_TURNS
+    int "Maximum saved complete turns"
+    default 20
+    range 4 40
+
+config SMART_HOME_SESSION_FILE_BYTES
+    int "Maximum session file bytes"
+    default 1048576
+    range 262144 2097152
+
+config SMART_HOME_SESSION_LINE_BYTES
+    int "Maximum encoded turn bytes"
+    default 131072
+    range 32768 524288
+
+endif
 
 config SMART_HOME_AUDIO_SMOKE
     bool "ES8311 audio smoke command"

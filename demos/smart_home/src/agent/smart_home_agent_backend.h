@@ -49,3 +49,6 @@ int smart_home_agent_backend_apply(smart_home_agent_backend_t *backend,
 void smart_home_agent_backend_destroy(smart_home_agent_backend_t **backend);
 
 int smart_home_agent_backend_prepare_turn(smart_home_agent_backend_t *backend);
+
+int smart_home_agent_backend_visit_history(smart_home_agent_backend_t *backend,
+                                            agent_session_visit_fn visit, void *context);

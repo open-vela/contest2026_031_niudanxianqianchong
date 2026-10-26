@@ -32,6 +32,15 @@ config CAGENT_SESSION_RAM
 	bool "Bounded RAM Session Storage"
 	default n
 
+config CAGENT_SESSION_JSONL
+	bool "Persistent JSONL Session Storage"
+	select CAGENT_FILE_STORE
+	default n
+
+config CAGENT_FILE_STORE
+	bool "Shared file store with OpenVela filesystem port"
+	default n
+
 config CAGENT_PORT_OPENVELA_RUNTIME
 	bool "OpenVela monotonic-clock runtime"
 	default y

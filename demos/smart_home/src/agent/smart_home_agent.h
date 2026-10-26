@@ -24,6 +24,7 @@ typedef struct {
     int skills_status;
     int tools_status;
     int model_status;
+    int session_status;
     int node_gateway_status;
     int mcp_bridge_status;
     size_t skills_loaded;
@@ -119,3 +120,7 @@ int smart_home_agent_app_clear_session(smart_home_agent_app_t *app);
 
 int smart_home_agent_app_set_observer(smart_home_agent_app_t *app,
                                       agent_event_callback_t callback, void *user_data);
+
+/* Complete groups newest first; callback must copy borrowed text and must not reenter. */
+int smart_home_agent_app_visit_history(smart_home_agent_app_t *app,
+                                       agent_session_visit_fn visit, void *context);

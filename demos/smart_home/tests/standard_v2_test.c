@@ -120,7 +120,20 @@ static void expect_run(smart_home_agent_app_t *app, const char *input)
     if (ret) fprintf(stderr, "standard run failed: %d (%s)\n", ret, agent_error_str(ret));
     assert(!ret && strlen(output) == 3000);
 }
-int main(void)
+static agent_error_t check_history(void *context, const agent_session_group_view_t *group)
+{
+    size_t *turns = context;
+    size_t calls = 0u;
+    assert(group->message_count >= 2u);
+    assert(group->messages[0].role == AGENT_MESSAGE_ROLE_USER);
+    for (size_t i = 0; i < group->message_count; ++i) calls += group->messages[i].tool_call_count;
+    assert(calls == 4u);
+    assert(group->messages[group->message_count - 1u].role == AGENT_MESSAGE_ROLE_ASSISTANT);
+    assert(group->messages[group->message_count - 1u].content.size == 3000u);
+    ++*turns;
+    return AGENT_OK;
+}
+int main(int argc, char **argv)
 {
     smart_home_agent_app_t app;
     smart_home_device_t device;
@@ -133,6 +146,21 @@ int main(void)
     assert(!smart_home_agent_app_init(&app));
     assert(app.skill_store.count == 6 && app.system_status.model_status == AGENT_OK);
     app.miloco = (smart_home_miloco_t *)&app;
+    if (argc > 1 && !strcmp(argv[1], "--resume")) {
+        size_t turns = 0u;
+        assert(!smart_home_agent_app_visit_history(&app, check_history, &turns) && turns == 3u);
+        assert(peak_request == 0u);
+        expect_run(&app, "after process restart");
+        assert(latest_users == 4);
+        assert(!smart_home_agent_app_clear_session(&app));
+        smart_home_agent_app_deinit(&app);
+        assert(!smart_home_agent_app_init(&app));
+        turns = 0u;
+        assert(!smart_home_agent_app_visit_history(&app, check_history, &turns) && turns == 0u);
+        smart_home_agent_app_deinit(&app);
+        puts("PASS: separate process restores real conversation and tool results without replay; clear survives reinitialization");
+        return 0;
+    }
     for (int i = 0; i < 8; ++i) {
         expect_run(&app, input);
         assert(latest_users == (i < 3 ? i + 1 : 4));
@@ -166,7 +194,7 @@ int main(void)
     assert(!smart_home_agent_app_apply_model_config(&app, &config));
     expect_run(&app, input);
     smart_home_agent_app_deinit(&app);
-    printf("PASS: standard firmware profile, real application/Skills/devices, 4-tool turns, RAM history, policy, switch, HTTP recovery; request_peak=%zu scratch_peak=%zu\n",
+    printf("PASS: standard firmware profile, real application/Skills/devices, 4-tool turns, history, policy, switch, HTTP recovery; request_peak=%zu scratch_peak=%zu\n",
            peak_request, peak_scratch);
     return 0;
 }

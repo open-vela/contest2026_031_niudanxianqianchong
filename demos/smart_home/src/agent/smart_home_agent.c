@@ -725,6 +725,7 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
         return AGENT_ERROR_INVALID;
     if (!app->agent_mutex_initialized) return AGENT_ERROR_STATE;
     pthread_mutex_lock(&app->agent_mutex);
+    app->system_status.session_status = AGENT_OK;
     if (!app->agent) {
         ret = AGENT_ERROR_STATE;
     } else if (app->system_status.model_status != AGENT_OK) {
@@ -739,7 +740,12 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
         response.output_size = output_size;
         smart_home_cpu_debug_log("agent-run-start");
         ret = smart_home_agent_backend_prepare_turn(app->backend);
-        if (ret == AGENT_OK) ret = agent_run(app->agent, &request, &response);
+        if (ret == AGENT_OK) {
+            ret = agent_run(app->agent, &request, &response);
+            app->system_status.session_status = response.session_status;
+        } else {
+            app->system_status.session_status = ret;
+        }
         if (ret == AGENT_OK && response.session_status != AGENT_OK)
             ret = response.session_status;
         if (ret == AGENT_OK && response.delivery_status != AGENT_OK)
@@ -920,4 +926,15 @@ int smart_home_agent_app_set_observer(smart_home_agent_app_t *app,
     app->observer_user_data = user_data;
     pthread_mutex_unlock(&app->agent_mutex);
     return AGENT_OK;
+}
+
+int smart_home_agent_app_visit_history(smart_home_agent_app_t *app,
+                                       agent_session_visit_fn visit, void *context)
+{
+    int ret;
+    if (!app || !visit || !app->agent_mutex_initialized) return AGENT_ERROR_INVALID;
+    pthread_mutex_lock(&app->agent_mutex);
+    ret = smart_home_agent_backend_visit_history(app->backend, visit, context);
+    pthread_mutex_unlock(&app->agent_mutex);
+    return ret;
 }

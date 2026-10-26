@@ -1,6 +1,6 @@
 # SmartHome cAGENT V2 移植过程
 
-分支：`feat/cagent-v2-migration`。标准固件阶段：`6397f6b`；追加启动超时修复。
+分支：`feat/cagent-v2-migration`。标准固件阶段：`6397f6b`；追加启动超时修复与 Session 持久化。
 范围：P4 标准 `smart_home`；使用 V2 原生接口，不增加 V1 兼容层。
 下文应用源码路径均相对于 `demos/smart_home/src/`。
 
@@ -59,6 +59,14 @@
 - 原因：Transport 初始化时漏设 `request_timeout_ms`，真实端口拒绝零值；Host mock 未校验该字段，遗漏此问题。
 - 修改：创建前校验模型配置，TLS 与 Transport 使用同一超时值；失败时输出具体创建阶段和错误名称。
 - 回归：mock 补齐零超时拒绝及 TLS/Transport 超时一致性检查；非法超时在分配前拒绝，5 秒和 60 秒边界创建通过。Agent 与标准应用联测通过 ASan/UBSan；P4 标准固件重新构建及镜像校验通过，板端启动待复验。
+
+## 9. Session 持久化与聊天恢复
+
+- 文件：新增 `agent/smart_home_session.[ch]`、`ui/lvgl/smart_home_lvgl_history.c`；引入 JSONL、共享 File Store 及 POSIX/OpenVela 文件端口。
+- 接口：通过原生 `agent_session_storage_t` 保存完整回合；应用加锁枚举历史，UI 复制借用文本后按时间顺序显示，不重放工具。
+- 问题与处理：Session ID 改为 `home`，使文件名满足 LittleFS 的 32 字符限制；JSONL 追加消息时预留结束标记空间。
+- 保留策略：最多二十回合、1 MiB，模型读取最近三轮；失败回合不落盘，半条尾记录可恢复，“新对话”删除持久化记录。
+- 回归：真实文件、独立进程恢复、短写回滚、同步失败、配额轮转、损坏记录及真实 UI 恢复代码通过 Host/ASan/UBSan。板端重启和断电验收待执行。
 
 ## 标准固件阶段验证结果（6397f6b）
 

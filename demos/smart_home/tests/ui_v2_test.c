@@ -48,7 +48,7 @@ int smart_home_agent_run(smart_home_agent_app_t *app, const char *input, char *o
     char name[] = "set_light";
     char id[] = "call1";
     agent_event_t event = {.type = AGENT_EVENT_MODEL_BEGIN};
-    (void)app;
+    app->system_status.session_status = !strcmp(input, "save-failure") ? AGENT_ERROR_IO : AGENT_OK;
     smart_home_lvgl_event_cb(current_ui, &event);
     event.tool_call.name = agent_string_view(name, sizeof(name) - 1);
     event.tool_call.id = agent_string_view(id, sizeof(id) - 1);
@@ -64,7 +64,8 @@ int smart_home_agent_run(smart_home_agent_app_t *app, const char *input, char *o
     snprintf(out, capacity, "answer");
     /* Heap pressure after model completion must not lose the queued completion. */
     atomic_store(&reject_allocations, 1);
-    return !strcmp(input, "failure") ? AGENT_ERROR_AUTH :
+    return !strcmp(input, "save-failure") ? AGENT_ERROR_IO :
+           !strcmp(input, "failure") ? AGENT_ERROR_AUTH :
            !strcmp(input, "truncated") ? AGENT_ERROR_TRUNCATED : AGENT_OK;
 }
 static void run_job(smart_home_lvgl_t *ui, const char *input)
@@ -96,6 +97,8 @@ int main(void)
     assert(replies == 1 && errors == 1); /* Exactly one error, despite TURN_END and completion. */
     run_job(&ui, "truncated");
     assert(replies == 2 && errors == 2); /* Show the partial answer plus a truncation notice. */
+    run_job(&ui, "save-failure");
+    assert(replies == 3 && errors == 3);
     smart_home_lvgl_discard_pending(&ui);
     smart_home_bulk_free(ui.agent_worker_stack_alloc);
     assert(!pthread_mutex_destroy(&ui.pending_mutex));

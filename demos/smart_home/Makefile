@@ -12,6 +12,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/smart_home_memory.c
   CSRCS     += src/agent/smart_home_agent.c
   CSRCS     += src/agent/smart_home_agent_backend.c
+  CSRCS     += src/agent/smart_home_session.c
   ifneq ($(CONFIG_FEATURE_SYSTEM_SMARTHOME),)
     CSRCS   += src/quickapp/smart_home_quickapp_provider.c
     CSRCS   += src/quickapp/smart_home_quickapp_ipc_server.c
@@ -100,6 +101,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   ifneq ($(CONFIG_SMART_HOME_DEMO_UI_LVGL),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_agent.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_history.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_chat.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_home.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_nav.c
@@ -161,6 +163,10 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/images
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
   CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/files/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/jsonl/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/posix/storage/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/openvela/storage/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/ram/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/model/openai/include
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/runtime/include

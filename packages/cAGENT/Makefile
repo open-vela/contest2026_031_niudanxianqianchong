@@ -25,6 +25,22 @@ ifeq ($(CONFIG_CAGENT_SESSION_RAM),y)
 CSRCS += providers/storage/ram/src/session_ram.c
 endif
 
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/providers/storage/files/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/providers/storage/jsonl/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/posix/storage/include
+CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/ports/openvela/storage/include
+
+ifeq ($(CONFIG_CAGENT_FILE_STORE),y)
+CSRCS += providers/storage/files/src/file_store.c
+CSRCS += ports/posix/storage/src/file_store.c
+CSRCS += ports/openvela/storage/src/file_store.c
+endif
+ifeq ($(CONFIG_CAGENT_SESSION_JSONL),y)
+CSRCS += providers/storage/jsonl/src/session_jsonl.c
+CSRCS += providers/storage/jsonl/src/jsonl_record.c
+CSRCS += providers/storage/jsonl/src/file_store_bind.c
+endif
+
 # 可移植 Core + 私有 JSON codec（零 malloc，全部借用式缓冲）
 CSRCS += $(wildcard src/*/*.c)
 CSRCS += codecs/json/reader.c

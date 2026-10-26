@@ -22,6 +22,8 @@ def main():
         package / "providers/model/openai/include", package / "providers/storage/ram/include",
         package / "ports/runtime/include", package / "ports/transport/include",
         package / "ports/tls/include", app / "src", cjson,
+        *sorted(package.glob("providers/storage/*/include")),
+        package / "ports/posix/storage/include", package / "ports/openvela/storage/include",
     ]
     sources = sorted(package.glob("src/*/*.c"))
     sources += [package / "codecs/json/reader.c", package / "codecs/json/writer.c"]
@@ -30,6 +32,7 @@ def main():
     application = [
         app / "src/agent/smart_home_agent.c",
         app / "src/agent/smart_home_agent_backend.c",
+        app / "src/agent/smart_home_session.c",
         app / "src/config/smart_home_backends.c",
     ]
     if arguments.p4:
@@ -38,6 +41,10 @@ def main():
             raise SystemExit("P4 object check requires an existing ESP32-P4 NuttX configuration")
         compiler = repo.parent / "prebuilts/gcc/linux-x86_64/riscv-none-elf/bin/riscv-none-elf-gcc"
         sources += sorted(package.glob("ports/*/src/*.c")) + application
+        sources += sorted(package.glob("providers/storage/files/src/*.c"))
+        sources += sorted(package.glob("providers/storage/jsonl/src/*.c"))
+        sources += [package / "ports/posix/storage/src/file_store.c",
+                    package / "ports/openvela/storage/src/file_store.c"]
         sources += [app / "src/tools/smart_home_tools.c",
                     app / "src/miloco/smart_home_miloco_tools.c",
                     app / "src/device/smart_home_device.c",
@@ -49,6 +56,7 @@ def main():
                     app / "src/ui/lvgl/smart_home_lvgl.c",
                     app / "src/ui/lvgl/smart_home_lvgl_agent.c",
                     app / "src/ui/lvgl/smart_home_lvgl_chat.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_history.c",
                     app / "src/ui/lvgl/smart_home_lvgl_settings.c",
                     app / "src/app/smart_home_main.c",
                     app / "src/smart_home_memory.c"]
