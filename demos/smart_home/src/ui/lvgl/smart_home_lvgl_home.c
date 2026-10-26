@@ -14,6 +14,7 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 enum home_action_e {
@@ -264,13 +265,8 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_remove_style_all(brand_mark);
     lv_obj_set_size(brand_mark, 36, 36);
     lv_obj_align(brand_mark, LV_ALIGN_LEFT_MID, smart_home_lvgl_pad_x(), 0);
-    lv_obj_set_style_radius(brand_mark, 11, 0);
-    smart_home_lvgl_set_bg(brand_mark, lv_color_hex(0x79AFBA));
-    icon = smart_home_lvgl_icon_create(brand_mark, ICON_NAV_HOME, 21, 21);
+    icon = smart_home_lvgl_icon_create(brand_mark, ICON_BRAND, 36, 36);
     if (icon) {
-        lv_obj_set_style_text_color(icon, lv_color_white(), 0);
-        lv_obj_set_style_image_recolor(icon, lv_color_white(), 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
         lv_obj_center(icon);
     }
 

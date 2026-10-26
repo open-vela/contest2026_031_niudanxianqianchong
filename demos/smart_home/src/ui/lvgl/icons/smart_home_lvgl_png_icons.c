@@ -54,6 +54,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:minus", NULL, &smart_home_icon_minus_32, NULL},
     {"asset:moon", &smart_home_icon_moon_20, &smart_home_icon_moon_32, NULL},
     {"asset:music-circle-outline", NULL, &smart_home_icon_music_circle_outline_32, &smart_home_icon_music_circle_outline_48},
+    {"asset:openvela", NULL, &smart_home_icon_openvela_36, NULL},
     {"asset:player-pause", NULL, &smart_home_icon_player_pause_32, NULL},
     {"asset:player-play", NULL, &smart_home_icon_player_play_32, NULL},
     {"asset:player-track-next", NULL, &smart_home_icon_player_track_next_32, NULL},
