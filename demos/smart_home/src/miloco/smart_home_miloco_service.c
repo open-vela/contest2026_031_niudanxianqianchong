@@ -19,7 +19,7 @@
 #include "../config/cjson_compat.h"
 #include "../config/smart_home_secrets.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -706,7 +706,7 @@ static int poll_bind_status(smart_home_miloco_t *service,
         service->revision++;
     }
     unlock_state(service);
-    return bound ? AGENT_OK : AGENT_ERROR_NOTFOUND;
+    return bound ? AGENT_OK : AGENT_ERROR_NOT_FOUND;
 }
 
 static int poll_device_list(smart_home_miloco_t *service,

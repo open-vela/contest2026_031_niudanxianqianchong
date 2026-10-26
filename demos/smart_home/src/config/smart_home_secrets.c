@@ -5,7 +5,7 @@
 
 #include "cjson_compat.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <errno.h>
 #include <stdint.h>
@@ -75,7 +75,7 @@ static int read_secrets_file(char **out_text, size_t *out_size)
     *out_size = 0u;
     file = fopen(CONFIG_SMART_HOME_MODEL_SECRETS_PATH, "rb");
     if (!file) {
-        return errno == ENOENT ? AGENT_ERROR_NOTFOUND : AGENT_ERROR;
+        return errno == ENOENT ? AGENT_ERROR_NOT_FOUND : AGENT_ERROR;
     }
 
     if (fseek(file, 0, SEEK_END) != 0) {
@@ -152,7 +152,7 @@ static int lookup_model_api_key(const char *backend_id,
         !cJSON_IsObject(keys) || !cJSON_IsString(value) ||
         !value->valuestring[0]) {
         ret = (!cJSON_IsNumber(version) || version->valueint != SMART_HOME_SECRETS_VERSION ||
-               !cJSON_IsObject(keys)) ? AGENT_ERROR_PARSE : AGENT_ERROR_NOTFOUND;
+               !cJSON_IsObject(keys)) ? AGENT_ERROR_PARSE : AGENT_ERROR_NOT_FOUND;
         cJSON_Delete(root);
         return ret;
     }
@@ -245,7 +245,7 @@ int smart_home_secrets_get_wifi_credentials(char *ssid, size_t ssid_size,
         contains_control(stored_ssid->valuestring) ||
         contains_control(stored_password->valuestring)) {
         cJSON_Delete(root);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     memcpy(ssid, stored_ssid->valuestring, strlen(stored_ssid->valuestring) + 1u);
     memcpy(password, stored_password->valuestring,
@@ -273,7 +273,7 @@ int smart_home_secrets_set_wifi_credentials(const char *ssid,
         return AGENT_ERROR_INVALID;
     }
     ret = read_secrets_file(&text, &text_size);
-    if (ret == AGENT_ERROR_NOTFOUND) {
+    if (ret == AGENT_ERROR_NOT_FOUND) {
         /* A first-time Wi-Fi setup must work before a model credential has
          * been provisioned.  Create the minimal versioned document. */
         root = cJSON_CreateObject();
@@ -401,7 +401,7 @@ int smart_home_secrets_get_miloco(char *host, size_t host_size,
         version->valueint != SMART_HOME_SECRETS_VERSION ||
         !cJSON_IsObject(miloco)) {
         cJSON_Delete(root);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     stored_host = cJSON_GetObjectItemCaseSensitive(miloco, "host");
     stored_port = cJSON_GetObjectItemCaseSensitive(miloco, "port");
@@ -410,7 +410,7 @@ int smart_home_secrets_get_miloco(char *host, size_t host_size,
         strlen(stored_host->valuestring) >= host_size ||
         contains_control(stored_host->valuestring)) {
         cJSON_Delete(root);
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     if (cJSON_IsNumber(stored_port) && stored_port->valueint > 0 &&
         stored_port->valueint <= 65535) {
@@ -450,7 +450,7 @@ int smart_home_secrets_set_miloco(const char *host, uint16_t port,
     syslog(LOG_INFO, "[milo] sec: read begin\n");
     ret = read_secrets_file(&text, &text_size);
     syslog(LOG_INFO, "[milo] sec: read ret=%d\n", ret);
-    if (ret == AGENT_ERROR_NOTFOUND) {
+    if (ret == AGENT_ERROR_NOT_FOUND) {
         root = cJSON_CreateObject();
         if (!root || !cJSON_AddNumberToObject(root, "version",
                                                SMART_HOME_SECRETS_VERSION) ||

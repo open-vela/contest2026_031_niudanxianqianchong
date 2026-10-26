@@ -113,6 +113,7 @@ static agent_error_t miot_device_list_tool(void *user_data,
     size_t used;
     size_t i;
     uint8_t k;
+    bool truncated = false;
 
     agent_error_t status = AGENT_ERROR_IO;
 
@@ -160,9 +161,13 @@ static agent_error_t miot_device_list_tool(void *user_data,
                     "action" : "set",
                 desc);
         }
+        if (k < devices[i].control_count) truncated = true;
         used = append_count(output, sizeof(output), used, "]}");
     }
-    used = append_count(output, sizeof(output), used, "]}");
+    if (i < count) truncated = true;
+    used = append_count(output, sizeof(output), used,
+                        "],\"truncated\":%s,\"total_devices\":%zu}",
+                        truncated ? "true" : "false", count);
     if (used >= sizeof(output) - 1u)
         return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"device_list_capacity\"}", AGENT_ERROR_CAPACITY);
     return smart_home_tool_reply(sink, output, AGENT_OK);

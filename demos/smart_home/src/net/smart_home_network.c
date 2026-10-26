@@ -25,7 +25,7 @@
 
 #include "netutils/netlib.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include "smart_home_network.h"
 #include "../config/smart_home_secrets.h"

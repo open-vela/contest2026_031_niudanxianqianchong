@@ -293,6 +293,7 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
 
 static const char *tool_status_text(int ok)
 {
+    if (ok == -2) return "Unconfirmed";
     if (ok > 0) {
         return "OK";
     }
@@ -317,14 +318,17 @@ static void refresh_trace_header(smart_home_lvgl_t *ui)
 {
     int has_running = 0;
     int has_failed = 0;
+    int has_unconfirmed = 0;
 
     if (!ui || !ui->chat_trace_status) {
         return;
     }
 
     for (int i = 0; i < ui->chat_trace_tool_count; i++) {
-        if (ui->chat_trace_tools[i].state < 0) {
+        if (ui->chat_trace_tools[i].state == -1) {
             has_running = 1;
+        } else if (ui->chat_trace_tools[i].state == -2) {
+            has_unconfirmed = 1;
         } else if (ui->chat_trace_tools[i].state == 0) {
             has_failed = 1;
         }
@@ -340,6 +344,10 @@ static void refresh_trace_header(smart_home_lvgl_t *ui)
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_DANGER,
                                     0);
+    } else if (has_unconfirmed) {
+        lv_label_set_text(ui->chat_trace_status, "Unconfirmed");
+        lv_obj_set_style_text_color(ui->chat_trace_status,
+                                    SMART_HOME_UI_COLOR_WARNING, 0);
     } else if (ui->chat_trace_tool_count > 0) {
         lv_label_set_text(ui->chat_trace_status, "OK");
         lv_obj_set_style_text_color(ui->chat_trace_status,
@@ -497,12 +505,12 @@ void smart_home_lvgl_finish_thinking(smart_home_lvgl_t *ui)
 
     for (int i = 0; i < ui->chat_trace_tool_count; i++) {
         smart_home_lvgl_trace_tool_t *tool = &ui->chat_trace_tools[i];
-        if (tool->state < 0) {
-            tool->state = 1;
+        if (tool->state == -1) {
+            tool->state = -2;
             if (tool->status_label) {
-                lv_label_set_text(tool->status_label, tool_status_text(1));
+                lv_label_set_text(tool->status_label, tool_status_text(-2));
                 lv_obj_set_style_text_color(tool->status_label,
-                                            tool_status_color(1),
+                                            tool_status_color(-2),
                                             0);
                 lv_obj_invalidate(tool->status_label);
             }
@@ -774,6 +782,10 @@ void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
     if (!ui || !text || !text[0]) {
         return;
     }
+    if (ui->request_inflight) {
+        smart_home_lvgl_append_error_bubble(ui, "请等待当前回复结束。");
+        return;
+    }
 
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     printf("[chat] user: %.200s\n", text);
@@ -806,11 +818,50 @@ void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
 
 /* ── build ─────────────────────────────────────────────────── */
 
+int smart_home_lvgl_chat_clear(smart_home_lvgl_t *ui)
+{
+    int ret;
+    if (!ui || !ui->app) return AGENT_ERROR_INVALID;
+    if (ui->request_inflight) return AGENT_ERROR_BUSY;
+#ifdef CONFIG_SMART_HOME_VOICE_ASR
+    if (ui->asr_active || ui->asr_worker_active) return AGENT_ERROR_BUSY;
+#endif
+    ret = smart_home_agent_app_clear_session(ui->app);
+    if (ret != AGENT_OK) return ret;
+    if (ui->chat_list) lv_obj_clean(ui->chat_list);
+    ui->chat_trace_body = NULL;
+    ui->chat_trace_row = NULL;
+    ui->chat_trace_title = NULL;
+    ui->chat_trace_status = NULL;
+    ui->chat_trace_active = 0;
+    ui->chat_trace_collapsed = 0;
+    ui->chat_msg_count = 0;
+    reset_active_trace_tools(ui);
+    if (ui->chat_input) lv_textarea_set_text(ui->chat_input, "");
+    layout_chat_controls(ui, 0);
+    if (ui->chat_status) {
+        lv_label_set_text(ui->chat_status, "已开始新对话");
+        lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+    }
+    return AGENT_OK;
+}
+
+static void chat_new_event_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    int ret = smart_home_lvgl_chat_clear(ui);
+    if (ret == AGENT_ERROR_BUSY)
+        smart_home_lvgl_append_error_bubble(ui, "请等待当前回复或录音结束后再开始新对话。");
+    else if (ret != AGENT_OK)
+        smart_home_lvgl_append_error_bubble(ui, "无法清空会话，请重试。");
+}
+
 void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
 {
     lv_obj_t *screen;
     lv_obj_t *input_bar;
     lv_obj_t *label;
+    lv_obj_t *new_button;
     int content_w = smart_home_lvgl_content_w();
 
     screen = lv_obj_create(NULL);
@@ -850,9 +901,9 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
 
     ui->chat_input = lv_textarea_create(input_bar);
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
-    lv_obj_set_size(ui->chat_input, content_w - 126, SMART_HOME_CHAT_INPUT_H);
+    lv_obj_set_size(ui->chat_input, content_w - 208, SMART_HOME_CHAT_INPUT_H);
 #else
-    lv_obj_set_size(ui->chat_input, content_w - 70, SMART_HOME_CHAT_INPUT_H);
+    lv_obj_set_size(ui->chat_input, content_w - 152, SMART_HOME_CHAT_INPUT_H);
 #endif
     lv_textarea_set_one_line(ui->chat_input, true);
     lv_textarea_set_placeholder_text(ui->chat_input, "问问 OpenVela…");
@@ -863,6 +914,16 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
                         chat_input_event_cb,
                         LV_EVENT_ALL,
                         ui);
+
+    new_button = lv_btn_create(input_bar);
+    lv_obj_remove_style_all(new_button);
+    lv_obj_set_size(new_button, 74, SMART_HOME_CHAT_INPUT_H);
+    lv_obj_set_style_radius(new_button, 8, 0);
+    smart_home_lvgl_set_bg(new_button, SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_add_event_cb(new_button, chat_new_event_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(new_button, "新对话",
+                                         SMART_HOME_UI_COLOR_PRIMARY, 12);
+    lv_obj_center(label);
 
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
     ui->chat_mic_btn = lv_btn_create(input_bar);

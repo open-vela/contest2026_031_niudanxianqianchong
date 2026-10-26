@@ -83,6 +83,9 @@ typedef struct smart_home_miloco smart_home_miloco_t;
 /* 配置校验：host 非空、无控制字符且端口非零。 */
 bool smart_home_miloco_config_valid(const smart_home_miloco_config_t *config);
 
+bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
+                                 smart_home_miloco_config_t *config);
+
 /*
  * 启动网关服务：创建 worker 线程（PSRAM 栈）并立即开始轮询。
  * 网络未就绪时轮询失败并按周期重试，不需要显式重连。

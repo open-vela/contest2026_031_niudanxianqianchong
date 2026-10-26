@@ -17,7 +17,7 @@
 
 #include "smart_home_miloco.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <stdio.h>
 #include <string.h>

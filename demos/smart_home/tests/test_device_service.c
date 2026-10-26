@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <cagent/types.h>
+#include <agent.h>
+#include <agent/context.h>
 #include <smart_home_device.h>
 #include <smart_home_device_service.h>
 #include <smart_home_scene_catalog.h>
@@ -83,7 +84,7 @@ static void test_scene_catalog_drives_one_logical_revision(void)
     assert(state.devices[2].ac_fan_speed == 2);
     assert(state.devices[2].temperature == 23);
     assert(smart_home_device_service_run_scene(&service, "movie")
-           == AGENT_ERROR_NOTFOUND);
+           == AGENT_ERROR_NOT_FOUND);
     assert(smart_home_device_service_revision(&service) == 1u);
     smart_home_device_service_deinit(&service);
 }
@@ -112,7 +113,7 @@ static void test_room_catalog_allows_device_reassignment(void)
     smart_home_device_service_deinit(&service);
 }
 
-static void test_default_scene_skill_catalog_is_valid(void)
+static void test_miloco_scene_skill_omits_virtual_catalog(void)
 {
     FILE *file;
     long size;
@@ -130,10 +131,8 @@ static void test_default_scene_skill_catalog_is_valid(void)
     assert(fread(text, 1u, (size_t)size, file) == (size_t)size);
     fclose(file);
 
-    assert(smart_home_scene_catalog_load(text, &catalog) == AGENT_OK);
-    assert(catalog.version == SMART_HOME_SCENE_CATALOG_VERSION);
-    assert(catalog.scene_count == 4u);
-    assert(strcmp(catalog.scenes[0].id, "sleep") == 0);
+    assert(smart_home_scene_catalog_load(text, &catalog) == AGENT_ERROR_NOT_FOUND);
+    assert(catalog.version == 0u && catalog.scene_count == 0u);
     free(text);
 }
 
@@ -142,13 +141,13 @@ int main(void)
     test_state_mutation_emits_revisioned_event();
     test_scene_catalog_drives_one_logical_revision();
     test_room_catalog_allows_device_reassignment();
-    test_default_scene_skill_catalog_is_valid();
+    test_miloco_scene_skill_omits_virtual_catalog();
     printf("all device_service tests passed\n");
     return 0;
 }
 
 /* device.c 引用了 cAGENT 的 context provider 注册，测试提供 stub。 */
-int agent_register_context_provider(agent_t *agent,
+agent_error_t agent_register_context(agent_t *agent,
                                     const agent_context_provider_t *provider)
 {
     (void)agent;

@@ -48,6 +48,7 @@ def main():
                     app / "src/ui/smart_home_ui.c",
                     app / "src/ui/lvgl/smart_home_lvgl.c",
                     app / "src/ui/lvgl/smart_home_lvgl_agent.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_chat.c",
                     app / "src/ui/lvgl/smart_home_lvgl_settings.c",
                     app / "src/app/smart_home_main.c",
                     app / "src/smart_home_memory.c"]
@@ -58,7 +59,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="smart-home-agent-p4-") as temporary:
             for index, source in enumerate(sources):
                 command = [str(compiler), "-std=c99", "-Wall", "-Wextra", "-Werror",
-                           "-march=rv32imafc", "-mabi=ilp32f", "-D__NuttX__",
+                           "-march=rv32imafc", "-mabi=ilp32", "-D__NuttX__",
                            '-DAGENT_BUILD_CONFIG_HEADER="nuttx/config.h"']
                 command += [item for path in native_includes for item in ["-I", str(path)]]
                 command += ["-c", str(source), "-o", str(Path(temporary) / f"{index}.o")]

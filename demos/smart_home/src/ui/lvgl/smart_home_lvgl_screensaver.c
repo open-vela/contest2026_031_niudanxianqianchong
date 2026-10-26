@@ -7,6 +7,7 @@
  */
 
 #include "smart_home_lvgl_internal.h"
+#include <stdio.h>
 static void screensaver_time_timer_cb(lv_timer_t *timer);
 
 

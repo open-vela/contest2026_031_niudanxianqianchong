@@ -35,7 +35,7 @@ static int provider_status_to_ipc_status(int status)
         return SMART_HOME_QUICKAPP_IPC_STATUS_STALE;
     }
 
-    if (status == AGENT_ERROR_INVALID || status == AGENT_ERROR_NOTFOUND) {
+    if (status == AGENT_ERROR_INVALID || status == AGENT_ERROR_NOT_FOUND) {
         return SMART_HOME_QUICKAPP_IPC_STATUS_INVALID;
     }
 

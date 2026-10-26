@@ -10,6 +10,9 @@
 static agent_tool_t tools[16];
 static size_t count;
 static int effects, fail_write;
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+static size_t gateway_device_count = 1u;
+#endif
 static char output[8192];
 
 agent_error_t agent_register_tool(agent_t *agent, const agent_tool_t *tool)
@@ -43,7 +46,21 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *s, const ch
 bool smart_home_miloco_reachable(const smart_home_miloco_t *s) { return s != NULL; }
 size_t smart_home_miloco_list(const smart_home_miloco_t *s, smart_home_miloco_device_t *d,
     size_t capacity, uint32_t *revision)
-{ (void)s; (void)capacity; (void)revision; memset(d, 0, sizeof(*d)); strcpy(d->did, "123"); strcpy(d->name, "test"); return 1; }
+{
+    (void)s; (void)revision;
+    assert(capacity >= gateway_device_count);
+    memset(d, 0, gateway_device_count * sizeof(*d));
+    for (size_t i = 0; i < gateway_device_count; ++i) {
+        snprintf(d[i].did, sizeof(d[i].did), "%zu", i);
+        strcpy(d[i].name, "test");
+        d[i].control_count = SMART_HOME_MILOCO_MAX_CONTROLS;
+        for (size_t k = 0; k < SMART_HOME_MILOCO_MAX_CONTROLS; ++k) {
+            snprintf(d[i].controls[k].iid, sizeof(d[i].controls[k].iid), "prop.2.%zu", k);
+            strcpy(d[i].controls[k].desc, "test control");
+        }
+    }
+    return gateway_device_count;
+}
 bool smart_home_miloco_get_weather(const smart_home_miloco_t *s, smart_home_miloco_weather_t *out)
 { (void)s; (void)out; return false; }
 int smart_home_miloco_run_scene(smart_home_miloco_t *s, const char *scene, char *report, size_t n)
@@ -97,12 +114,14 @@ int main(void)
     assert(invoke("set_light", "{\"room\":\"bedroom\",\"on\":true,\"brightness\":2147483648}"));
     assert(invoke("set_light", "{\"room\":\"bedroom\",\"on\":true,\"brightness\":40,\"brightness\":0}"));
     assert(invoke("set_light", "{\"room\":\"bedroom\",\"on\":true,\"brightness\":40}x"));
+    assert(invoke("set_light", "{\"room\":\"bedroom\\u0000suffix\",\"on\":true,\"brightness\":40}"));
     assert(invoke("set_ac", "{\"room\":\"bedroom\",\"on\":true,\"temperature\":\"oops\"}"));
     assert(invoke("set_ac", "{\"room\":\"bedroom\",\"on\":true,\"mode\":\"oops\"}"));
     assert(effects == 1);
     assert(!invoke("set_ac", "{\"room\":\"bedroom\",\"on\":true}"));
     assert(effects == 2);
     assert(!invoke("get_weather", "{\"location\":\"Shenzhen\"}"));
+    assert(!invoke("get_weather", "{\"location\":\"safe\\\\u0000\"}"));
     for (int i = 0; i < 8; ++i) assert(!invoke("set_timer", "{\"delay_seconds\":60,\"message\":\"test\"}"));
     assert(invoke("set_timer", "{\"delay_seconds\":60,\"message\":\"full\"}") == AGENT_ERROR_CAPACITY);
     assert(!invoke("list_timers", "{}"));
@@ -122,6 +141,13 @@ int main(void)
     assert(effects == 2);
     assert(!invoke("miot_device_control", "{\"did\":\"123\",\"iid\":\"prop.2.1\",\"value\":true}"));
     assert(effects == 3 && strstr(output, "submitted"));
+    gateway_device_count = SMART_HOME_MILOCO_MAX_DEVICES;
+    assert(!invoke("miot_device_list", "{}"));
+    cJSON *list = cJSON_Parse(output);
+    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(list, "truncated")));
+    assert(cJSON_GetObjectItemCaseSensitive(list, "total_devices")->valueint == SMART_HOME_MILOCO_MAX_DEVICES);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(list, "devices")) < SMART_HOME_MILOCO_MAX_DEVICES);
+    cJSON_Delete(list);
 #endif
     puts("PASS: native tools, bounded arguments, rejection without effects, timer capacity and sink failures");
     return 0;

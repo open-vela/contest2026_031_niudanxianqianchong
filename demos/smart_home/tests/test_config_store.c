@@ -12,7 +12,8 @@
  * 使用独立临时目录（固定测试路径，见 setup_temp_dir），避免并行冲突。
  */
 
-#include <cagent/types.h>
+#include <agent.h>
+#include <agent/context.h>
 #include <cJSON.h>
 #include <smart_home_config_store.h>
 #include <smart_home_backends.h>
@@ -358,7 +359,7 @@ int main(void)
 }
 
 /* device.c 引用了 cAGENT 的 context provider 注册，测试提供 stub */
-int agent_register_context_provider(agent_t *agent,
+agent_error_t agent_register_context(agent_t *agent,
                                     const agent_context_provider_t *provider)
 {
     (void)agent;

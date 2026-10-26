@@ -2,7 +2,8 @@
 
 #include "smart_home_secrets.h"
 
-#include <cagent/types.h>
+#include <agent.h>
+#include <agent/context.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -44,7 +45,7 @@ static void test_valid_lookup_and_isolation(void)
     assert(strcmp(key, "mimo-key") == 0);
     assert(smart_home_secrets_model_api_key_status("deepseek") == AGENT_OK);
     assert(smart_home_secrets_model_api_key_status("qwen") ==
-           AGENT_ERROR_NOTFOUND);
+           AGENT_ERROR_NOT_FOUND);
 }
 
 static void test_missing_or_empty_key_fails_closed(void)
@@ -54,7 +55,7 @@ static void test_missing_or_empty_key_fails_closed(void)
     write_text("{\"version\":1,\"model_api_keys\":{\"mimo\":\"\"}}");
     memset(key, 0xa5, sizeof(key));
     assert(smart_home_secrets_get_model_api_key("mimo", key, sizeof(key)) ==
-           AGENT_ERROR_NOTFOUND);
+           AGENT_ERROR_NOT_FOUND);
     expect_cleared(key, sizeof(key));
 }
 
@@ -86,7 +87,7 @@ static void test_limits_and_missing_file(void)
 
     assert(unlink(CONFIG_SMART_HOME_MODEL_SECRETS_PATH) == 0);
     assert(smart_home_secrets_model_api_key_status("mimo") ==
-           AGENT_ERROR_NOTFOUND);
+           AGENT_ERROR_NOT_FOUND);
 }
 
 static void test_wifi_credentials_round_trip(void)
@@ -115,7 +116,7 @@ static void test_wifi_credentials_round_trip(void)
                                                     sizeof(password)) == AGENT_OK);
     assert(strcmp(ssid, "NewHome") == 0);
     assert(smart_home_secrets_model_api_key_status("mimo") ==
-           AGENT_ERROR_NOTFOUND);
+           AGENT_ERROR_NOT_FOUND);
 }
 
 int main(void)

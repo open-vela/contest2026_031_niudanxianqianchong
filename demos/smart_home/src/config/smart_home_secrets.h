@@ -9,6 +9,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,7 +26,7 @@ extern "C" {
 /**
  * 从 secrets.json 的 model_api_keys 对象中读取 backend_id 对应的密钥。
  *
- * 成功返回 AGENT_OK。文件/条目不存在或值为空返回 AGENT_ERROR_NOTFOUND；
+ * 成功返回 AGENT_OK。文件/条目不存在或值为空返回 AGENT_ERROR_NOT_FOUND；
  * 非法 JSON、版本或值返回 AGENT_ERROR_PARSE；过大输入/输出缓冲不足返回
  * AGENT_ERROR_LIMIT。任何失败都会清空 out，且不会回退到源码默认值。
  */

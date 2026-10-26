@@ -10,7 +10,7 @@
 #include "smart_home_backends.h"
 #include "../device/smart_home_device.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -464,7 +464,7 @@ static int validate_backend_fields(const cJSON *item)
             return AGENT_ERROR_PARSE;
         }
         for (p = host->valuestring; *p; p++) {
-            if (*p <= 0x20u || *p == 0x7fu || *p == '/') {
+            if ((unsigned char)*p <= 0x20u || *p == 0x7fu || *p == '/') {
                 return AGENT_ERROR_PARSE;
             }
         }

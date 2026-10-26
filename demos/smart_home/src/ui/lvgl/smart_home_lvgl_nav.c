@@ -2,6 +2,9 @@
 
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#include "../../miloco/smart_home_miloco.h"
+#endif
 
 #include <stdint.h>
 

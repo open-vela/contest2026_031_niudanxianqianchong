@@ -45,7 +45,7 @@ static const char g_system_prompt[] =
     "控制米家设备时，先调用 miot_device_list 获取设备与 controls 列表，"
     "再用其中返回的 did 和 iid 调用 miot_device_control，不要凭空猜测 iid。"
 #endif
-    "若工具返回 policy_denied，说明该工具已在设置中停用："
+    "若工具返回 AGENT_ERROR_POLICY_DENIED，说明该工具已在设置中停用："
     "告知用户操作未执行、可在设置页重新开启；工具被拒或失败后，"
     "绝不能声称操作成功。"
     "回复使用纯文本、不要使用 Markdown。";

@@ -14,6 +14,13 @@ static inline cJSON *smart_home_tool_parse(agent_string_view_t json)
 
     if (!json.data || !json.size || memchr(json.data, '\0', json.size))
         return NULL;
+    /* cJSON represents strings as C strings; reject a lossy decoded NUL. */
+    for (size_t i = 0u; i + 1u < json.size; ++i) {
+        if (json.data[i] != '\\') continue;
+        if (i + 5u < json.size && json.data[i + 1u] == 'u' &&
+            memcmp(json.data + i + 2u, "0000", 4u) == 0) return NULL;
+        ++i;
+    }
     root = cJSON_ParseWithLengthOpts(json.data, json.size, &end, 0);
     if (!root) return NULL;
     while (end < json.data + json.size &&
