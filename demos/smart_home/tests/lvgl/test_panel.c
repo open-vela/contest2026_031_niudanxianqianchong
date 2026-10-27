@@ -26,16 +26,33 @@ static void capture_home(smart_home_lvgl_t *ui)
 
 static smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
 static size_t snapshot_count;
+static uint32_t snapshot_revision = 1;
+static unsigned snapshot_reads;
 size_t smart_home_miloco_list(const smart_home_miloco_t *service,
                              smart_home_miloco_device_t *out,
                              size_t capacity, uint32_t *revision)
 {
     (void)service;
-    if (revision) *revision = 1;
+    if (revision) *revision = snapshot_revision;
+    if (out) snapshot_reads++;
     size_t n = capacity < snapshot_count ? capacity : snapshot_count;
     if (out) memcpy(out, snapshot, n * sizeof(*out));
     return out ? n : snapshot_count;
 }
+
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+static caddons_node_info_t node_snapshot[CAGENT_ADDONS_MAX_NODES];
+static size_t node_count;
+size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
+    caddons_node_info_t *out, size_t capacity, uint32_t *revision)
+{
+    (void)gateway;
+    if (revision) *revision = 1;
+    size_t n = capacity < node_count ? capacity : node_count;
+    if (out) memcpy(out, node_snapshot, n * sizeof(*out));
+    return out ? n : node_count;
+}
+#endif
 
 static int submit_result;
 static int submissions;
@@ -208,6 +225,148 @@ static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
     puts("PASS: power and BOOL rollback; offline guard; ENUM/ACTION feedback; 8x4 controls");
 }
 
+static unsigned deleted_objects;
+static void count_deleted(lv_event_t *event)
+{ (void)event; deleted_objects++; }
+
+static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
+{
+    ui->device_state = &ui->app->device_state;
+    ui->panel_grid = lv_obj_create(screen);
+    lv_obj_set_size(ui->panel_grid, 968, 180);
+    lv_obj_set_flex_flow(ui->panel_grid, LV_FLEX_FLOW_ROW_WRAP);
+    ui->panel_filter_row = lv_obj_create(screen);
+    ui->panel_source_dd = lv_dropdown_create(screen);
+    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\nNode");
+    lv_dropdown_set_selected(ui->panel_room_dd, 0);
+    memset(snapshot, 0, sizeof(snapshot));
+    snapshot_count = SMART_HOME_MILOCO_MAX_DEVICES;
+    for (size_t i = 0; i < snapshot_count; i++) {
+        snprintf(snapshot[i].did, sizeof(snapshot[i].did), "device-%u", (unsigned)i);
+        strcpy(snapshot[i].room, "living_room");
+        strcpy(snapshot[i].name, "测试设备");
+        snapshot[i].online = true;
+        snapshot[i].controllable = true;
+        snapshot[i].control_count = SMART_HOME_MILOCO_MAX_CONTROLS;
+        for (size_t j = 0; j < SMART_HOME_MILOCO_MAX_CONTROLS; j++) {
+            snprintf(snapshot[i].controls[j].iid, sizeof(snapshot[i].controls[j].iid),
+                     "2.%u", (unsigned)j);
+            snapshot[i].controls[j].type = SMART_HOME_MILOCO_CTRL_BOOL;
+        }
+    }
+    rebuild_device_cards(ui);
+    assert(lv_obj_get_child_count(ui->panel_grid) == SMART_HOME_MILOCO_MAX_DEVICES);
+    lv_obj_t *card = ui->miloco_cards[0].card;
+    lv_obj_t *power = ui->miloco_cards[0].power;
+    lv_obj_add_event_cb(card, count_deleted, LV_EVENT_DELETE, NULL);
+    lv_obj_update_layout(ui->panel_grid);
+    lv_obj_scroll_to_y(ui->panel_grid, 80, LV_ANIM_OFF);
+    int32_t grid_scroll = lv_obj_get_scroll_y(ui->panel_grid);
+    assert(grid_scroll == 80);
+    strcpy(snapshot[0].name, "更新的设备名");
+    snapshot[0].power_on = true;
+    rebuild_device_cards(ui);
+    assert(deleted_objects == 0 && ui->miloco_cards[0].card == card);
+    assert(ui->miloco_cards[0].power == power && lv_obj_has_state(power, LV_STATE_CHECKED));
+    assert(!strcmp(lv_label_get_text(ui->miloco_cards[0].name), "更新的设备名"));
+    assert(lv_obj_get_scroll_y(ui->panel_grid) == grid_scroll);
+    smart_home_miloco_device_t swap = snapshot[0];
+    snapshot[0] = snapshot[1]; snapshot[1] = swap;
+    rebuild_device_cards(ui);
+    assert(ui->miloco_cards[0].card == card && deleted_objects == 0);
+    assert(!strcmp(lv_obj_get_user_data(power), "device-0"));
+    /* A queued command keeps the pending value until readback or timeout. */
+    submit_result = AGENT_OK;
+    lv_obj_remove_state(power, LV_STATE_CHECKED);
+    lv_obj_send_event(power, LV_EVENT_VALUE_CHANGED, NULL);
+    append_miloco_cards(ui);
+    assert(!lv_obj_has_state(power, LV_STATE_CHECKED));
+    lv_tick_inc(MILOCO_CONFIRM_WAIT_MS + 1);
+    append_miloco_cards(ui);
+    assert(lv_obj_has_state(power, LV_STATE_CHECKED));
+    assert(strstr(lv_label_get_text(ui->panel_feedback_label), "尚未确认"));
+
+    miloco_sheet_build(ui, "device-0");
+    lv_obj_t *sheet = ui->miloco_sheet;
+    miloco_sheet_context_t *context = ui->miloco_sheet_context;
+    lv_obj_t *control = context->requests[0].widget;
+    lv_obj_add_event_cb(sheet, count_deleted, LV_EVENT_DELETE, NULL);
+    lv_obj_update_layout(sheet);
+    lv_obj_scroll_to_y(sheet, 40, LV_ANIM_OFF);
+    int32_t sheet_scroll = lv_obj_get_scroll_y(sheet);
+    assert(sheet_scroll == 40);
+    int before = submissions;
+    snapshot[1].controls[0].value = 1;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    assert(ui->miloco_sheet == sheet && deleted_objects == 0);
+    assert(context->requests[0].widget == control);
+    assert(lv_obj_has_state(control, LV_STATE_CHECKED));
+    assert(lv_obj_get_scroll_y(sheet) == sheet_scroll && submissions == before);
+    snapshot[1].online = false;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    assert(lv_obj_has_state(control, LV_STATE_DISABLED));
+    snapshot[1].online = true;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    assert(!lv_obj_has_state(control, LV_STATE_DISABLED));
+    strcpy(snapshot[1].controls[0].desc, "新的控制项");
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    assert(deleted_objects == 1); /* schema change alone rebuilds the drawer */
+    assert(lv_obj_get_scroll_y(ui->miloco_sheet) == sheet_scroll);
+    snapshot[1].controls[1].type = SMART_HOME_MILOCO_CTRL_ENUM;
+    snapshot[1].controls[1].option_count = 2;
+    snapshot[1].controls[1].options[0].value = 0;
+    snapshot[1].controls[1].options[1].value = 1;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    context = ui->miloco_sheet_context;
+    sheet = ui->miloco_sheet;
+    lv_obj_t *option = context->requests[3].widget;
+    snapshot[1].controls[1].value = 1;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    assert(ui->miloco_sheet == sheet && context->requests[3].widget == option);
+    assert(lv_color_eq(lv_obj_get_style_bg_color(option, 0), SMART_HOME_UI_COLOR_PRIMARY));
+    snapshot_count = 0;
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    rebuild_device_cards(ui);
+    assert(!ui->miloco_sheet && !ui->miloco_sheet_context);
+    assert(lv_obj_get_child_count(ui->panel_grid) == 0);
+    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++)
+        assert(!ui->miloco_cards[i].card);
+    /* A home refresh consumes the revision without marking hidden cards current. */
+    ui->active_tab = SMART_HOME_TAB_HOME;
+    snapshot_revision = ui->miloco_revision + 1;
+    smart_home_lvgl_miloco_poll_set_enabled(ui, 1);
+    miloco_timer_cb(ui->miloco_timer);
+    unsigned reads = snapshot_reads;
+    miloco_timer_cb(ui->miloco_timer);
+    assert(reads == snapshot_reads);
+    assert(ui->miloco_polled_revision == snapshot_revision);
+    assert(ui->miloco_revision != snapshot_revision);
+    smart_home_lvgl_miloco_poll_set_enabled(ui, 0);
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    ui->app->node_gateway = (smart_home_node_gateway_t *)&node_snapshot;
+    node_count = 1;
+    strcpy(node_snapshot[0].node_id, "node-1");
+    strcpy(node_snapshot[0].display_name, "节点一");
+    node_snapshot[0].online = true;
+    rebuild_device_cards(ui);
+    assert(lv_obj_get_child_count(ui->panel_grid) == 1);
+    lv_obj_t *node_card = ui->node_cards[0].card;
+    rebuild_device_cards(ui);
+    assert(ui->node_cards[0].card == node_card);
+    assert(lv_obj_get_child_count(ui->panel_grid) == 1);
+    lv_dropdown_set_selected(ui->panel_source_dd, 1);
+    rebuild_device_cards(ui);
+    assert(!ui->node_cards[0].card && !lv_obj_get_child_count(ui->panel_grid));
+    lv_dropdown_set_selected(ui->panel_source_dd, 0);
+    rebuild_device_cards(ui);
+    node_snapshot[0].online = false;
+    rebuild_device_cards(ui);
+    assert(!ui->node_cards[0].card);
+    node_count = 0;
+#endif
+    puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
+}
+
 int main(void)
 {
     lv_init();
@@ -251,6 +410,7 @@ int main(void)
     assert(!miloco_sync_room_options(&ui));
     puts("PASS: real-room catalog, deduplication, filtering, reorder and removal");
     test_feedback(&ui, screen);
+    test_incremental(&ui, screen);
     test_home(&ui);
     lv_obj_delete(screen);
     return 0;

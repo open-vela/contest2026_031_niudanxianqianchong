@@ -21,11 +21,17 @@
 #include <lvgl/lvgl.h>
 #include <pthread.h>
 #include <stdint.h>
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+#include "../../addons/smart_home_node_gateway.h"
+#endif
 
 #include "../../agent/smart_home_agent.h"
 #include "../../camera/smart_home_camera_service.h"
 #include "../../device/smart_home_device.h"
 #include "smart_home_lvgl_style.h"
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#include "../../miloco/smart_home_miloco.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +48,30 @@ typedef struct {
     char name[64];
     int state; /* -2 unconfirmed, -1 running, 0 failed, 1 result returned */
 } smart_home_lvgl_trace_tool_t;
+
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+typedef struct {
+    char did[24];
+    lv_obj_t *card;
+    lv_obj_t *name;
+    lv_obj_t *room;
+    lv_obj_t *status;
+    lv_obj_t *power;
+    int category;
+    int controllable;
+    int pending;
+    uint32_t submitted_at;
+} smart_home_lvgl_miloco_card_t;
+#endif
+
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+typedef struct {
+    char id[CAGENT_ADDONS_NODE_ID_SIZE + 1];
+    lv_obj_t *card;
+    lv_obj_t *name;
+    lv_obj_t *commands;
+} smart_home_lvgl_node_card_t;
+#endif
 
 typedef struct {
     /* Screens */
@@ -81,6 +111,9 @@ typedef struct {
     lv_obj_t *panel_add_btn;
     lv_timer_t *remote_node_timer;
     uint32_t remote_node_revision;
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    smart_home_lvgl_node_card_t node_cards[CAGENT_ADDONS_MAX_NODES];
+#endif
 
     /* Panel: card widgets (indexed by device slot) */
     lv_obj_t *device_cards[SMART_HOME_MAX_DEVICES];
@@ -232,7 +265,11 @@ typedef struct {
     lv_obj_t *screensaver_weather_label;
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     lv_timer_t *miloco_timer;
-    uint32_t miloco_revision;
+    uint32_t miloco_revision; /* Last snapshot rendered on the device page. */
+    uint32_t miloco_polled_revision;
+    smart_home_lvgl_miloco_card_t miloco_cards[SMART_HOME_MILOCO_MAX_DEVICES];
+    lv_obj_t *miloco_placeholder;
+    void *miloco_sheet_context;
     lv_obj_t *settings_weather_city_input;
     lv_obj_t *miloco_sheet;
     lv_obj_t *miloco_sheet_feedback;

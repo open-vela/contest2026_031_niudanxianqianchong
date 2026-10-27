@@ -14,6 +14,7 @@ add_compile_definitions(LV_KCONFIG_IGNORE)
 add_subdirectory("${OPENVELA_ROOT}/apps/graphics/lvgl/lvgl" lvgl)
 file(GLOB ICONS "${UI}/icons/generated/*.c")
 add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
+  "${REPO}/demos/smart_home/src/device/smart_home_device.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_screensaver.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
 target_compile_definitions(panel_check PRIVATE _GNU_SOURCE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1
@@ -30,3 +31,9 @@ target_link_options(panel_check PRIVATE -Wl,--gc-sections)
 target_link_libraries(panel_check PRIVATE lvgl m pthread)
 enable_testing()
 add_test(NAME panel_check COMMAND panel_check)
+
+option(SMART_HOME_TEST_NODE_GATEWAY "Also test optional Node cards" OFF)
+if(SMART_HOME_TEST_NODE_GATEWAY)
+  target_compile_definitions(panel_check PRIVATE CONFIG_SMART_HOME_NODE_GATEWAY=1)
+  target_include_directories(panel_check PRIVATE "${REPO}/packages/cagent_addons/include")
+endif()
