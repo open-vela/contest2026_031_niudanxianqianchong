@@ -280,6 +280,13 @@ static int device_matches_filter(smart_home_lvgl_t *ui,
 }
 #endif
 
+static const char *device_ac_mode_text(int mode)
+{
+    static const char *const modes[] = {"制冷", "制热", "除湿", "送风", "自动"};
+    return mode >= 0 && mode < (int)(sizeof(modes) / sizeof(modes[0])) ?
+        modes[mode] : "未知模式";
+}
+
 #ifndef CONFIG_SMART_HOME_MILOCO_BRIDGE
 static void format_device_card_text(const smart_home_device_t *device,
                                     char *buffer,
@@ -295,7 +302,7 @@ static void format_device_card_text(const smart_home_device_t *device,
                      buffer_size,
                      "%s · %d°C · %s",
                      device_room_name(device->room), device->temperature,
-                     smart_home_ac_mode_name(device->ac_mode));
+                     device_ac_mode_text(device->ac_mode));
         } else {
             snprintf(buffer, buffer_size, "%s · 已关闭",
                      device_room_name(device->room));
@@ -615,7 +622,7 @@ static void env_slider_cb(lv_event_t *event)
     ui->env_pending_value = value;
 
     if (ui->env_pending_type == ENV_TEMP) {
-        snprintf(text, sizeof(text), "%d C", value);
+        snprintf(text, sizeof(text), "%d°C", value);
     } else if (ui->env_pending_type == ENV_HUM) {
         snprintf(text, sizeof(text), "%d%%", value);
     } else {
@@ -1044,7 +1051,7 @@ static void refresh_sensor_bar(smart_home_lvgl_t *ui)
             snprintf(text,
                      sizeof(text),
                      "空调 %s %d°C",
-                     ac->on ? smart_home_ac_mode_name(ac->ac_mode) : "已关闭",
+                     ac->on ? device_ac_mode_text(ac->ac_mode) : "已关闭",
                      ac->temperature);
         } else {
             snprintf(text, sizeof(text), "暂无空调");
@@ -1289,7 +1296,7 @@ static void env_click_cb(lv_event_t *event)
     smart_home_state_t *state;
     int min = 0;
     int max = 100;
-    const char *title = "Environment";
+    const char *title = "环境";
 
     if (!ui || !ui->device_state) {
         return;
@@ -1298,15 +1305,15 @@ static void env_click_cb(lv_event_t *event)
     state = ui->device_state;
     ui->env_pending_type = type;
     if (type == ENV_TEMP) {
-        title = "Temperature";
+        title = "温度";
         max = 45;
         ui->env_pending_value = state->env_temperature;
     } else if (type == ENV_HUM) {
-        title = "Humidity";
+        title = "湿度";
         max = 100;
         ui->env_pending_value = state->env_humidity;
     } else {
-        title = "Ambient Light";
+        title = "光照";
         max = 1000;
         ui->env_pending_value = state->env_light;
     }
@@ -1349,7 +1356,7 @@ static void env_click_cb(lv_event_t *event)
                             ui);
 
         btn = create_action_button(popup,
-                                   "Cancel",
+                                   "取消",
                                    SMART_HOME_UI_COLOR_BTN_SECONDARY,
                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY);
         lv_obj_align(btn,
@@ -1359,7 +1366,7 @@ static void env_click_cb(lv_event_t *event)
         lv_obj_add_event_cb(btn, env_cancel_cb, LV_EVENT_CLICKED, ui);
 
         btn = create_action_button(popup,
-                                   "Apply",
+                                   "应用",
                                    SMART_HOME_UI_COLOR_PRIMARY,
                                    lv_color_white());
         lv_obj_align(btn,
@@ -1568,10 +1575,10 @@ static void format_remote_command_text(const caddons_node_info_t *node,
         return;
     }
 
-    snprintf(buffer, buffer_size, "Commands: ");
+    snprintf(buffer, buffer_size, "支持操作：");
     used = strlen(buffer);
     if (!node || node->command_count == 0u) {
-        snprintf(buffer, buffer_size, "Commands: none");
+        snprintf(buffer, buffer_size, "暂无可用操作");
         return;
     }
 
@@ -1594,8 +1601,8 @@ static void format_remote_command_text(const caddons_node_info_t *node,
         separator = ", ";
     }
 
-    if (used == strlen("Commands: ")) {
-        snprintf(buffer, buffer_size, "Commands: none");
+    if (used == strlen("支持操作：")) {
+        snprintf(buffer, buffer_size, "暂无可用操作");
     }
 }
 
@@ -1655,10 +1662,10 @@ static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 
-    label = smart_home_lvgl_label_create(content, "Online",
+    label = smart_home_lvgl_label_create(content, "在线",
                                          SMART_HOME_UI_COLOR_SUCCESS,
                                          font_size);
-    label = smart_home_lvgl_label_create(content, "Source: Node",
+    label = smart_home_lvgl_label_create(content, "来源：节点设备",
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                          font_size);
     format_remote_command_text(node, commands, sizeof(commands));
@@ -2292,7 +2299,7 @@ static lv_obj_t *create_miloco_card(smart_home_lvgl_t *ui,
                                          font_size);
     binding->room = label;
     label = smart_home_lvgl_label_create(
-        content, device->online ? "Online" : "Offline",
+        content, device->online ? "在线" : "离线",
         device->online ? SMART_HOME_UI_COLOR_SUCCESS :
                          SMART_HOME_UI_COLOR_TEXT_MUTED,
         font_size);
@@ -2633,7 +2640,7 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
 
     /* 来源筛选：全部/米家/Node，与房间筛选互补。 */
     ui->panel_source_dd = lv_dropdown_create(screen);
-    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\nNode");
+    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\n节点");
     lv_obj_set_style_text_font(ui->panel_source_dd, smart_home_lvgl_font(13), 0);
     lv_obj_t *source_list = lv_dropdown_get_list(ui->panel_source_dd);
     if (source_list) {

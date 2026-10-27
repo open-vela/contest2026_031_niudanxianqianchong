@@ -813,7 +813,7 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     card = home_card(screen, x + weather_w + gap, y + top_h + gap, scene_w,
                      bottom_h, SMART_HOME_UI_COLOR_SURFACE);
     home_icon_badge(card, ICON_NAV_CHAT, lv_color_hex(0xF2F0FF), 54);
-    home_feature_text(card, "Hi，OpenVela", "问问家庭状态",
+    home_feature_text(card, "智能管家", "问问家庭状态",
                       SMART_HOME_UI_COLOR_TEXT_PRIMARY);
     home_make_clickable(card, ui, HOME_ACTION_AGENT);
 

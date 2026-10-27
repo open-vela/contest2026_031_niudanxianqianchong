@@ -462,13 +462,13 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
     page_icon_badge(card, ICON_SETTING_AI, lv_color_hex(0xF1F4FF));
-    page_title(card, "模型服务", "LLM 后端与密钥");
+    page_title(card, "模型服务", "模型后端与密钥");
     page_action(card, ui, PAGE_ACTION_MODEL);
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
     page_icon_badge(card, ICON_TOOL, lv_color_hex(0xFFF6EA));
-    page_title(card, "工具与权限", "Agent 工具目录");
+    page_title(card, "工具与权限", "智能管家工具目录");
     page_action(card, ui, PAGE_ACTION_TOOLS);
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
@@ -1063,7 +1063,7 @@ void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui)
         card, ui, "端口（默认 1810）",
         port_text, sizeof(port_text) - 1u, 0, 138);
     ui->miloco_token_input = miloco_input_create(
-        card, ui, "服务 Token（未启用鉴权可留空）",
+        card, ui, "访问令牌（未启用鉴权可留空）",
         token, sizeof(token) - 1u, 1, 188);
 
     /* 按钮放卡片头部右侧：键盘弹出时覆盖卡片下半区（约 y>232），
