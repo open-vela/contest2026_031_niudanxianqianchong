@@ -15,6 +15,7 @@ add_subdirectory("${OPENVELA_ROOT}/apps/graphics/lvgl/lvgl" lvgl)
 file(GLOB ICONS "${UI}/icons/generated/*.c")
 add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${REPO}/demos/smart_home/src/device/smart_home_device.c"
+  "${UI}/smart_home_lvgl_nav.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_screensaver.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
 target_compile_definitions(panel_check PRIVATE _GNU_SOURCE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1

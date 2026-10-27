@@ -137,6 +137,7 @@ static void open_scene_mode_popup(smart_home_lvgl_t *ui)
         lv_obj_set_style_pad_all(button, 10, 0);
         lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
+        smart_home_lvgl_press_feedback(button);
         lv_obj_add_event_cb(button, scene_mode_click_cb, LV_EVENT_CLICKED, ui);
 
         badge = lv_obj_create(button);
@@ -519,6 +520,7 @@ static void home_make_clickable(lv_obj_t *card, smart_home_lvgl_t *ui,
 {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(card, (void *)(intptr_t)action);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, home_action_cb, LV_EVENT_CLICKED, ui);
 }
 

@@ -503,6 +503,7 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_flag(body, LV_OBJ_FLAG_HIDDEN);
 
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header, trace_header_event_cb, LV_EVENT_CLICKED, body);
 
     ui->chat_trace_row = row;
@@ -816,6 +817,7 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     lv_obj_set_size(ui->chat_mic_btn, 48, SMART_HOME_CHAT_INPUT_H);
     lv_obj_set_style_radius(ui->chat_mic_btn, 8, 0);
     smart_home_lvgl_set_bg(ui->chat_mic_btn, SMART_HOME_UI_COLOR_PRIMARY);
+    smart_home_lvgl_press_feedback(ui->chat_mic_btn);
     lv_obj_add_event_cb(ui->chat_mic_btn,
                         chat_mic_event_cb,
                         LV_EVENT_CLICKED,
@@ -832,10 +834,8 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     lv_obj_set_size(ui->chat_send_btn, 62, SMART_HOME_CHAT_INPUT_H);
     lv_obj_set_style_radius(ui->chat_send_btn, 8, 0);
     smart_home_lvgl_set_bg(ui->chat_send_btn, SMART_HOME_UI_COLOR_PRIMARY);
-    lv_obj_set_style_bg_color(ui->chat_send_btn,
-                               SMART_HOME_UI_COLOR_PRIMARY_DARK,
-                               LV_STATE_PRESSED);
     lv_obj_set_style_opa(ui->chat_send_btn, LV_OPA_50, LV_STATE_DISABLED);
+    smart_home_lvgl_press_feedback(ui->chat_send_btn);
     lv_obj_add_event_cb(ui->chat_send_btn,
                         chat_send_event_cb,
                         LV_EVENT_CLICKED,

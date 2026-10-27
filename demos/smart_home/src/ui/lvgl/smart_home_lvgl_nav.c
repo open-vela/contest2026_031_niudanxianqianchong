@@ -124,6 +124,16 @@ static void nav_btn_click(lv_event_t *event)
     }
 }
 
+/* 图标容器也可接收点击，将按压视觉同步到整个导航触区。 */
+static void nav_content_press_cb(lv_event_t *event)
+{
+    lv_obj_t *button = lv_event_get_user_data(event);
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) lv_obj_add_state(button, LV_STATE_PRESSED);
+    else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
+        lv_obj_remove_state(button, LV_STATE_PRESSED);
+}
+
 lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
                                         smart_home_lvgl_t *ui)
 {
@@ -172,6 +182,9 @@ lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
         lv_obj_set_size(button, button_w, SMART_HOME_NAV_H - 8);
         lv_obj_set_style_radius(button, 16, 0);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
         lv_obj_add_event_cb(button, nav_btn_click, LV_EVENT_CLICKED, ui);
         if (i == active) smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
         else lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
@@ -182,6 +195,9 @@ lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
          * input paths. Give it the same handler as its button so tapping
          * the Chat glyph or label always changes screen. */
         lv_obj_add_flag(button_content, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_PRESSED, button);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_RELEASED, button);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_PRESS_LOST, button);
         lv_obj_set_user_data(button_content, (void *)(intptr_t)i);
         lv_obj_add_event_cb(button_content, nav_btn_click, LV_EVENT_CLICKED, ui);
         lv_obj_center(button_content);

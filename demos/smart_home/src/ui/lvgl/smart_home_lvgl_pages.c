@@ -286,6 +286,7 @@ static void page_action(lv_obj_t *card, smart_home_lvgl_t *ui,
 {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(card, (void *)(intptr_t)action);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, page_click_cb, LV_EVENT_CLICKED, ui);
 }
 
@@ -324,6 +325,7 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     /* 摄像头开关置于右上角（原'已布防'徽标位置）：安防页最高频的
      * 操作应一步可达；布防状态不再是本页主叙事。 */
     ui->security_camera_switch = lv_switch_create(screen);
+    smart_home_lvgl_press_feedback(ui->security_camera_switch);
     lv_obj_set_size(ui->security_camera_switch, 46, 26);
     lv_obj_align(ui->security_camera_switch, LV_ALIGN_TOP_RIGHT, -x,
                  SMART_HOME_TOPBAR_H + 32);
@@ -389,6 +391,7 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     lv_obj_align(ui->security_camera_metrics, LV_ALIGN_LEFT_MID, 12, 10);
     button = page_outline_button(footer, "进入监控", 92);
     lv_obj_align(button, LV_ALIGN_RIGHT_MID, -8, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, security_camera_button_cb,
                         LV_EVENT_CLICKED, ui);
     ui->security_camera_timer = lv_timer_create(security_camera_timer_cb,
@@ -802,6 +805,7 @@ void smart_home_lvgl_build_network_screen(smart_home_lvgl_t *ui)
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
     lv_obj_set_style_text_color(lv_obj_get_child(button, 0), lv_color_white(), 0);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, network_connect_cb, LV_EVENT_CLICKED, ui);
 
     ui->network_keyboard = lv_keyboard_create(screen);
@@ -1072,10 +1076,12 @@ void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui)
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
     lv_obj_set_style_text_color(lv_obj_get_child(button, 0), lv_color_white(), 0);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, miloco_save_cb, LV_EVENT_CLICKED, ui);
 
     button = page_outline_button(card, "扫码绑定", 108);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -144, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, miloco_bind_entry_cb, LV_EVENT_CLICKED, ui);
 
     ui->miloco_keyboard = lv_keyboard_create(screen);

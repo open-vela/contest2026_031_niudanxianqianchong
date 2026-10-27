@@ -633,6 +633,7 @@ static void create_local_tool_switch(lv_obj_t *parent,
     context->ui = ui;
     memcpy(context->name, tool->name, name_length + 1u);
     sw = lv_switch_create(parent);
+    smart_home_lvgl_press_feedback(sw);
     lv_obj_set_size(sw, 44, 24);
     if (smart_home_agent_app_local_tool_access_allowed(ui->app,
                                                         tool->name,
@@ -827,6 +828,7 @@ static void create_weather_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     label = smart_home_lvgl_label_create(button, "切换城市",
                                          lv_color_white(), 12);
     lv_obj_center(label);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, weather_city_save_cb, LV_EVENT_CLICKED, ui);
 }
 #endif
@@ -862,6 +864,7 @@ static void create_tool_directory_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         tool_directory_toggle_event,
                         LV_EVENT_CLICKED,
@@ -1357,6 +1360,7 @@ static void create_system_status_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         system_status_toggle_event,
                         LV_EVENT_CLICKED,
@@ -1611,6 +1615,7 @@ static void create_voice_announce_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         voice_announce_toggle_event,
                         LV_EVENT_CLICKED,
@@ -1661,6 +1666,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_voice_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_voice_switch);
         lv_obj_set_size(ui->settings_voice_switch, 44, 24);
         smart_home_tts_config_load(&config);
         if (config.enabled) {
@@ -1701,6 +1707,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_size(button, 112, 32);
         lv_obj_set_style_radius(button, 6, 0);
         smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
+        smart_home_lvgl_press_feedback(button);
         lv_obj_add_event_cb(button,
                             voice_announce_stop_event,
                             LV_EVENT_CLICKED,
@@ -1740,6 +1747,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_asr_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_asr_switch);
         lv_obj_set_size(ui->settings_asr_switch, 44, 24);
         smart_home_asr_config_load(&config);
         if (config.enabled) {
@@ -1780,6 +1788,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_kws_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_kws_switch);
         lv_obj_set_size(ui->settings_kws_switch, 44, 24);
         smart_home_kws_config_load(&config);
         if (config.enabled) {
@@ -1842,6 +1851,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
                               LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(header, 6, 0);
         lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+        smart_home_lvgl_press_feedback(header);
         lv_obj_add_event_cb(header,
                             model_api_toggle_event,
                             LV_EVENT_CLICKED,
@@ -1908,6 +1918,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
         lv_obj_set_width(field_label, lv_pct(100));
 
         ui->settings_backend_dd = lv_dropdown_create(wrap);
+        smart_home_lvgl_press_feedback(ui->settings_backend_dd);
         lv_dropdown_set_options(ui->settings_backend_dd,
                                 backend_options[0] ? backend_options : "自定义");
         lv_dropdown_set_selected(ui->settings_backend_dd,
@@ -1977,6 +1988,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     lv_obj_set_size(button, 96, 34);
     lv_obj_set_style_radius(button, 8, 0);
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, apply_settings_event, LV_EVENT_CLICKED, ui);
     label = smart_home_lvgl_label_create(button, "应用", lv_color_white(), 12);
     lv_obj_center(label);
@@ -2055,6 +2067,7 @@ static void create_mcp_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     lv_obj_set_size(s_mcp_discover_button, 112, 32);
     lv_obj_set_style_radius(s_mcp_discover_button, 6, 0);
     smart_home_lvgl_set_bg(s_mcp_discover_button, SMART_HOME_UI_COLOR_PRIMARY);
+    smart_home_lvgl_press_feedback(s_mcp_discover_button);
     lv_obj_add_event_cb(s_mcp_discover_button,
                         mcp_discover_event,
                         LV_EVENT_CLICKED,

@@ -275,6 +275,17 @@ void smart_home_lvgl_set_bg(lv_obj_t *obj, lv_color_t color)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
+/* 复用当前渲染器的着色能力，不缩放控件，也不增加过渡动画。 */
+void smart_home_lvgl_press_feedback(lv_obj_t *obj)
+{
+    if (!obj) return;
+    lv_obj_set_style_recolor(obj, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(obj, LV_OPA_20, LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(obj, LV_OPA_TRANSP,
+        LV_STATE_DISABLED | LV_STATE_PRESSED);
+    lv_obj_set_style_opa(obj, LV_OPA_50, LV_STATE_DISABLED);
+}
+
 void smart_home_lvgl_card_style(lv_obj_t *obj)
 {
     smart_home_lvgl_set_bg(obj, SMART_HOME_UI_COLOR_SURFACE);

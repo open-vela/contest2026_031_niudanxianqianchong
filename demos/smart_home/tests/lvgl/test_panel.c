@@ -78,13 +78,92 @@ bool smart_home_miloco_get_weather(const smart_home_miloco_t *service,
 { (void)service; *out = weather; return weather.valid; }
 bool smart_home_miloco_bound(const smart_home_miloco_t *service)
 { (void)service; return true; }
-lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen, smart_home_lvgl_t *ui)
-{ (void)screen; (void)ui; return NULL; }
-void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
-{ ui->active_tab = tab; }
+void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui) { (void)ui; }
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
 void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
 { (void)ui; (void)text; }
+
+static lv_point_t pointer_point;
+static lv_indev_state_t pointer_state;
+static void read_pointer(lv_indev_t *input, lv_indev_data_t *data)
+{ (void)input; data->point = pointer_point; data->state = pointer_state; }
+static void touch(lv_indev_t *input, lv_obj_t *target, lv_indev_state_t state)
+{
+    lv_area_t bounds;
+    lv_obj_get_coords(target, &bounds);
+    pointer_point.x = (bounds.x1 + bounds.x2) / 2;
+    pointer_point.y = (bounds.y1 + bounds.y2) / 2;
+    pointer_state = state;
+    lv_tick_inc(40);
+    lv_indev_read(input);
+}
+
+static void test_press(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *probe = lv_button_create(ui->screen_home);
+    lv_obj_remove_style_all(probe);
+    smart_home_lvgl_set_bg(probe, SMART_HOME_UI_COLOR_SURFACE);
+    smart_home_lvgl_press_feedback(probe);
+    lv_obj_add_state(probe, LV_STATE_PRESSED);
+    assert(lv_obj_get_style_recolor_opa(probe, 0) == LV_OPA_20);
+    smart_home_lvgl_set_bg(probe, SMART_HOME_UI_COLOR_PRIMARY);
+    lv_obj_remove_state(probe, LV_STATE_PRESSED);
+    assert(lv_color_eq(lv_obj_get_style_bg_color(probe, 0),
+                       SMART_HOME_UI_COLOR_PRIMARY));
+    lv_obj_add_state(probe, LV_STATE_DISABLED | LV_STATE_PRESSED);
+    assert(lv_obj_get_style_recolor_opa(probe, 0) == LV_OPA_TRANSP);
+    assert(lv_obj_get_style_opa(probe, 0) == LV_OPA_50);
+    lv_obj_delete(probe);
+
+    ui->screen_chat = lv_obj_create(NULL);
+    ui->active_tab = SMART_HOME_TAB_HOME;
+    lv_screen_load(ui->screen_home);
+    lv_obj_update_layout(ui->screen_home);
+    lv_obj_t *bar = lv_obj_get_child(ui->screen_home, -1);
+    lv_obj_t *nav = lv_obj_get_child(bar, 0);
+    lv_obj_t *button = lv_obj_get_child(nav, SMART_HOME_TAB_CHAT);
+    lv_obj_t *icon_content = lv_obj_get_child(button, 0);
+    lv_indev_t *input = lv_indev_create();
+    lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(input, read_pointer);
+    int before = submissions;
+    touch(input, icon_content, LV_INDEV_STATE_PRESSED);
+    assert(lv_obj_has_state(button, LV_STATE_PRESSED));
+    assert(lv_obj_get_style_bg_opa(button, 0) == LV_OPA_COVER);
+    assert(ui->active_tab == SMART_HOME_TAB_HOME && submissions == before);
+    touch(input, icon_content, LV_INDEV_STATE_RELEASED);
+    assert(!lv_obj_has_state(button, LV_STATE_PRESSED));
+    assert(ui->active_tab == SMART_HOME_TAB_CHAT);
+    assert(lv_screen_active() == ui->screen_chat && submissions == before);
+
+    lv_screen_load(ui->screen_home);
+    ui->active_tab = SMART_HOME_TAB_HOME;
+    lv_obj_t *scene = lv_obj_get_child(ui->screen_home, 2);
+    lv_refr_now(NULL);
+    lv_area_t bounds;
+    lv_obj_get_coords(scene, &bounds);
+    size_t sample = (bounds.y1 + 90) * 1024 + bounds.x1 + 30;
+    uint16_t normal = pixels[sample];
+    touch(input, scene, LV_INDEV_STATE_PRESSED);
+    lv_refr_now(NULL);
+    assert(lv_obj_has_state(scene, LV_STATE_PRESSED));
+    assert(pixels[sample] != normal && submissions == before);
+    touch(input, scene, LV_INDEV_STATE_RELEASED);
+    assert(!lv_obj_has_state(scene, LV_STATE_PRESSED));
+    assert(ui->scene_popup && !lv_obj_has_flag(ui->scene_popup, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_add_flag(ui->scene_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_refr_now(NULL);
+    assert(pixels[sample] == normal && submissions == before);
+    /* Gesture cancellation restores the navigation parent as well. */
+    lv_obj_send_event(icon_content, LV_EVENT_PRESSED, NULL);
+    assert(lv_obj_has_state(button, LV_STATE_PRESSED));
+    lv_obj_send_event(icon_content, LV_EVENT_PRESS_LOST, NULL);
+    assert(!lv_obj_has_state(button, LV_STATE_PRESSED));
+    lv_indev_delete(input);
+    lv_obj_delete(ui->screen_chat);
+    ui->screen_chat = NULL;
+    puts("PASS: pointer press/release, RGB565 feedback, nav hit target/cancel, disabled and selected states");
+}
 
 static void test_home(smart_home_lvgl_t *ui)
 {
@@ -136,6 +215,7 @@ static void test_home(smart_home_lvgl_t *ui)
     lv_obj_get_coords(title, &title_area);
     lv_obj_get_coords(ui->home_status_label, &value_area);
     assert(title_area.y2 < value_area.y1);
+    test_press(ui);
     capture_home(ui);
     lv_timer_delete(ui->home_time_timer);
     ui->home_time_timer = NULL;
