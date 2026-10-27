@@ -121,6 +121,7 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui);
 void smart_home_lvgl_set_camera_indicator(smart_home_lvgl_t *ui, int on);
 /* 统一时钟刷新：顶栏 + 首页卡 + 屏保（各定时器调用）。 */
 void smart_home_lvgl_update_clock(smart_home_lvgl_t *ui);
+void smart_home_lvgl_update_clock_at(smart_home_lvgl_t *ui, time_t utc);
 void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab);
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title);

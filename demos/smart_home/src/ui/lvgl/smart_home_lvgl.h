@@ -220,17 +220,19 @@ typedef struct {
     int topbar_camera_icon_count;
     int topbar_camera_on;
     lv_timer_t *network_status_timer;
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    lv_timer_t *miloco_timer;
-    uint32_t miloco_revision;
     lv_obj_t *home_miloco_sub_label;
     lv_obj_t *home_weather_temp_label;
-    lv_obj_t *home_weather_cond_label;
+    lv_obj_t *home_weather_city_label;
     lv_obj_t *home_weather_badge;
     lv_obj_t *home_date_label;
     lv_obj_t *home_time_label;
     lv_timer_t *home_time_timer;
     lv_obj_t *screensaver_time_label;
+    lv_obj_t *screensaver_date_label;
+    lv_obj_t *screensaver_weather_label;
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    lv_timer_t *miloco_timer;
+    uint32_t miloco_revision;
     lv_obj_t *settings_weather_city_input;
     lv_obj_t *miloco_sheet;
     lv_obj_t *miloco_sheet_feedback;

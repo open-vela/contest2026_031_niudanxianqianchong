@@ -14,8 +14,9 @@ add_compile_definitions(LV_KCONFIG_IGNORE)
 add_subdirectory("${OPENVELA_ROOT}/apps/graphics/lvgl/lvgl" lvgl)
 file(GLOB ICONS "${UI}/icons/generated/*.c")
 add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
+  "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_screensaver.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
-target_compile_definitions(panel_check PRIVATE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1
+target_compile_definitions(panel_check PRIVATE _GNU_SOURCE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1
   CONFIG_SMART_HOME_DEMO_DATA_ROOT="${REPO}/demos/smart_home"
   CONFIG_LV_USE_TINY_TTF=1 CONFIG_LV_FONT_MONTSERRAT_12=1
   CONFIG_LV_FONT_MONTSERRAT_14=1 CONFIG_LV_FONT_MONTSERRAT_16=1)

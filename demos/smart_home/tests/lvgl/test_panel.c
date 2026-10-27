@@ -3,6 +3,27 @@
 #include <assert.h>
 #include <stdlib.h>
 
+static uint16_t pixels[1024 * 600];
+static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
+{ (void)area; (void)data; lv_display_flush_ready(display); }
+static void capture_home(smart_home_lvgl_t *ui)
+{
+    const char *path = getenv("SMART_HOME_LVGL_CAPTURE");
+    if (!path) return;
+    lv_screen_load(ui->screen_home);
+    lv_refr_now(NULL);
+    FILE *file = fopen(path, "wb");
+    assert(file);
+    fprintf(file, "P6\n1024 600\n255\n");
+    for (size_t i = 0; i < sizeof(pixels) / sizeof(pixels[0]); i++) {
+        unsigned p = pixels[i];
+        uint8_t rgb[] = {((p >> 11) & 31) * 255 / 31,
+                         ((p >> 5) & 63) * 255 / 63, (p & 31) * 255 / 31};
+        fwrite(rgb, 1, 3, file);
+    }
+    fclose(file);
+}
+
 static smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
 static size_t snapshot_count;
 size_t smart_home_miloco_list(const smart_home_miloco_t *service,
@@ -32,6 +53,78 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
     (void)service; (void)did; (void)iid; (void)operation; (void)value;
     submissions++;
     return submit_result;
+}
+
+static smart_home_miloco_weather_t weather;
+bool smart_home_miloco_get_weather(const smart_home_miloco_t *service,
+                                   smart_home_miloco_weather_t *out)
+{ (void)service; *out = weather; return weather.valid; }
+bool smart_home_miloco_bound(const smart_home_miloco_t *service)
+{ (void)service; return true; }
+lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen, smart_home_lvgl_t *ui)
+{ (void)screen; (void)ui; return NULL; }
+void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
+{ ui->active_tab = tab; }
+void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
+void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
+{ (void)ui; (void)text; }
+
+static void test_home(smart_home_lvgl_t *ui)
+{
+    snapshot_count = 2;
+    snapshot[0].online = true;
+    snapshot[1].online = false;
+    ui->device_state = &ui->app->device_state;
+    smart_home_lvgl_build_home_screen(ui);
+    smart_home_lvgl_build_screensaver_screen(ui);
+    assert(!strcmp(lv_label_get_text(ui->home_status_label),
+                   "在线 1 / 共 2 台\n米家设备状态"));
+    assert(!strcmp(lv_label_get_text(ui->home_env_label), "天气数据暂不可用"));
+    assert(!strcmp(lv_label_get_text(ui->home_weather_temp_label), "--°"));
+    weather.valid = true;
+    strcpy(weather.city, "Beijing");
+    strcpy(weather.condition_cn, "小雨");
+    weather.temperature = 18;
+    weather.humidity = 72;
+    smart_home_lvgl_refresh_home(ui);
+    assert(!strcmp(lv_label_get_text(ui->home_weather_city_label), "Beijing"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "小雨 · 18°C"));
+    weather.valid = false;
+    smart_home_lvgl_refresh_home(ui);
+    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "天气数据暂不可用"));
+    gateway_online = false;
+    smart_home_lvgl_refresh_home(ui);
+    assert(strstr(lv_label_get_text(ui->home_status_label), "未知"));
+    gateway_online = true;
+    smart_home_lvgl_refresh_home(ui);
+
+    smart_home_lvgl_update_clock_at(ui, 1574985600); /* board's 2019 boot date */
+    assert(!strcmp(lv_label_get_text(ui->home_time_label), "--:--"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_date_label), "时间待同步"));
+    struct tm moment = {.tm_year = 126, .tm_mon = 9, .tm_mday = 26,
+                        .tm_hour = 15, .tm_min = 59};
+    time_t utc = timegm(&moment);
+    smart_home_lvgl_update_clock_at(ui, utc);
+    assert(!strcmp(lv_label_get_text(ui->home_time_label), "23:59"));
+    assert(strstr(lv_label_get_text(ui->screensaver_date_label), "10月26日"));
+    smart_home_lvgl_update_clock_at(ui, utc + 60);
+    assert(!strcmp(lv_label_get_text(ui->screensaver_time_label), "00:00"));
+    assert(strstr(lv_label_get_text(ui->screensaver_date_label), "10月27日"));
+    assert(!strcmp(lv_label_get_text(ui->home_date_label),
+                   lv_label_get_text(ui->screensaver_date_label)));
+    lv_obj_update_layout(ui->screen_home);
+    lv_obj_t *card = lv_obj_get_parent(ui->home_status_label);
+    lv_obj_t *title = lv_obj_get_child(card, 1);
+    lv_area_t title_area, value_area;
+    lv_obj_get_coords(title, &title_area);
+    lv_obj_get_coords(ui->home_status_label, &value_area);
+    assert(title_area.y2 < value_area.y1);
+    capture_home(ui);
+    lv_timer_delete(ui->home_time_timer);
+    ui->home_time_timer = NULL;
+    lv_obj_delete(ui->screen_home);
+    lv_obj_delete(ui->screen_screensaver);
+    puts("PASS: cached weather/city, truthful counts, unknown status, midnight date, separated layout");
 }
 
 static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
@@ -118,7 +211,11 @@ static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
 int main(void)
 {
     lv_init();
-    lv_display_create(1024, 600);
+    lv_display_t *display = lv_display_create(1024, 600);
+    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_buffers(display, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_flush_cb(display, flush);
+    assert(smart_home_lvgl_style_init() == 0);
     smart_home_agent_app_t app = {0};
     smart_home_lvgl_t ui = {0};
     app.miloco = (smart_home_miloco_t *)&snapshot;
@@ -154,6 +251,7 @@ int main(void)
     assert(!miloco_sync_room_options(&ui));
     puts("PASS: real-room catalog, deduplication, filtering, reorder and removal");
     test_feedback(&ui, screen);
+    test_home(&ui);
     lv_obj_delete(screen);
     return 0;
 }

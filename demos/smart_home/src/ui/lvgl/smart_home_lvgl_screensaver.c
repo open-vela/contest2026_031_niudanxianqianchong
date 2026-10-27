@@ -1,13 +1,12 @@
 /**
  * Lightweight native screensaver.
  *
- * It intentionally uses no bitmap background, timer, network request, camera
- * frame or Agent call.  The first touch gesture only changes LVGL screens and
+ * Clock and weather reuse the home timer and cached snapshots. No network
+ * request, camera frame or Agent call is started by this screen.  The first touch gesture only changes LVGL screens and
  * therefore remains safe during early board bring-up.
  */
 
 #include "smart_home_lvgl_internal.h"
-static void screensaver_time_timer_cb(lv_timer_t *timer);
 
 
 static void screensaver_wake_cb(lv_event_t *event)
@@ -44,63 +43,19 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, smart_home_lvgl_pad_x(), 28);
 
     ui->screensaver_time_label = smart_home_lvgl_label_create(
-        screen, "12:00", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
+        screen, "--:--", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_align(ui->screensaver_time_label, LV_ALIGN_CENTER, 0, -26);
-    {
-        struct timespec ts;
-        struct tm tm_now;
-        char buf[24];
-        static const char *const wd[] = {"日","一","二","三","四","五","六"};
+    ui->screensaver_date_label = smart_home_lvgl_label_create(screen,
+        "时间待同步", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
+    lv_obj_align(ui->screensaver_date_label, LV_ALIGN_CENTER, 0, 20);
+    ui->screensaver_weather_label = smart_home_lvgl_label_create(screen,
+        "天气数据暂不可用", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_align(ui->screensaver_weather_label, LV_ALIGN_CENTER, 0, 54);
 
-        clock_gettime(CLOCK_REALTIME, &ts);
-        if (ts.tv_sec > 1000000000L) {
-            /* HTTP Date 为 UTC，加 8 小时偏移显示北京时间。 */
-            ts.tv_sec += 8 * 3600L;
-            gmtime_r(&ts.tv_sec, &tm_now);
-            snprintf(buf, sizeof(buf), "%d 月 %d 日 · 周%s",
-                     tm_now.tm_mon + 1, tm_now.tm_mday, wd[tm_now.tm_wday % 7]);
-            if (ui->screensaver_time_label) {
-                char tb[8];
-                snprintf(tb, sizeof(tb), "%02d:%02d",
-                         tm_now.tm_hour, tm_now.tm_min);
-                lv_label_set_text(ui->screensaver_time_label, tb);
-            }
-        } else {
-            snprintf(buf, sizeof(buf), "时间同步中…");
-        }
-        label = smart_home_lvgl_label_create(screen, buf,
-                                             SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
-    }
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 20);
-    label = smart_home_lvgl_label_create(screen, "晴 · 32°C · 家庭状态正常",
-                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 54);
-
-    label = smart_home_lvgl_label_create(screen, "上滑进入首页",
+    label = smart_home_lvgl_label_create(screen, "轻触进入首页",
                                          SMART_HOME_UI_COLOR_PRIMARY_DARK, 14);
     lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -38);
 
-    /* 30 秒定时器：对时成功后自动从占位切换到真实时间。 */
-    lv_timer_create(screensaver_time_timer_cb, 30000, ui);
-}
-
-static void screensaver_time_timer_cb(lv_timer_t *timer)
-{
-    smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
-    struct timespec ts;
-    struct tm tm_now;
-    char buf[16];
-
-    if (!ui || !ui->screensaver_time_label) {
-        return;
-    }
-
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
-        return;
-    }
-
-    ts.tv_sec += 8 * 3600L;
-    gmtime_r(&ts.tv_sec, &tm_now);
-    snprintf(buf, sizeof(buf), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
-    lv_label_set_text(ui->screensaver_time_label, buf);
+    smart_home_lvgl_update_clock(ui);
+    smart_home_lvgl_refresh_home(ui);
 }
