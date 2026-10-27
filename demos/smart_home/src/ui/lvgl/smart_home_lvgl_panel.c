@@ -148,6 +148,84 @@ static void room_dropdown_options(const smart_home_state_t *state,
     }
 }
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#define MILOCO_ROOM_OPTIONS_SIZE (32 * SMART_HOME_MILOCO_MAX_DEVICES + 32)
+
+static const char *miloco_room_name(const char *room)
+{
+    return room && room[0] ? device_room_name(room) : "未分配房间";
+}
+
+/* 房间来自真实设备快照；同名房间只列一次，不混入本地演示房间。 */
+static void miloco_room_options(smart_home_lvgl_t *ui, char *buffer, size_t size)
+{
+    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    const char *rooms[SMART_HOME_MILOCO_MAX_DEVICES];
+    size_t count = 0, room_count = 0, used;
+
+    snprintf(buffer, size, "全部");
+    used = strlen(buffer);
+    if (ui->app && ui->app->miloco) {
+        count = smart_home_miloco_list(ui->app->miloco, devices,
+                                      SMART_HOME_MILOCO_MAX_DEVICES, NULL);
+    }
+    for (size_t i = 0; i < count; i++) {
+        const char *room = miloco_room_name(devices[i].room);
+        size_t j;
+        for (j = 0; j < room_count; j++) {
+            if (!strcmp(rooms[j], room)) {
+                break;
+            }
+        }
+        if (j != room_count) {
+            continue;
+        }
+        int n = snprintf(buffer + used, size - used, "\n%s", room);
+        if (n < 0 || (size_t)n >= size - used) {
+            break;
+        }
+        used += (size_t)n;
+        rooms[room_count++] = room;
+    }
+}
+
+static int miloco_matches_room(smart_home_lvgl_t *ui, const char *room)
+{
+    char selected[32];
+    if (!ui->panel_room_dd || !lv_dropdown_get_selected(ui->panel_room_dd)) {
+        return 1;
+    }
+    lv_dropdown_get_selected_str(ui->panel_room_dd, selected, sizeof(selected));
+    return !strcmp(selected, miloco_room_name(room));
+}
+
+/* 按房间名称保留选择，避免设备发现顺序变化后筛错房间。 */
+static int miloco_sync_room_options(smart_home_lvgl_t *ui)
+{
+    char options[MILOCO_ROOM_OPTIONS_SIZE];
+    char selected[32];
+    uint32_t index = 0;
+    miloco_room_options(ui, options, sizeof(options));
+    if (!strcmp(options, lv_dropdown_get_options(ui->panel_room_dd))) {
+        return 0;
+    }
+    lv_dropdown_get_selected_str(ui->panel_room_dd, selected, sizeof(selected));
+    lv_dropdown_set_options(ui->panel_room_dd, options);
+    const char *start = options;
+    while (start && *start) {
+        const char *end = strchr(start, '\n');
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        if (strlen(selected) == len && !strncmp(start, selected, len)) {
+            lv_dropdown_set_selected(ui->panel_room_dd, index);
+            break;
+        }
+        start = end ? end + 1 : NULL;
+        index++;
+    }
+    return 1;
+}
+#endif
+
 static const char *device_display_name(const smart_home_device_t *device)
 {
     if (!device || !device->name[0]) {
@@ -835,6 +913,17 @@ static void rebuild_room_filters(smart_home_lvgl_t *ui)
         return;
     }
     lv_obj_clean(ui->panel_filter_row);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    const char *start = lv_dropdown_get_options(ui->panel_room_dd);
+    for (i = 0; start && *start; i++) {
+        const char *end = strchr(start, '\n');
+        char room[32];
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        snprintf(room, sizeof(room), "%.*s", (int)len, start);
+        create_room_chip(ui->panel_filter_row, ui, room, i);
+        start = end ? end + 1 : NULL;
+    }
+#else
     create_room_chip(ui->panel_filter_row, ui, "全部", 0);
     for (i = 0; i < smart_home_room_count(ui->device_state); i++) {
         create_room_chip(ui->panel_filter_row, ui,
@@ -855,6 +944,7 @@ static void rebuild_room_filters(smart_home_lvgl_t *ui)
                                              12);
         lv_obj_center(label);
     }
+#endif
 }
 
 #ifndef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -2018,6 +2108,9 @@ static void append_miloco_cards(smart_home_lvgl_t *ui)
                                    SMART_HOME_MILOCO_MAX_DEVICES,
                                    &ui->miloco_revision);
     for (i = 0; i < count; i++) {
+        if (!miloco_matches_room(ui, devices[i].room)) {
+            continue;
+        }
         create_miloco_card(ui, &devices[i]);
     }
 }
@@ -2066,6 +2159,11 @@ static void rebuild_device_cards(smart_home_lvgl_t *ui)
         return;
     }
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (miloco_sync_room_options(ui)) {
+        rebuild_room_filters(ui);
+    }
+#endif
     lv_obj_clean(ui->panel_grid);
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     /* 抽屉挂在 screen_panel 上，lv_obj_clean(panel_grid) 删不到它；
@@ -2197,7 +2295,11 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
                  sensor_bottom -
                  sensor_h -
                  (compact ? 6 : 12);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    char room_options[MILOCO_ROOM_OPTIONS_SIZE];
+#else
     char room_options[128];
+#endif
 
     if (grid_h < (compact ? 84 : 120)) {
         grid_h = compact ? 84 : 120;
@@ -2220,8 +2322,12 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
                  SMART_HOME_TOPBAR_H + (compact ? 10 : 26));
 
     ui->panel_room_dd = lv_dropdown_create(screen);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    miloco_room_options(ui, room_options, sizeof(room_options));
+#else
     room_dropdown_options(ui->device_state, room_options,
                           sizeof(room_options), 1);
+#endif
     lv_dropdown_set_options(ui->panel_room_dd, room_options);
     /* Keep the existing selection contract as the source of truth while the
      * product page exposes it as touch-friendly room chips below. */
