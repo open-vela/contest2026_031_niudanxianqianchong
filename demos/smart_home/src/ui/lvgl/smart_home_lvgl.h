@@ -77,6 +77,7 @@ typedef struct {
     lv_obj_t *panel_filter_row;
     lv_obj_t *panel_sensor_bar;
     lv_obj_t *panel_title;
+    lv_obj_t *panel_feedback_label;
     lv_obj_t *panel_add_btn;
     lv_timer_t *remote_node_timer;
     uint32_t remote_node_revision;
@@ -232,6 +233,7 @@ typedef struct {
     lv_obj_t *screensaver_time_label;
     lv_obj_t *settings_weather_city_input;
     lv_obj_t *miloco_sheet;
+    lv_obj_t *miloco_sheet_feedback;
     char miloco_sheet_did[24];
     lv_obj_t *screen_miloco_bind;
     lv_obj_t *bind_status_label;

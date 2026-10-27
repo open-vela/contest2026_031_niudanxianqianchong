@@ -12,7 +12,9 @@ set(LV_CONF_BUILD_DISABLE_DEMOS ON CACHE BOOL "" FORCE)
 set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL ON CACHE BOOL "" FORCE)
 add_compile_definitions(LV_KCONFIG_IGNORE)
 add_subdirectory("${OPENVELA_ROOT}/apps/graphics/lvgl/lvgl" lvgl)
-add_executable(panel_check test_panel.c)
+file(GLOB ICONS "${UI}/icons/generated/*.c")
+add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
+  "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
 target_compile_definitions(panel_check PRIVATE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1
   CONFIG_SMART_HOME_DEMO_DATA_ROOT="${REPO}/demos/smart_home"
   CONFIG_LV_USE_TINY_TTF=1 CONFIG_LV_FONT_MONTSERRAT_12=1
