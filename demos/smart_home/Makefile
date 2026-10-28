@@ -177,3 +177,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
 endif
 
 include $(APPDIR)/Application.mk
+
+# Sources already include their relative directories.  --dep-path . makes
+# mkdeps strip them and attach header dependencies to the wrong objects.
+DEPPATH := --obj-path .
