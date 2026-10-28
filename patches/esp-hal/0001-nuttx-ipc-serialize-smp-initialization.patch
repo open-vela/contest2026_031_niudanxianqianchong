@@ -1,0 +1,221 @@
+--- a/nuttx/src/components/esp_system/esp_ipc.c
++++ b/nuttx/src/components/esp_system/esp_ipc.c
+@@ -72,7 +72,9 @@
+ static volatile bool s_no_block_func_and_arg_are_ready[CONFIG_SMP_NCPUS];
+ static void * volatile s_no_block_func_arg[CONFIG_SMP_NCPUS];
+ 
+-static volatile bool s_ipc_initialized = false;
++static bool s_ipc_initialized;
++static mutex_t s_ipc_init_mutex = NXMUTEX_INITIALIZER;
++static int s_ipc_init_error;
+ 
+ /****************************************************************************
+  * Private Functions
+@@ -97,13 +99,15 @@
+     {
+       /* Wait for notification to process IPC call */
+ 
+-      nxsem_wait(&s_ipc_notify[cpuid]);
+-
+-      if (s_no_block_func_and_arg_are_ready[cpuid] && s_no_block_func[cpuid])
++      nxsem_wait_uninterruptible(&s_ipc_notify[cpuid]);
++
++      if (__atomic_load_n(&s_no_block_func_and_arg_are_ready[cpuid],
++                          __ATOMIC_ACQUIRE))
+         {
+           (*s_no_block_func[cpuid])(s_no_block_func_arg[cpuid]);
+-          s_no_block_func_and_arg_are_ready[cpuid] = false;
+-          s_no_block_func[cpuid] = NULL;
++          __atomic_store_n(&s_no_block_func_and_arg_are_ready[cpuid],
++                           false, __ATOMIC_RELAXED);
++          __atomic_store_n(&s_no_block_func[cpuid], NULL, __ATOMIC_RELEASE);
+         }
+ 
+ #if CONFIG_SMP_NCPUS > 1
+@@ -154,6 +158,7 @@
+   char *argv[2];
+   char arg1[32];
+   cpu_set_t cpuset;
++  posix_spawnattr_t attr;
+   char task_name[] = "ipcX";
+ 
+   task_name[3] = cpu + (char)'0';
+@@ -177,10 +182,11 @@
+ 
+   /* Initialize the task */
+ 
+-  ret = nxtask_init(tcb, task_name,
+-                    SCHED_PRIORITY_MAX,
+-                    NULL, IPC_STACK_SIZE,
+-                    ipc_task, argv, environ, NULL);
++  posix_spawnattr_init(&attr);
++  posix_spawnattr_setstacksize(&attr, IPC_STACK_SIZE);
++  posix_spawnattr_setpriority(&attr, SCHED_PRIORITY_MAX);
++  ret = nxtask_init(tcb, task_name, ipc_task, NULL, &attr, argv, environ);
++  posix_spawnattr_destroy(&attr);
+   if (ret < OK)
+     {
+       kmm_free(tcb);
+@@ -225,7 +231,7 @@
+   int cpu;
+   int ret;
+ 
+-  if (s_ipc_initialized)
++  if (__atomic_load_n(&s_ipc_initialized, __ATOMIC_ACQUIRE))
+     {
+       return;
+     }
+@@ -237,13 +243,17 @@
+       return;
+     }
+ 
+-  sched_lock();
+-
+-  /* Double check after acquiring lock */
+-
+-  if (s_ipc_initialized)
+-    {
+-      sched_unlock();
++  ret = nxmutex_lock(&s_ipc_init_mutex);
++  if (ret < 0)
++    {
++      return;
++    }
++
++  /* Other CPUs can enter here concurrently; a scheduler lock is not enough. */
++
++  if (s_ipc_initialized || s_ipc_init_error)
++    {
++      nxmutex_unlock(&s_ipc_init_mutex);
+       return;
+     }
+ 
+@@ -256,13 +266,17 @@
+       nxsem_init(&s_ipc_notify[cpu], 0, 0);
+ 
+       ret = esp_ipc_init_task(cpu);
+-      DEBUGASSERT(ret == OK);
+-      (void)ret;
+-    }
+-
+-  s_ipc_initialized = true;
+-
+-  sched_unlock();
++      if (ret < 0)
++        {
++          s_ipc_init_error = ret;
++          nxmutex_unlock(&s_ipc_init_mutex);
++          return;
++        }
++    }
++
++  __atomic_store_n(&s_ipc_initialized, true, __ATOMIC_RELEASE);
++
++  nxmutex_unlock(&s_ipc_init_mutex);
+ 
+   sinfo("IPC tasks created successfully\n");
+ }
+@@ -276,12 +290,19 @@
+  *
+  ****************************************************************************/
+ 
+-static void esp_ipc_ensure_init(void)
+-{
+-  if (!s_ipc_initialized && OSINIT_OS_READY())
++static bool esp_ipc_ensure_init(void)
++{
++  if (__atomic_load_n(&s_ipc_initialized, __ATOMIC_ACQUIRE))
++    {
++      return true;
++    }
++
++  if (OSINIT_OS_READY() && !up_interrupt_context())
+     {
+       esp_ipc_init();
+     }
++
++  return __atomic_load_n(&s_ipc_initialized, __ATOMIC_ACQUIRE);
+ }
+ 
+ /****************************************************************************
+@@ -296,8 +317,22 @@
+                                        void *arg, esp_ipc_wait_t wait_for)
+ {
+   FAR struct tcb_s *current_task;
+-
+-  esp_ipc_ensure_init();
++  int ret;
++
++  if (func == NULL || cpu_id >= CONFIG_SMP_NCPUS)
++    {
++      return ESP_ERR_INVALID_ARG;
++    }
++
++  if (up_interrupt_context())
++    {
++      return ESP_ERR_INVALID_STATE;
++    }
++
++  if (!esp_ipc_ensure_init())
++    {
++      return ESP_ERR_INVALID_STATE;
++    }
+ 
+   if (cpu_id >= CONFIG_SMP_NCPUS)
+     {
+@@ -326,7 +361,11 @@
+ 
+   /* Take mutex to serialize IPC calls */
+ 
+-  nxmutex_lock(&s_ipc_mutex[cpu_id]);
++  ret = nxmutex_lock(&s_ipc_mutex[cpu_id]);
++  if (ret < 0)
++    {
++      return ESP_FAIL;
++    }
+ 
+   s_func_arg[cpu_id] = arg;
+   s_wait_for[cpu_id] = wait_for;
+@@ -343,7 +382,7 @@
+ 
+   /* Wait for acknowledgement */
+ 
+-  nxsem_wait(&s_ipc_ack[cpu_id]);
++  nxsem_wait_uninterruptible(&s_ipc_ack[cpu_id]);
+ 
+   nxmutex_unlock(&s_ipc_mutex[cpu_id]);
+ 
+@@ -395,9 +434,13 @@
+ esp_err_t esp_ipc_call_nonblocking(uint32_t cpu_id, esp_ipc_func_t func,
+                                    void *arg)
+ {
+-  esp_ipc_ensure_init();
+-
+-  if (cpu_id >= CONFIG_SMP_NCPUS || s_ipc_task_handle[cpu_id] == NULL)
++  if (!esp_ipc_ensure_init())
++    {
++      return ESP_ERR_INVALID_STATE;
++    }
++
++  if (func == NULL || cpu_id >= CONFIG_SMP_NCPUS ||
++      s_ipc_task_handle[cpu_id] == NULL)
+     {
+       return ESP_ERR_INVALID_ARG;
+     }
+@@ -411,11 +454,13 @@
+    * it cannot wait for a mutex to be released.
+    */
+ 
+-  if (esp_cpu_compare_and_set((volatile uint32_t *)&s_no_block_func[cpu_id],
+-                              0, (uint32_t)func))
++  esp_ipc_func_t expected = NULL;
++  if (__atomic_compare_exchange_n(&s_no_block_func[cpu_id], &expected, func,
++                                  false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+     {
+       s_no_block_func_arg[cpu_id] = arg;
+-      s_no_block_func_and_arg_are_ready[cpu_id] = true;
++      __atomic_store_n(&s_no_block_func_and_arg_are_ready[cpu_id],
++                       true, __ATOMIC_RELEASE);
+ 
+       /* Post to the notify semaphore to wake the IPC task */
+ 

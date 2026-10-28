@@ -42,4 +42,27 @@
 
 #define EXCEPTION_SECTION .iram1
 
+#if defined(__ASSEMBLY__) && defined(CONFIG_SMP) && \
+    CONFIG_ARCH_INTERRUPTSTACK > 15
+
+/* Select this hart's interrupt stack, preserving an already active frame. */
+
+.macro setintstack tmp0, tmp1
+  csrr  \tmp0, CSR_MHARTID
+  li    \tmp1, INT_STACK_SIZE
+  mul   \tmp1, \tmp0, \tmp1
+  la    \tmp0, g_intstacktop
+  sub   \tmp0, \tmp0, \tmp1
+  li    \tmp1, INT_STACK_SIZE
+  sub   \tmp1, \tmp0, \tmp1
+  bltu  sp, \tmp1, 1f
+  bgtu  sp, \tmp0, 1f
+  j     2f
+1:
+  mv    sp, \tmp0
+2:
+.endm
+
+#endif
+
 #endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_CHIP_H */

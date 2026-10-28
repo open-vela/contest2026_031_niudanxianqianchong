@@ -559,6 +559,14 @@ if(CONFIG_ESPRESSIF_IDF_ENV_FPGA)
                       esp_common_include_fpga_overrides_rng)
 endif()
 
+if(CONFIG_ESP32P4_SMP)
+  list(APPEND HAL_SRCS
+       ${ESP_HAL_3RDPARTY_REPO}/nuttx/src/components/esp_system/esp_ipc.c)
+  # CPU retention requires a separate ISR IPC port; PM is disabled here.
+  list(REMOVE_ITEM HAL_SRCS
+       ${ESP_HAL_3RDPARTY_REPO}/components/esp_hw_support/lowpower/port/${CHIP_SERIES}/sleep_cpu.c)
+endif()
+
 target_sources(arch PRIVATE ${HAL_SRCS})
 
 # ##############################################################################

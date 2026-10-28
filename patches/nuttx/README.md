@@ -1,4 +1,4 @@
-# ES8311 本地 NuttX 补丁
+# 本地 NuttX 兼容补丁
 
 这些补丁针对本项目使用的 NuttX `drivers/audio/es8311.c`，按顺序应用：
 
@@ -37,4 +37,11 @@ git apply --unidiff-zero ../contest2026_031_niudanxianqianchong/patches/nuttx/00
 
 当前配置未启用 `CONFIG_LIBC_SEM_MUTEX_NOINLINE`，`nxmutex_init/lock/unlock` 是头文件中的内联实现。缺少该头文件时，编译器按隐式外部函数处理，随后链接失败；不需要新增互斥锁库或更改同步实现。
 
-本机 NuttX 工作区已经按上述顺序应用九个补丁，不要重复执行。固件编译及板端录放音仍需验证。
+本机 NuttX 工作区已经按上述顺序应用九个音频补丁，不要重复执行。固件编译及板端录放音仍需验证。
+
+## RISC-V 自定义 SMP
+
+`0010-riscv-allow-custom-smp.patch` 为 Make/CMake 增加 `ARCH_CUSTOM_SMP` 构建判断。
+P4 SMP 由本项目实现启核与 IPI；其他配置继续使用原有通用实现。
+适用基线为 NuttX `106bf012365ed035c6d6c717e73448e76089d721`。
+构建和板端验收见[独立 SMP 配置](../../board/esp32p4/esp32p4-function-ev-board/configs/smp/README.md)。

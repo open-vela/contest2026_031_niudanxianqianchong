@@ -34,6 +34,10 @@ list(APPEND SRCS esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c)
 list(APPEND SRCS esp_lowputc.c esp_serial.c)
 list(APPEND SRCS esp_systemreset.c)
 
+if(CONFIG_SMP)
+  list(APPEND SRCS esp_smp.c esp_atomic64.c esp_cpu1_start.S)
+endif()
+
 if(CONFIG_ARCH_HAVE_EXTRA_HEAPS)
   list(APPEND SRCS esp_extraheaps.c)
   if(CONFIG_ESPRESSIF_RETENTION_HEAP)
