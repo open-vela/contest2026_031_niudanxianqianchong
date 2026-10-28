@@ -5,7 +5,7 @@
 
 ## 文档分类
 
-本目录按主题分为五类。分类只表示文档的组织方式，不代表完成状态；
+本目录按主题分为六类。分类只表示文档的组织方式，不代表完成状态；
 每篇文档自身的状态行与验收条件才是判断依据。
 
 ### 基础与规划
@@ -36,6 +36,13 @@
 | --- | --- |
 | [ESP32-P4X SmartHome 板载 C6 Wi-Fi 接入方案](网络与连接/ESP32-P4X-SmartHome板载C6-WiFi接入方案.md) | 板载 ESP32-C6 经 SDIO 的 ESP-Hosted 接入：分层设计、W0~W4 阶段与验收 |
 | [ESP32-P4X SmartHome 板载以太网接入方案](网络与连接/ESP32-P4X-SmartHome板载以太网接入方案.md) | 板载 EMAC 以太网接入方案与验收 |
+| [ESP32-P4X 板载 C6 蓝牙/BLE 适配方案](网络与连接/ESP32-P4X-板载C6蓝牙BLE适配方案.md) | Hosted-HCI、NimBLE、C6 固件匹配及 Wi-Fi/BLE 共存验收 |
+
+### 存储与文件系统
+
+| 文档 | 内容 |
+| --- | --- |
+| [ESP32-P4X microSD 卡存储适配方案](存储与文件系统/ESP32-P4X-microSD卡存储适配方案.md) | SDMMC 双槽共享、标准 MMCSD/FAT32 接入及 C6 并发验收 |
 
 ### 应用与 AI
 
