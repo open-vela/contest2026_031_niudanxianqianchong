@@ -42,6 +42,26 @@ config ARCH_CHIP_ESP32P4
 
 if ARCH_CHIP_ESP32P4
 
+config ESP32P4_SMP
+	bool "Experimental ESP32-P4 dual-core SMP"
+	depends on SMP && EXPERIMENTAL
+	depends on BUILD_FLAT && !ARCH_USE_S_MODE
+	depends on !ESP32P4_SELECTS_REV_LESS_V3 && !ARCH_RV_SHADOW_STACK
+	depends on ARCH_INTERRUPTSTACK > 0
+	depends on !ESPRESSIF_SPIFLASH && !ESPRESSIF_SPIRAM && !PM
+	---help---
+		Enable the initial HP CPU1 startup and cross-core scheduler port.
+		This requires the project RISC-V custom SMP patch. Flash MTD,
+		PSRAM and power management remain disabled until their dual-core
+		cache and IPC paths have been validated.
+
+config ARCH_CUSTOM_SMP
+	bool
+	default y if ESP32P4_SMP
+
+config SMP_NCPUS
+	range 2 2 if ESP32P4_SMP
+
 # ESP32-P4 shares the generic Espressif flash, bootloader and SDK options.
 # This source is required so the selected flash size reaches .config and the
 # generic image rule can derive FLASH_SIZE for esptool.

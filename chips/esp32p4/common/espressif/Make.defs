@@ -41,6 +41,11 @@ CHIP_CSRCS += esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c
 CHIP_CSRCS += esp_lowputc.c esp_serial.c
 CHIP_CSRCS += esp_systemreset.c
 
+ifeq ($(CONFIG_SMP),y)
+	CHIP_CSRCS += esp_smp.c esp_atomic64.c
+	CHIP_ASRCS += esp_cpu1_start.S
+endif
+
 ifeq ($(CONFIG_ARCH_HAVE_EXTRA_HEAPS),y)
 	CHIP_CSRCS += esp_extraheaps.c
 	ifeq ($(CONFIG_ESPRESSIF_RETENTION_HEAP),y)
