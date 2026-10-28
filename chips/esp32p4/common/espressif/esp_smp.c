@@ -254,11 +254,16 @@ int up_cpu_start(int cpu)
 #endif
 
   __atomic_store_n(&g_cpu1_status, 0, __ATOMIC_RELEASE);
-  esp_cpu_unstall(cpu);
+
+  /* The boot address must be visible before the APP CPU leaves reset;
+   * otherwise CPU1 may fetch from a stale address.
+   */
+
+  ets_set_appcpu_boot_addr((uint32_t)esp_cpu1_start);
+  UP_DMB();
   cpu_utility_ll_enable_clock_and_reset_app_cpu();
   cpu_utility_ll_enable_clock_and_reset_app_cpu_int_matrix();
-  UP_DMB();
-  ets_set_appcpu_boot_addr((uint32_t)esp_cpu1_start);
+  esp_cpu_unstall(cpu);
 
   for (poll = 0; poll < ESP_SMP_BOOT_POLLS; poll++)
     {

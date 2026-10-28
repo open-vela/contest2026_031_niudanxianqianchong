@@ -11,20 +11,21 @@
 source myenv/bin/activate
 git -C nuttx apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0010-riscv-allow-custom-smp.patch
 git -C nuttx apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0010-riscv-allow-custom-smp.patch
-git -C contest2026_031_niudanxianqianchong/chips/esp32p4/esp-hal-3rdparty apply --check ../../../patches/esp-hal/0001-nuttx-ipc-serialize-smp-initialization.patch
-git -C contest2026_031_niudanxianqianchong/chips/esp32p4/esp-hal-3rdparty apply ../../../patches/esp-hal/0001-nuttx-ipc-serialize-smp-initialization.patch
 ./build.sh contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/smp -j4
 ```
 
-补丁使通用 RISC-V 构建在 `ARCH_CUSTOM_SMP=y` 时使用芯片自己的启动与 IPI 实现。
-HAL 补丁匹配 `b90b1837cb5ad24747deb4c895246037cc206ce5`，接入本树任务创建接口，
-修复 IPC 首次初始化互斥和参数发布。已应用时不重复执行；从单核切换至 SMP 必须使用干净输出，不能复用单核对象。
+NuttX 补丁使通用 RISC-V 构建在 `ARCH_CUSTOM_SMP=y` 时使用芯片自己的启动与 IPI 实现，
+需手工应用一次。HAL 补丁位于 `chips/esp32p4/common/espressif/patches/`，由 Make 在
+每次 checkout 后按文件名顺序自动重放，匹配 `b90b1837cb5ad24747deb4c895246037cc206ce5`：
+修复早期临界区、RTC 校准定时器初始化、HAL 单核启动路径和 SMP IPC 初始化。
+从单核切换至 SMP 必须使用干净输出，不能复用单核对象。
 
 ## 板端验证
 
 启动时应出现 `ESP32-P4 SMP: CPU1 ready`，随后进入 NSH。该提示只证明次核初始化握手。
 
 ```text
+nsh> mount -t procfs /proc
 nsh> ps
 nsh> taskset 1 getprime
 nsh> taskset 2 getprime
@@ -41,9 +42,12 @@ nsh> taskset 3 ostest
 
 ## 验证状态
 
-2026-10-28：SMP 配置已通过 Make 编译、链接和镜像生成；ELF 已核对次核入口、
-IPI 符号与两核中断栈。尚未烧录，单核回归与 CMake 构建尚未验收。
-CMake 仍有公共板级 Kconfig 路径缺失、默认 HAL 版本与 Make 不一致的问题。
+2026-10-28：SMP 配置已在 ESP32-P4 Function EV Board（revision v3.2）上启动到 NSH，
+串口输出 `[CPU0] ESP32-P4 SMP: CPU1 ready`；挂载 procfs 后 `ps` 列出 CPU0/CPU1 两个
+IDLE。`taskset 3 smp` 观察到两核且全部线程返回 0，`taskset 3 atomic` 通过，
+`taskset 3 ostest` 以 status 0 结束并包含 `smp_call_test: Test success`。
+单核回归、CMake 构建、反复冷启动和长时间负载尚未验收；CMake 仍有公共板级 Kconfig
+路径缺失、默认 HAL 版本与 Make 不一致的问题。
 
 ## 当前边界
 
