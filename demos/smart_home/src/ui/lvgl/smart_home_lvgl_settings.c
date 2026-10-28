@@ -50,7 +50,8 @@ static void build_backend_dropdown_options(char *options, size_t options_size)
     for (index = 0u; index < smart_home_llm_backend_count(); index++) {
         const smart_home_llm_backend_preset_t *preset =
             smart_home_llm_backend_get(index);
-        const char *label = preset && preset->name ? preset->name : "Unknown";
+        const char *label = preset && (preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) ?
+            "自定义" : preset && preset->name ? preset->name : "未知";
         int written;
 
         written = snprintf(options + used,
@@ -227,7 +228,7 @@ static void update_api_key_input_for_backend(
         lv_textarea_set_text(ui->settings_api_key_input, "");
     } else {
         lv_textarea_set_text(ui->settings_api_key_input,
-                             "Managed by secrets.json");
+                             "由系统安全配置管理");
         lv_obj_add_state(ui->settings_api_key_input, LV_STATE_DISABLED);
     }
 }
@@ -243,22 +244,22 @@ static void show_backend_key_status(smart_home_lvgl_t *ui,
     }
     if ((preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) != 0u) {
         set_settings_status(ui,
-                            "Custom backend: API key is session-only and not saved.",
+                            "自定义密钥仅本次使用，不会保存",
                             SMART_HOME_UI_COLOR_TEXT_MUTED);
         return;
     }
 
     ret = smart_home_secrets_model_api_key_status(preset->id);
     if (ret == AGENT_OK) {
-        snprintf(message, sizeof(message), "%s key is configured in secrets.json.",
+        snprintf(message, sizeof(message), "已配置 %s 密钥",
                  preset->name);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_SUCCESS);
     } else if (ret == AGENT_ERROR_NOT_FOUND) {
-        snprintf(message, sizeof(message), "%s API key is not configured.",
+        snprintf(message, sizeof(message), "%s 尚未配置密钥",
                  preset->name);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_WARNING);
     } else {
-        snprintf(message, sizeof(message), "Cannot read %s key (%d).",
+        snprintf(message, sizeof(message), "无法读取 %s 密钥（%d）",
                  preset->name, ret);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_DANGER);
     }
@@ -356,16 +357,16 @@ static void mcp_discover_event(lv_event_t *event)
     ret = smart_home_mcp_bridge_request_discover(ui->app->mcp_bridge);
     if (ret == AGENT_OK) {
         set_settings_status(ui,
-                            "MCP discovery requested.",
+                            "已请求发现 MCP 工具",
                             SMART_HOME_UI_COLOR_TEXT_SECONDARY);
     } else if (ret == AGENT_ERROR_BUSY) {
         set_settings_status(ui,
-                            "MCP discovery is already running.",
+                            "正在发现 MCP 工具，请稍候",
                             SMART_HOME_UI_COLOR_WARNING);
     } else {
-        char message[64];
+        char message[128];
 
-        snprintf(message, sizeof(message), "MCP discovery request failed (%d).", ret);
+        snprintf(message, sizeof(message), "MCP 工具发现请求失败（%d）", ret);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_DANGER);
     }
 }
@@ -426,7 +427,7 @@ static void apply_settings_event(lv_event_t *event)
 
     if (ui->request_inflight) {
         set_settings_status(ui,
-                            "Wait for the current request to finish.",
+                            "请等待当前请求完成",
                             SMART_HOME_UI_COLOR_WARNING);
         return;
     }
@@ -489,11 +490,11 @@ static void apply_settings_event(lv_event_t *event)
     ret = smart_home_agent_app_apply_model_config(ui->app, &config);
     if (ret == AGENT_OK) {
         set_settings_status(ui,
-                            "Model settings applied.",
+                            "模型设置已应用",
                             SMART_HOME_UI_COLOR_SUCCESS);
     } else {
         char message[96];
-        snprintf(message, sizeof(message), "Apply failed: %d", ret);
+        snprintf(message, sizeof(message), "应用设置失败（%d）", ret);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_DANGER);
     }
     /* No keyboard in NSH mode — nothing to hide. */
@@ -516,13 +517,13 @@ static const char *tool_category_name(uint16_t category)
 {
     switch (category) {
     case SMART_HOME_TOOL_CATEGORY_QUERY:
-        return "Query";
+        return "查询";
     case SMART_HOME_TOOL_CATEGORY_CONTROL:
-        return "Control";
+        return "控制";
     case SMART_HOME_TOOL_CATEGORY_SKILL:
-        return "Skill";
+        return "技能";
     default:
-        return "Other";
+        return "其他";
     }
 }
 
@@ -542,13 +543,13 @@ static const char *tool_source_name(uint16_t group_id)
 {
     switch (group_id) {
     case 0u:
-        return "Local";
+        return "本地";
     case 10u:
-        return "Node";
+        return "节点";
     case 20u:
         return "MCP";
     default:
-        return "Other";
+        return "其他";
     }
 }
 
@@ -589,7 +590,7 @@ static void local_tool_switch_event(lv_event_t *event)
     if (ui->request_inflight) {
         set_tool_switch_state(target, !allowed);
         set_settings_status(ui,
-                            "Wait for the current request to finish.",
+                            "请等待当前请求完成",
                             SMART_HOME_UI_COLOR_WARNING);
         return;
     }
@@ -599,13 +600,13 @@ static void local_tool_switch_event(lv_event_t *event)
                                                       allowed);
     if (ret != AGENT_OK) {
         set_tool_switch_state(target, !allowed);
-        snprintf(message, sizeof(message), "Tool update failed: %d", ret);
+        snprintf(message, sizeof(message), "权限更新失败（%d）", ret);
         set_settings_status(ui, message, SMART_HOME_UI_COLOR_DANGER);
         return;
     }
 
-    snprintf(message, sizeof(message), "%s %s.", context->name,
-             allowed ? "allowed" : "blocked");
+    snprintf(message, sizeof(message), "%s：%s", context->name,
+             allowed ? "已允许" : "已禁止");
     set_settings_status(ui, message, SMART_HOME_UI_COLOR_SUCCESS);
 }
 
@@ -632,6 +633,7 @@ static void create_local_tool_switch(lv_obj_t *parent,
     context->ui = ui;
     memcpy(context->name, tool->name, name_length + 1u);
     sw = lv_switch_create(parent);
+    smart_home_lvgl_press_feedback(sw);
     lv_obj_set_size(sw, 44, 24);
     allowed = tool->access_allowed;
     set_tool_switch_state(sw, allowed);
@@ -645,7 +647,7 @@ static void create_tool_directory_row(lv_obj_t *parent,
     lv_obj_t *row;
     lv_obj_t *title_row;
     lv_obj_t *label;
-    char status[64];
+    char status[128];
     int access_allowed = 1;
 
     row = lv_obj_create(parent);
@@ -682,9 +684,9 @@ static void create_tool_directory_row(lv_obj_t *parent,
     snprintf(status, sizeof(status), "%s | %s%s",
              tool_source_name(tool ? tool->group_id : 0u),
              tool && tool->enabled
-                 ? (access_allowed ? "allowed" : "blocked")
-                 : "unavailable",
-             tool && !tool->llm_visible ? " | hidden from AI" : "");
+                 ? (access_allowed ? "已允许" : "已禁止")
+                 : "不可用",
+             tool && !tool->llm_visible ? " · 对智能管家隐藏" : "");
     label = smart_home_lvgl_label_create(row,
                                          status,
                                          SMART_HOME_UI_COLOR_TEXT_MUTED,
@@ -738,16 +740,16 @@ void smart_home_lvgl_refresh_tool_directory(smart_home_lvgl_t *ui)
                                                append_tool_directory_entry,
                                                &builder);
     if (ret != AGENT_OK) {
-        char message[64];
+        char message[128];
 
-        snprintf(message, sizeof(message), "Tool directory unavailable: %d", ret);
+        snprintf(message, sizeof(message), "工具目录暂不可用（%d）", ret);
         smart_home_lvgl_label_create(builder.body,
                                      message,
                                      SMART_HOME_UI_COLOR_WARNING,
                                      12);
     } else if (builder.count == 0u) {
         smart_home_lvgl_label_create(builder.body,
-                                     "No tools registered.",
+                                     "暂无可用工具",
                                      SMART_HOME_UI_COLOR_TEXT_MUTED,
                                      12);
     }
@@ -788,6 +790,7 @@ static void create_tool_directory_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         tool_directory_toggle_event,
                         LV_EVENT_CLICKED,
@@ -890,30 +893,30 @@ static const char *network_status_text(
     const char *ifname = network && network->ifname ? network->ifname : "-";
 
     if (!network_status_checked(network)) {
-        return "Not checked";
+        return "待检测";
     }
 
     if (network->online) {
-        snprintf(buffer, size, "Online (%s)", ifname);
+        snprintf(buffer, size, "在线（%s）", ifname);
         return buffer;
     }
 
     if (network->ip_status == SMART_HOME_NETWORK_ERR_NO_IP) {
-        snprintf(buffer, size, "No IP (%s)", ifname);
+        snprintf(buffer, size, "未获取地址（%s）", ifname);
         return buffer;
     }
 
     if (network->ip_status == SMART_HOME_NETWORK_ERR_DHCP) {
-        snprintf(buffer, size, "DHCP failed (%s)", ifname);
+        snprintf(buffer, size, "地址获取失败（%s）", ifname);
         return buffer;
     }
 
     if (network->dns_status == SMART_HOME_NETWORK_ERR_DNS) {
-        snprintf(buffer, size, "DNS failed (%s)", ifname);
+        snprintf(buffer, size, "域名解析失败（%s）", ifname);
         return buffer;
     }
 
-    snprintf(buffer, size, "Offline (%s)", ifname);
+    snprintf(buffer, size, "离线（%s）", ifname);
     return buffer;
 }
 
@@ -925,27 +928,27 @@ static const char *wifi_status_text(
     int status;
 
     if (!network_status_checked(network)) {
-        return "Not checked";
+        return "待检测";
     }
 
     if (network->backend != SMART_HOME_NETWORK_BACKEND_WIFI) {
-        return "N/A";
+        return "不适用";
     }
 
     status = network->init_status;
     switch (status) {
     case SMART_HOME_WIFI_OK:
-        return "Associated";
+        return "已连接路由器";
     case SMART_HOME_WIFI_ERR_CONFIG:
-        return "Config missing";
+        return "缺少配置";
     case SMART_HOME_WIFI_ERR_ASSOC:
-        return "Association failed";
+        return "路由器连接失败";
     case SMART_HOME_WIFI_ERR_DHCP:
-        return "DHCP failed";
+        return "地址获取失败";
     case SMART_HOME_WIFI_ERR_DNS:
-        return "DNS failed";
+        return "域名解析失败";
     default:
-        snprintf(buffer, size, "Failed (%d)", status);
+        snprintf(buffer, size, "失败（%d）", status);
         return buffer;
     }
 }
@@ -972,18 +975,18 @@ static const char *skills_status_text(const smart_home_agent_app_t *app,
     if (status == AGENT_OK) {
         snprintf(buffer,
                  size,
-                 "%lu loaded",
+                 "已加载 %lu 项",
                  (unsigned long)(app ? app->system_status.skills_loaded : 0u));
         return buffer;
     }
     if (status == SMART_HOME_STATUS_UNKNOWN) {
-        return "Not checked";
+        return "待检测";
     }
     if (status == AGENT_ERROR_NOT_FOUND) {
-        return "Not found";
+        return "未找到";
     }
 
-    snprintf(buffer, size, "Failed (%d)", status);
+    snprintf(buffer, size, "失败（%d）", status);
     return buffer;
 }
 
@@ -996,10 +999,10 @@ static const char *simple_agent_status_text(int status,
         return ready;
     }
     if (status == SMART_HOME_STATUS_UNKNOWN) {
-        return "Not checked";
+        return "待检测";
     }
 
-    snprintf(buffer, size, "Failed (%d)", status);
+    snprintf(buffer, size, "失败（%d）", status);
     return buffer;
 }
 
@@ -1013,13 +1016,13 @@ static const char *model_status_text(const smart_home_agent_app_t *app,
     if (status == AGENT_OK) {
         snprintf(buffer,
                  size,
-                 "Ready (%s)",
+                 "就绪（%s）",
                  app && app->model_config.backend_id[0] ?
                      app->model_config.backend_id : "custom");
         return buffer;
     }
 
-    return simple_agent_status_text(status, "Ready", buffer, size);
+    return simple_agent_status_text(status, "就绪", buffer, size);
 }
 
 static const char *node_gateway_status_text(const smart_home_agent_app_t *app,
@@ -1030,7 +1033,7 @@ static const char *node_gateway_status_text(const smart_home_agent_app_t *app,
     (void)app;
     (void)buffer;
     (void)size;
-    return "Not built";
+    return "未启用";
 #else
     int status = app ? app->system_status.node_gateway_status :
                        SMART_HOME_STATUS_UNKNOWN;
@@ -1038,15 +1041,15 @@ static const char *node_gateway_status_text(const smart_home_agent_app_t *app,
     if (status == AGENT_OK) {
         snprintf(buffer,
                  size,
-                 "Listening (%u)",
+                 "监听中（%u）",
                  (unsigned int)CONFIG_SMART_HOME_NODE_GATEWAY_PORT);
         return buffer;
     }
     if (status == SMART_HOME_STATUS_UNKNOWN) {
-        return "Not checked";
+        return "待检测";
     }
 
-    snprintf(buffer, size, "Disabled (%d)", status);
+    snprintf(buffer, size, "未启用（%d）", status);
     return buffer;
 #endif
 }
@@ -1069,7 +1072,7 @@ static __attribute__((unused)) const char *mcp_bridge_status_text(const smart_ho
     (void)app;
     (void)buffer;
     (void)size;
-    return "Not built";
+    return "未启用";
 #else
     int status = app ? app->system_status.mcp_bridge_status :
                        SMART_HOME_STATUS_UNKNOWN;
@@ -1077,10 +1080,10 @@ static __attribute__((unused)) const char *mcp_bridge_status_text(const smart_ho
     int last_error = 0;
 
     if (status == SMART_HOME_STATUS_UNKNOWN) {
-        return "Not checked";
+        return "待检测";
     }
     if (status != AGENT_OK) {
-        snprintf(buffer, size, "Disabled (%d)", status);
+        snprintf(buffer, size, "未启用（%d）", status);
         return buffer;
     }
     /* Bridge creation does not access the network. Discovery is a manual
@@ -1089,18 +1092,18 @@ static __attribute__((unused)) const char *mcp_bridge_status_text(const smart_ho
         || smart_home_mcp_bridge_get_state(app->mcp_bridge,
                                            &state,
                                            &last_error) != AGENT_OK) {
-        return "Not checked";
+        return "待检测";
     }
     if (state == SMART_HOME_MCP_STATE_CONNECTING) {
-        return "Connecting...";
+        return "正在连接…";
     }
     if (state == SMART_HOME_MCP_STATE_IDLE) {
-        return "Manual";
+        return "等待手动发现";
     }
     if (state == SMART_HOME_MCP_STATE_READY) {
-        return "Connected";
+        return "已连接";
     }
-    snprintf(buffer, size, "Failed (%d)", last_error);
+    snprintf(buffer, size, "失败（%d）", last_error);
     return buffer;
 #endif
 }
@@ -1210,22 +1213,22 @@ static const char *agent_status_text(const smart_home_agent_app_t *app,
     const smart_home_system_status_t *status;
 
     if (!app) {
-        return "Not checked";
+        return "待检测";
     }
 
     status = &app->system_status;
     if (status->agent_status != AGENT_OK) {
-        snprintf(buffer, size, "Init failed (%d)", status->agent_status);
+        snprintf(buffer, size, "初始化失败（%d）", status->agent_status);
         return buffer;
     }
     if (status->skills_status != AGENT_OK ||
         status->tools_status != AGENT_OK ||
         (network_status_checked(&status->network_status) &&
          !status->network_status.online)) {
-        return "Degraded";
+        return "部分功能不可用";
     }
 
-    return "Ready";
+    return "就绪";
 }
 
 static lv_color_t agent_status_color(const smart_home_agent_app_t *app)
@@ -1283,6 +1286,7 @@ static void create_system_status_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         system_status_toggle_event,
                         LV_EVENT_CLICKED,
@@ -1326,7 +1330,7 @@ static void create_system_status_card(lv_obj_t *content,
                       status ?
                           smart_home_network_platform_name(
                               status->network_status.platform) :
-                          "Unknown",
+                          "未知",
                       SMART_HOME_UI_COLOR_TEXT_SECONDARY);
 
     create_status_row(body,
@@ -1338,7 +1342,7 @@ static void create_system_status_card(lv_obj_t *content,
                                                  NULL));
 
     create_status_row(body,
-                      "Skills",
+                      "技能",
                       skills_status_text(app, buffer, sizeof(buffer)),
                       subsystem_status_color(status ? status->skills_status :
                                                  SMART_HOME_STATUS_UNKNOWN));
@@ -1347,7 +1351,7 @@ static void create_system_status_card(lv_obj_t *content,
                       "工具服务",
                       simple_agent_status_text(status ? status->tools_status :
                                                    SMART_HOME_STATUS_UNKNOWN,
-                                               "Ready",
+                                               "就绪",
                                                buffer,
                                                sizeof(buffer)),
                       subsystem_status_color(status ? status->tools_status :
@@ -1366,7 +1370,7 @@ static void create_system_status_card(lv_obj_t *content,
 
     /* 设备网关与 MCP 状态迁至各自的独立服务页（更多页卡片入口）。 */
 
-    snprintf(value, sizeof(value), "%d devices", device_count);
+    snprintf(value, sizeof(value), "%d 台设备", device_count);
     create_status_row(body,
                       "本地设备",
                       value,
@@ -1537,6 +1541,7 @@ static void create_voice_announce_card(lv_obj_t *content,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
     lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+    smart_home_lvgl_press_feedback(header);
     lv_obj_add_event_cb(header,
                         voice_announce_toggle_event,
                         LV_EVENT_CLICKED,
@@ -1581,12 +1586,13 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_style_pad_column(row, 8, 0);
 
         label = smart_home_lvgl_label_create(row,
-                                             "自动播报 Agent 回复",
+                                             "自动播报智能管家回复",
                                              SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                              12);
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_voice_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_voice_switch);
         lv_obj_set_size(ui->settings_voice_switch, 44, 24);
         smart_home_tts_config_load(&config);
         if (config.enabled) {
@@ -1616,7 +1622,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         label = smart_home_lvgl_label_create(
             body,
             "端点与密钥在 /data/smart_home/voice.json 与 secrets.json 中配置；"
-            "可用 tts_smoke speak 命令验证链路。",
+            "用于播报智能管家的文字回复",
             SMART_HOME_UI_COLOR_TEXT_MUTED,
             10);
         lv_obj_set_width(label, lv_pct(100));
@@ -1627,6 +1633,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_size(button, 112, 32);
         lv_obj_set_style_radius(button, 6, 0);
         smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
+        smart_home_lvgl_press_feedback(button);
         lv_obj_add_event_cb(button,
                             voice_announce_stop_event,
                             LV_EVENT_CLICKED,
@@ -1666,6 +1673,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_asr_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_asr_switch);
         lv_obj_set_size(ui->settings_asr_switch, 44, 24);
         smart_home_asr_config_load(&config);
         if (config.enabled) {
@@ -1706,6 +1714,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_flex_grow(label, 1);
 
         ui->settings_kws_switch = lv_switch_create(row);
+        smart_home_lvgl_press_feedback(ui->settings_kws_switch);
         lv_obj_set_size(ui->settings_kws_switch, 44, 24);
         smart_home_kws_config_load(&config);
         if (config.enabled) {
@@ -1724,7 +1733,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         label = smart_home_lvgl_label_create(
             body,
             "唤醒词模型特征前端尚未与训练管线对拍，真机唤醒率数据"
-            "仅供参考；可用 kws_smoke 命令验证模型。",
+            "识别唤醒词后进入语音交互",
             SMART_HOME_UI_COLOR_TEXT_MUTED,
             10);
         lv_obj_set_width(label, lv_pct(100));
@@ -1768,6 +1777,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
                               LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(header, 6, 0);
         lv_obj_add_flag(header, LV_OBJ_FLAG_CLICKABLE);
+        smart_home_lvgl_press_feedback(header);
         lv_obj_add_event_cb(header,
                             model_api_toggle_event,
                             LV_EVENT_CLICKED,
@@ -1834,8 +1844,9 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
         lv_obj_set_width(field_label, lv_pct(100));
 
         ui->settings_backend_dd = lv_dropdown_create(wrap);
+        smart_home_lvgl_press_feedback(ui->settings_backend_dd);
         lv_dropdown_set_options(ui->settings_backend_dd,
-                                backend_options[0] ? backend_options : "Custom");
+                                backend_options[0] ? backend_options : "自定义");
         lv_dropdown_set_selected(ui->settings_backend_dd,
                                  (uint16_t)selected_backend);
         lv_obj_set_size(ui->settings_backend_dd, lv_pct(100), 32);
@@ -1893,7 +1904,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     ui->settings_max_tokens_input =
         create_settings_input(model_body,
                               ui,
-                              "最大输出 Token",
+                              "最大输出长度（词元）",
                               max_tokens_text,
                               8,
                               0);
@@ -1903,6 +1914,7 @@ static void create_model_api_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     lv_obj_set_size(button, 96, 34);
     lv_obj_set_style_radius(button, 8, 0);
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, apply_settings_event, LV_EVENT_CLICKED, ui);
     label = smart_home_lvgl_label_create(button, "应用", lv_color_white(), 12);
     lv_obj_center(label);
@@ -1981,6 +1993,7 @@ static void create_mcp_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     lv_obj_set_size(s_mcp_discover_button, 112, 32);
     lv_obj_set_style_radius(s_mcp_discover_button, 6, 0);
     smart_home_lvgl_set_bg(s_mcp_discover_button, SMART_HOME_UI_COLOR_PRIMARY);
+    smart_home_lvgl_press_feedback(s_mcp_discover_button);
     lv_obj_add_event_cb(s_mcp_discover_button,
                         mcp_discover_event,
                         LV_EVENT_CLICKED,
@@ -1991,7 +2004,7 @@ static void create_mcp_card(lv_obj_t *content, smart_home_lvgl_t *ui)
     ui->settings_mcp_discover_btn = s_mcp_discover_button;
 #else
     create_status_row(body, "连接状态",
-                      "固件未启用（CONFIG_SMART_HOME_MCP_BRIDGE）",
+                      "当前版本未启用 MCP 服务",
                       SMART_HOME_UI_COLOR_TEXT_MUTED);
 #endif
 }

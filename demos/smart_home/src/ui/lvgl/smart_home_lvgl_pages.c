@@ -286,6 +286,7 @@ static void page_action(lv_obj_t *card, smart_home_lvgl_t *ui,
 {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(card, (void *)(intptr_t)action);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, page_click_cb, LV_EVENT_CLICKED, ui);
 }
 
@@ -324,6 +325,7 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     /* 摄像头开关置于右上角（原'已布防'徽标位置）：安防页最高频的
      * 操作应一步可达；布防状态不再是本页主叙事。 */
     ui->security_camera_switch = lv_switch_create(screen);
+    smart_home_lvgl_press_feedback(ui->security_camera_switch);
     lv_obj_set_size(ui->security_camera_switch, 46, 26);
     lv_obj_align(ui->security_camera_switch, LV_ALIGN_TOP_RIGHT, -x,
                  SMART_HOME_TOPBAR_H + 32);
@@ -389,6 +391,7 @@ void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui)
     lv_obj_align(ui->security_camera_metrics, LV_ALIGN_LEFT_MID, 12, 10);
     button = page_outline_button(footer, "进入监控", 92);
     lv_obj_align(button, LV_ALIGN_RIGHT_MID, -8, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, security_camera_button_cb,
                         LV_EVENT_CLICKED, ui);
     ui->security_camera_timer = lv_timer_create(security_camera_timer_cb,
@@ -462,13 +465,13 @@ void smart_home_lvgl_build_more_screen(smart_home_lvgl_t *ui)
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
     page_icon_badge(card, ICON_SETTING_AI, lv_color_hex(0xF1F4FF));
-    page_title(card, "模型服务", "LLM 后端与密钥");
+    page_title(card, "模型服务", "模型后端与密钥");
     page_action(card, ui, PAGE_ACTION_MODEL);
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
     col++;
     page_icon_badge(card, ICON_TOOL, lv_color_hex(0xFFF6EA));
-    page_title(card, "工具与权限", "Agent 工具目录");
+    page_title(card, "工具与权限", "智能管家工具目录");
     page_action(card, ui, PAGE_ACTION_TOOLS);
 
     card = page_card(screen, MORE_CARD_X(), MORE_CARD_Y(), w, 140);
@@ -802,6 +805,7 @@ void smart_home_lvgl_build_network_screen(smart_home_lvgl_t *ui)
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
     lv_obj_set_style_text_color(lv_obj_get_child(button, 0), lv_color_white(), 0);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, network_connect_cb, LV_EVENT_CLICKED, ui);
 
     ui->network_keyboard = lv_keyboard_create(screen);
@@ -1063,7 +1067,7 @@ void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui)
         card, ui, "端口（默认 1810）",
         port_text, sizeof(port_text) - 1u, 0, 138);
     ui->miloco_token_input = miloco_input_create(
-        card, ui, "服务 Token（未启用鉴权可留空）",
+        card, ui, "访问令牌（未启用鉴权可留空）",
         token, sizeof(token) - 1u, 1, 188);
 
     /* 按钮放卡片头部右侧：键盘弹出时覆盖卡片下半区（约 y>232），
@@ -1072,10 +1076,12 @@ void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui)
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY);
     lv_obj_set_style_text_color(lv_obj_get_child(button, 0), lv_color_white(), 0);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, miloco_save_cb, LV_EVENT_CLICKED, ui);
 
     button = page_outline_button(card, "扫码绑定", 108);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -144, 0);
+    smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, miloco_bind_entry_cb, LV_EVENT_CLICKED, ui);
 
     ui->miloco_keyboard = lv_keyboard_create(screen);

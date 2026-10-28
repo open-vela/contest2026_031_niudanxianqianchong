@@ -1,4 +1,4 @@
-/** Generated SmartHome PNG-derived LVGL A8 icon declarations. */
+/** Generated SmartHome PNG-derived LVGL icon declarations. */
 #pragma once
 
 #include <lvgl/lvgl.h>
@@ -67,6 +67,7 @@ extern const lv_image_dsc_t smart_home_icon_moon_20;
 extern const lv_image_dsc_t smart_home_icon_moon_32;
 extern const lv_image_dsc_t smart_home_icon_music_circle_outline_32;
 extern const lv_image_dsc_t smart_home_icon_music_circle_outline_48;
+extern const lv_image_dsc_t smart_home_icon_openvela_36;
 extern const lv_image_dsc_t smart_home_icon_player_pause_32;
 extern const lv_image_dsc_t smart_home_icon_player_play_32;
 extern const lv_image_dsc_t smart_home_icon_player_track_next_32;

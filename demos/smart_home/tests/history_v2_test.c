@@ -5,7 +5,9 @@
 #include "../src/ui/lvgl/smart_home_lvgl_history.c"
 
 static int rendered, errors, visits, fail_read;
-static const char *expected[] = {"old user", "历史工具调用：set_light", "old answer", "new user", "new answer"};
+static const char *expected[] = {"old user", "历史操作：调整灯光", "old answer", "new user", "new answer"};
+const char *smart_home_lvgl_tool_display_name(const char *name)
+{ assert(!strcmp(name, "set_light")); return "调整灯光"; }
 static agent_string_view_t view(const char *s) { return agent_string_view(s, strlen(s)); }
 int smart_home_agent_app_visit_history(smart_home_agent_app_t *app,
                                        agent_session_visit_fn visit, void *context)

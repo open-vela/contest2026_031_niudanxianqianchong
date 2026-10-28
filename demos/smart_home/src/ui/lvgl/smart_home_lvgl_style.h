@@ -62,6 +62,7 @@ const lv_font_t *smart_home_lvgl_font(int size);
 
 void smart_home_lvgl_set_bg(lv_obj_t *obj, lv_color_t color);
 void smart_home_lvgl_card_style(lv_obj_t *obj);
+void smart_home_lvgl_press_feedback(lv_obj_t *obj);
 void smart_home_lvgl_soft_card_style(lv_obj_t *obj);
 void smart_home_lvgl_style_keyboard(lv_obj_t *keyboard);
 

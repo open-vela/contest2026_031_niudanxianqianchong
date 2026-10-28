@@ -36,6 +36,8 @@ void smart_home_lvgl_append_error_bubble(smart_home_lvgl_t *ui, const char *text
 { (void)ui; on_ui(); assert(text && text[0]); ++errors; }
 void lv_label_set_text(lv_obj_t *obj, const char *text) { (void)obj; (void)text; on_ui(); }
 void lv_obj_remove_flag(lv_obj_t *obj, lv_obj_flag_t flag) { (void)obj; (void)flag; on_ui(); }
+void lv_obj_add_flag(lv_obj_t *obj, lv_obj_flag_t flag) { (void)obj; (void)flag; on_ui(); }
+void lv_obj_remove_state(lv_obj_t *obj, lv_state_t state) { (void)obj; (void)state; on_ui(); }
 void lv_refr_now(lv_display_t *display) { (void)display; on_ui(); }
 void smart_home_cpu_debug_log(const char *stage) { (void)stage; }
 void smart_home_memory_log_region(const char *name, const void *p) { (void)name; (void)p; }

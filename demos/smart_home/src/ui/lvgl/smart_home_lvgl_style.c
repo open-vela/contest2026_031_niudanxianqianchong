@@ -275,6 +275,17 @@ void smart_home_lvgl_set_bg(lv_obj_t *obj, lv_color_t color)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
+/* 复用当前渲染器的着色能力，不缩放控件，也不增加过渡动画。 */
+void smart_home_lvgl_press_feedback(lv_obj_t *obj)
+{
+    if (!obj) return;
+    lv_obj_set_style_recolor(obj, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(obj, LV_OPA_20, LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(obj, LV_OPA_TRANSP,
+        LV_STATE_DISABLED | LV_STATE_PRESSED);
+    lv_obj_set_style_opa(obj, LV_OPA_50, LV_STATE_DISABLED);
+}
+
 void smart_home_lvgl_card_style(lv_obj_t *obj)
 {
     smart_home_lvgl_set_bg(obj, SMART_HOME_UI_COLOR_SURFACE);
@@ -347,7 +358,7 @@ static int icon_is_product_asset(const char *icon)
 
 const lv_font_t *smart_home_lvgl_embedded_icon_font(const char *icon)
 {
-    /* Product UI uses the PNG-derived A8 library.  Keep this compatibility
+    /* Product UI uses the PNG-derived image library. Keep this compatibility
      * hook for callers that pass LVGL built-in symbols. */
     (void)icon;
     return NULL;
@@ -394,8 +405,13 @@ lv_obj_t *smart_home_lvgl_icon_create(lv_obj_t *parent,
             lv_obj_set_size(img, draw_w, draw_h);
         }
         lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
-        lv_obj_set_style_image_recolor(img, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
-        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+        if (asset->header.cf == LV_COLOR_FORMAT_A8) {
+            lv_obj_set_style_image_recolor(img, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+            lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+        } else {
+            /* Preserve the brand PNG's original colors. */
+            lv_obj_set_style_image_recolor_opa(img, LV_OPA_TRANSP, 0);
+        }
         return img;
     }
 

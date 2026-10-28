@@ -2,10 +2,10 @@
  * smart_home icon constants.
  *
  * Source: quickapp/smart_home_ui/prototype-web/assets/icons/（全部 PNG 文件）
- * Build:  scripts/generate_smart_home_lvgl_icons.py -> LVGL A8 C images
+ * Build:  scripts/generate_smart_home_lvgl_icons.py -> LVGL A8 / ARGB8888 images
  *
  * Product icons use stable `asset:<png-stem>` names. The icon factory maps
- * them to linked LVGL A8 images; no LittleFS lookup is needed at runtime.
+ * them to linked LVGL images; no LittleFS lookup is needed at runtime.
  * To update assets: replace the source PNG, run the generator, and rebuild.
  */
 
@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 /* ── Navigation bar ────────────────────────────────────────── */
+#define ICON_BRAND           "asset:openvela"
 #define ICON_NAV_HOME        "asset:home"
 #define ICON_NAV_DEVICES     "asset:devices"
 #define ICON_NAV_SCENES      "asset:sparkle-2"

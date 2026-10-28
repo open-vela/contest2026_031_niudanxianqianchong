@@ -18,6 +18,8 @@ void lv_obj_remove_flag(lv_obj_t *obj, lv_obj_flag_t flag) { (void)obj; (void)fl
 void lv_obj_set_size(lv_obj_t *obj, int32_t width, int32_t height) { (void)obj; assert(width > 0 && height > 0); }
 void lv_obj_align(lv_obj_t *obj, lv_align_t align, int32_t x, int32_t y)
 { (void)obj; (void)align; (void)x; (void)y; }
+void lv_obj_align_to(lv_obj_t *obj, const lv_obj_t *base, lv_align_t align, int32_t x, int32_t y)
+{ (void)obj; (void)base; (void)align; (void)x; (void)y; }
 lv_display_t *lv_display_get_default(void) { return NULL; }
 int32_t lv_display_get_horizontal_resolution(const lv_display_t *display) { (void)display; return 1024; }
 int32_t lv_display_get_vertical_resolution(const lv_display_t *display) { (void)display; return 600; }
@@ -50,10 +52,10 @@ int main(void)
     ui.chat_trace_tools[0].status_label = tool_label;
     smart_home_lvgl_finish_thinking(&ui);
     assert(ui.chat_trace_tools[0].state == -2);
-    assert(!strcmp(tool_text, "Unconfirmed") && !strcmp(header_text, "Unconfirmed"));
+    assert(!strcmp(tool_text, "未确认") && !strcmp(header_text, "结果待确认"));
     ui.chat_trace_tools[0].state = 1;
     smart_home_lvgl_finish_thinking(&ui);
-    assert(!strcmp(header_text, "OK"));
+    assert(!strcmp(header_text, "已返回"));
     ui.request_inflight = 1;
     assert(smart_home_lvgl_chat_clear(&ui) == AGENT_ERROR_BUSY && clear_calls == 0 && cleaned == 0);
     ui.request_inflight = 0;

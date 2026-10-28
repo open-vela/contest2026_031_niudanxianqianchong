@@ -1,4 +1,5 @@
 #include "smart_home_lvgl_internal.h"
+#include "../smart_home_ui_event.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,8 +51,13 @@ static agent_error_t history_collect(void *context, const agent_session_group_vi
             message->role == AGENT_MESSAGE_ROLE_ASSISTANT)
             ret = history_add(&tail, message->content,
                               message->role == AGENT_MESSAGE_ROLE_USER, "");
-        for (size_t j = 0u; ret == AGENT_OK && j < message->tool_call_count; ++j)
-            ret = history_add(&tail, message->tool_calls[j].name, 0, "历史工具调用：");
+        for (size_t j = 0u; ret == AGENT_OK && j < message->tool_call_count; ++j) {
+            char name[AGENT_MAX_NAME_BYTES + 1u];
+            smart_home_ui_copy_view(name, sizeof(name), message->tool_calls[j].name);
+            const char *title = smart_home_lvgl_tool_display_name(name);
+            ret = history_add(&tail, agent_string_view(title, strlen(title)),
+                              0, "历史操作：");
+        }
     }
     if (ret != AGENT_OK) {
         history_free(head);
