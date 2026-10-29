@@ -51,8 +51,12 @@
 #  error "ESP32-P4 SMP requires ESP32P4_SMP and exactly two HP CPUs"
 #endif
 
-#if defined(CONFIG_ESPRESSIF_SPIFLASH) || defined(CONFIG_PM)
-#  error "Flash MTD and power management need separate SMP validation"
+#if defined(CONFIG_PM)
+#  error "Power management needs separate SMP validation"
+#endif
+
+#if defined(CONFIG_ESPRESSIF_SPIFLASH) && !defined(CONFIG_ESP32P4_SMP_SPIFLASH)
+#  error "Flash MTD with SMP requires ESP32P4_SMP_SPIFLASH"
 #endif
 
 #if defined(CONFIG_ESPRESSIF_SPIRAM) && !defined(CONFIG_ESP32P4_SMP_PSRAM)
