@@ -48,12 +48,21 @@ config ESP32P4_SMP
 	depends on BUILD_FLAT && !ARCH_USE_S_MODE
 	depends on !ESP32P4_SELECTS_REV_LESS_V3 && !ARCH_RV_SHADOW_STACK
 	depends on ARCH_INTERRUPTSTACK > 0
-	depends on !ESPRESSIF_SPIFLASH && !ESPRESSIF_SPIRAM && !PM
+	depends on !ESPRESSIF_SPIFLASH && !PM
 	---help---
 		Enable the initial HP CPU1 startup and cross-core scheduler port.
-		This requires the project RISC-V custom SMP patch. Flash MTD,
-		PSRAM and power management remain disabled until their dual-core
-		cache and IPC paths have been validated.
+		This requires the project RISC-V custom SMP patch. Flash MTD and
+		power management remain disabled. PSRAM requires a separate
+		experimental opt-in for board validation.
+
+config ESP32P4_SMP_PSRAM
+	bool "Experimental PSRAM access with SMP"
+	depends on ESP32P4_SMP
+	default n
+	---help---
+		Allow PSRAM initialization and mapping on CPU0 before CPU1 starts.
+		Use the smp_psram profile to validate both CPUs before enabling
+		display scanout. Runtime remapping and Flash MTD remain out of scope.
 
 config ARCH_CUSTOM_SMP
 	bool

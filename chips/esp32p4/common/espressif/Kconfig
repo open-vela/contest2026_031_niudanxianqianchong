@@ -47,6 +47,7 @@ config ESPRESSIF_DONT_USE_ROM_LIBC
 menuconfig ESPRESSIF_SPIRAM
 	bool "External SPI RAM (SPIRAM)"
 	depends on ARCH_CHIP_ESP32P4
+	depends on !SMP || ESP32P4_SMP_PSRAM
 	default n
 	---help---
 		Enable external PSRAM support through the ESP HAL component.

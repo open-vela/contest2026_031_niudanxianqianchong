@@ -1,0 +1,19 @@
+diff --git a/components/hal/mmu_hal.c b/components/hal/mmu_hal.c
+index 95441f7463e..ddd3c1cbe75 100644
+--- a/components/hal/mmu_hal.c
++++ b/components/hal/mmu_hal.c
+@@ -41,7 +41,14 @@ void mmu_hal_unmap_all(void)
+ {
+ #if SOC_MMU_PER_EXT_MEM_TARGET
+     mmu_ll_unmap_all(MMU_LL_FLASH_MMU_ID);
++#if !CONFIG_ESPRESSIF_SPIRAM
++    /* With PSRAM enabled the S-bus MMU clear stalls before the PSRAM
++     * controller clock is initialized.  Simple Boot leaves no PSRAM
++     * mappings behind, so they do not need to be invalidated here.
++     */
++
+     mmu_ll_unmap_all(MMU_LL_PSRAM_MMU_ID);
++#endif
+ #else
+     for (int i = 0; i < s_ctx.core_nums; i++) {
+         mmu_ll_unmap_all(i);
