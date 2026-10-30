@@ -260,7 +260,7 @@ if(DEFINED ENV{ESP_HAL_3RDPARTY_VERSION})
       CACHE STRING "ESP HAL 3rdparty version")
 else()
   set(ESP_HAL_3RDPARTY_VERSION
-      0eb59f7e02a4735f2b9a78797e691b66740fcadb
+      b90b1837cb5ad24747deb4c895246037cc206ce5
       CACHE STRING "ESP HAL 3rdparty version")
 endif()
 
@@ -504,7 +504,7 @@ add_custom_command(
   COMMAND
     ${CMAKE_COMMAND} -DBINARY_DIR=${CMAKE_BINARY_DIR}
     -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -P
-    ${NUTTX_DIR}/tools/espressif/espressif_mkimage.cmake
+    ${CMAKE_CURRENT_LIST_DIR}/espressif_mkimage.cmake
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   COMMENT "Generating ESP-compatible binary"
   VERBATIM)

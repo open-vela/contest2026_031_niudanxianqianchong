@@ -150,13 +150,13 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/log
     ${ESP_HAL_3RDPARTY_REPO}/components/log/include
     ${ESP_HAL_3RDPARTY_REPO}/components/log/src/log_level/tag_log_level
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include/aes
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/psa_driver/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/core
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/include
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include/aes
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/psa_driver/include
     ${ESP_HAL_3RDPARTY_REPO}/components/riscv/include
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/include
@@ -186,7 +186,7 @@ else()
        ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/register/hw_ver3)
 endif()
 
-target_include_directories(arch PRIVATE ${ESP32P4_INCLUDES})
+target_include_directories(arch BEFORE PRIVATE ${ESP32P4_INCLUDES})
 
 # ##############################################################################
 # Linker Scripts (from hal_esp32p4.mk)

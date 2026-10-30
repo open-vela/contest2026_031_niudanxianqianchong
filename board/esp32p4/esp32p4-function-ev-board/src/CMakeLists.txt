@@ -29,6 +29,8 @@ if(CONFIG_ESP32P4_FUNCTION_EV_BOARD_AUDIO_ES8311)
 endif()
 
 if(CONFIG_BOARDCTL)
+  list(APPEND SRCS esp32p4_appinit.c)
+
   if(CONFIG_BOARDCTL_RESET)
     list(APPEND SRCS esp32p4_reset.c)
   endif()
