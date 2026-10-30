@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -482,6 +483,18 @@ int smart_home_camera_start(void)
       attr_initialized = true;
 #ifdef __NuttX__
       ret = pthread_attr_setstack(&attr, stack, SMART_HOME_CAMERA_STACK_SIZE);
+      if (ret == 0)
+        {
+          cpu_set_t cpuset;
+
+          /* V4L2 capture and the preview copy run on CPU0, next to the DSI
+           * scanout, so frame buffers never cross cores during cache sync.
+           */
+
+          CPU_ZERO(&cpuset);
+          CPU_SET(0, &cpuset);
+          ret = pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+        }
 #else
       (void)stack;
 #endif
