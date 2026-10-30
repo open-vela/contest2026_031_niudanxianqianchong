@@ -19,12 +19,75 @@
 #ifdef CONFIG_SMART_HOME_DEMO_UI_LVGL
 #include "../ui/lvgl/smart_home_lvgl.h"
 #endif
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+#include "../camera/smart_home_camera_service.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+
+static int smart_home_selftest_miloco_write(void)
+{
+    int ret = smart_home_secrets_set_miloco("127.0.0.1", 1, "selftest");
+
+    printf("smart_home_selftest: miloco write %s (%d)\n",
+           ret == AGENT_OK ? "PASS" : "FAIL", ret);
+    return ret == AGENT_OK ? 0 : 1;
+}
+
+static int smart_home_selftest_miloco_read(void)
+{
+    char host[64] = "";
+    char token[64] = "";
+    uint16_t port = 0;
+    int ret = smart_home_secrets_get_miloco(host, sizeof(host), &port,
+                                            token, sizeof(token));
+    int pass = ret == AGENT_OK && strcmp(host, "127.0.0.1") == 0 &&
+               port == 1 && strcmp(token, "selftest") == 0;
+
+    memset(token, 0, sizeof(token));
+    printf("smart_home_selftest: miloco read %s host=%s port=%u\n",
+           pass ? "PASS" : "FAIL", host, port);
+    return pass ? 0 : 1;
+}
+
+#if defined(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+static int smart_home_selftest_camera(void)
+{
+    struct smart_home_camera_status_s status;
+    int ret = smart_home_camera_start();
+
+    if (ret < 0)
+    {
+        printf("smart_home_selftest: camera start failed %d\n", ret);
+        return 1;
+    }
+
+    for (int i = 0; i < 50; i++)
+    {
+        if (smart_home_camera_get_status(&status) == 0 &&
+            status.state == SMART_HOME_CAMERA_RUNNING &&
+            status.preview_sequence > 0)
+        {
+            printf("smart_home_selftest: camera PASS preview=%u capture=%u\n",
+                   status.preview_sequence, status.capture_sequence);
+            smart_home_camera_stop();
+            return 0;
+        }
+
+        usleep(200 * 1000);
+    }
+
+    smart_home_camera_get_status(&status);
+    printf("smart_home_selftest: camera FAIL state=%d err=%d preview=%u\n",
+           status.state, status.last_error, status.preview_sequence);
+    smart_home_camera_stop();
+    return 1;
+}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -35,6 +98,25 @@ int main(int argc, char *argv[])
     int network_ret;
 #endif
     int ret;
+
+    /* Board self-tests run before network and agent initialization. */
+
+    if (argc > 1 && strcmp(argv[1], "--selftest-miloco-write") == 0)
+    {
+        return smart_home_selftest_miloco_write();
+    }
+
+    if (argc > 1 && strcmp(argv[1], "--selftest-miloco-read") == 0)
+    {
+        return smart_home_selftest_miloco_read();
+    }
+
+#if defined(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+    if (argc > 1 && strcmp(argv[1], "--selftest-camera") == 0)
+    {
+        return smart_home_selftest_camera();
+    }
+#endif
 
     printf("=== Smart Home Agent Demo ===\n");
     if (argc > 1) {

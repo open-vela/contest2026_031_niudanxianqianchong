@@ -69,6 +69,29 @@ def send(ser, command, wait=CMD_TIMEOUT):
     return read_for(ser, wait, stop=b'nsh>')
 
 
+def reset_board(ser):
+    ser.setDTR(False)
+    ser.setRTS(True)
+    time.sleep(0.15)
+    ser.setRTS(False)
+
+
+def reopen_and_boot(old_port):
+    ser = None
+    for _ in range(30):
+        try:
+            port = find_port(None)
+            ser = serial.Serial(port, 115200, timeout=0.3)
+            break
+        except Exception:
+            time.sleep(0.5)
+    if ser is None:
+        raise SystemExit('board did not re-enumerate after reboot')
+    reset_board(ser)
+    log = read_for(ser, BOOT_TIMEOUT, stop=b'nsh>')
+    return ser, log
+
+
 def check_boot(text):
     return 'CPU1 ready' in text and 'NuttShell (NSH)' in text
 
@@ -115,6 +138,9 @@ def main():
     results['video0'] = False
     results['secrets'] = False
     results['ping'] = False
+    results['camera'] = False
+    results['miloco_write'] = False
+    results['miloco_roundtrip'] = False
     results['ui_cpu0'] = False
 
     if results['boot']:
@@ -127,6 +153,29 @@ def main():
         out = send(ser, f'ping -c 3 {args.ping_target}', wait=25)
         results['ping'] = check_ping(out)
         log += out
+
+        cam = send(ser, 'smart_home --selftest-camera', wait=20)
+        log += cam
+        results['camera'] = 'camera PASS' in cam
+
+        # miloco persistence: write a marker, reboot, read it back through the
+        # same secrets API used by the UI.
+        write = send(ser, 'smart_home --selftest-miloco-write')
+        log += write
+        results['miloco_write'] = 'miloco write PASS' in write
+
+        ser.write(b'taskset 1 reboot\r')
+        time.sleep(2)
+        try:
+            ser.close()
+        except Exception:
+            pass
+        ser, boot2 = reopen_and_boot(port)
+        log += boot2
+
+        read = send(ser, 'smart_home --selftest-miloco-read')
+        log += read
+        results['miloco_roundtrip'] = 'miloco read PASS' in read
 
         send(ser, 'taskset 1 smart_home &', wait=3)
         ui = read_for(ser, 20)
@@ -148,7 +197,7 @@ def main():
     print('\n=== results ===')
     for key, ok in results.items():
         print(f'{key:10s} {"PASS" if ok else "FAIL"}')
-    print('\nMANUAL: touch response, display quality, miloco config round-trip')
+    print('\nMANUAL: touch response and display quality')
     print(f'log: {os.path.join(root, args.log)}')
 
     return 0 if all(results.values()) else 1
