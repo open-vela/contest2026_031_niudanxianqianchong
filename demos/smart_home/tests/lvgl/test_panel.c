@@ -8,6 +8,7 @@
 #include <time.h>
 
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
+static void test_screen_cycle(smart_home_lvgl_t *ui);
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -260,6 +261,7 @@ static void test_home(smart_home_lvgl_t *ui)
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MODEL_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(99) == -1);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
+    test_screen_cycle(ui);   /* 首页与设置页都还在，才能做切换稳定性回归 */
     lv_obj_delete(ui->screen_settings_v9);
     ui->screen_settings_v9 = NULL;
 
@@ -601,6 +603,38 @@ static void test_host_frame_budget(smart_home_lvgl_t *ui)
            (unsigned)before.uordblks, (unsigned)before.fordblks);
 }
 
+static uint32_t count_objects(lv_obj_t *root)
+{
+    uint32_t total = 1;
+    uint32_t i;
+
+    if (!root) return 0;
+    for (i = 0; i < lv_obj_get_child_cnt(root); i++) {
+        total += count_objects(lv_obj_get_child(root, i));
+    }
+    return total;
+}
+
+/* U40：连续页面切换不应增长对象树，也不应留下悬空控件。 */
+static void test_screen_cycle(smart_home_lvgl_t *ui)
+{
+    uint32_t before;
+    uint32_t after;
+    unsigned i;
+
+    assert(ui->screen_home && ui->screen_settings_v9);
+    before = count_objects(ui->screen_home) + count_objects(ui->screen_settings_v9);
+    for (i = 0; i < 200; i++) {
+        lv_screen_load(ui->screen_home);
+        lv_timer_handler();
+        lv_screen_load(ui->screen_settings_v9);
+        lv_timer_handler();
+    }
+    after = count_objects(ui->screen_home) + count_objects(ui->screen_settings_v9);
+    assert(before == after);
+    printf("PASS: 200 screen switches keep the object tree stable (%u objects)\n",
+           (unsigned)after);
+}
 static void test_v9_views(void)
 {
     smart_home_state_t state;
