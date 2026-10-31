@@ -18,7 +18,7 @@
 #include <string.h>
 
 #define SMART_HOME_CHAT_INPUT_H 56
-#define SMART_HOME_CHAT_HEADER_H 148
+#define SMART_HOME_CHAT_HEADER_H 124
 #define SMART_HOME_CHAT_STATUS_H 22
 
 static int chat_content_width(void)
@@ -843,9 +843,6 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     label = smart_home_lvgl_label_create(screen, "智能管家",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
     lv_obj_set_pos(label, 24, 76);
-    label = smart_home_lvgl_label_create(screen, "聊聊日常，也帮你照顾家",
-                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
-    lv_obj_set_pos(label, 24, 110);
 
     /* Preserve session clearing without taking space from the input row. */
     button = lv_button_create(screen);

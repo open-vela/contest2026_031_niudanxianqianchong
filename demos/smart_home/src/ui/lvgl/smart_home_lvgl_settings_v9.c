@@ -1301,7 +1301,6 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
 {
     lv_obj_t *screen;
     lv_obj_t *title;
-    lv_obj_t *subtitle;
     lv_obj_t *left;
     lv_obj_t *right;
 
@@ -1321,22 +1320,19 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     title = smart_home_lvgl_label_create(screen, "设置",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
     lv_obj_set_pos(title, 24, 76);
-    subtitle = smart_home_lvgl_label_create(screen, "连接家庭，按习惯调整",
-                                            SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
-    lv_obj_set_pos(subtitle, 24, 110);
 
     left = lv_obj_create(screen);
     lv_obj_remove_style_all(left);
-    lv_obj_set_size(left, 208, 384);
-    lv_obj_set_pos(left, 24, 136);
+    lv_obj_set_size(left, 208, 408);
+    lv_obj_set_pos(left, 24, 112);
     smart_home_lvgl_card_style(left);
     lv_obj_set_style_radius(left, 18, 0);
     lv_obj_set_style_pad_all(left, 0, 0);
 
     right = lv_obj_create(screen);
     lv_obj_remove_style_all(right);
-    lv_obj_set_size(right, 752, 384);
-    lv_obj_set_pos(right, 248, 136);
+    lv_obj_set_size(right, 752, 408);
+    lv_obj_set_pos(right, 248, 112);
     smart_home_lvgl_card_style(right);
     lv_obj_set_style_radius(right, 18, 0);
     lv_obj_set_style_pad_all(right, 23, 0);

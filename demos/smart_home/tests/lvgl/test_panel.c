@@ -1,6 +1,7 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
 #include "smart_home_v9_device_view.h"
+#include "icons/smart_home_lvgl_png_icons.h"
 #include "../../src/config/smart_home_backends.h"
 #include <assert.h>
 #include <malloc.h>
@@ -197,19 +198,24 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_build_screensaver_screen(ui);
     assert(!strcmp(lv_label_get_text(ui->home_status_label),
                    "在线 1 / 共 2 台\n米家设备状态"));
-    assert(!strcmp(lv_label_get_text(ui->home_env_label), "天气数据暂不可用"));
+    assert(!strcmp(lv_label_get_text(ui->home_env_label), "晴天"));
     assert(!strcmp(lv_label_get_text(ui->home_weather_temp_label), "--°"));
     weather.valid = true;
     strcpy(weather.city, "Beijing");
     strcpy(weather.condition_cn, "小雨");
+    strcpy(weather.condition_en, "Light rain");
     weather.temperature = 18;
     weather.humidity = 72;
     smart_home_lvgl_refresh_home(ui);
     assert(!strcmp(lv_label_get_text(ui->home_weather_city_label), "Beijing"));
     assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "小雨 · 18°C"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_temp_label), "18°"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_condition_label), "小雨"));
     weather.valid = false;
     smart_home_lvgl_refresh_home(ui);
-    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "天气数据暂不可用"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "晴天"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_condition_label), "晴天"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_temp_label), "--°"));
     gateway_online = false;
     smart_home_lvgl_refresh_home(ui);
     assert(strstr(lv_label_get_text(ui->home_status_label), "未知"));
@@ -217,8 +223,9 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_refresh_home(ui);
 
     smart_home_lvgl_update_clock_at(ui, 1574985600); /* board's 2019 boot date */
-    assert(!strcmp(lv_label_get_text(ui->home_time_label), "--:--"));
-    assert(!strcmp(lv_label_get_text(ui->screensaver_date_label), "时间待同步"));
+    assert(!strcmp(lv_label_get_text(ui->home_time_label), "12:00"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_time_label), "12:00"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_date_label), ""));
     struct tm moment = {.tm_year = 126, .tm_mon = 9, .tm_mday = 26,
                         .tm_hour = 15, .tm_min = 59};
     time_t utc = timegm(&moment);
@@ -988,7 +995,7 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     assert(key);
     lv_obj_get_coords(key, &key_bounds);
     lv_obj_get_content_coords(lv_obj_get_parent(key), &parent_bounds);
-    assert(key_bounds.x1 == 272 && key_bounds.y1 == 306);
+    assert(key_bounds.x1 == 272 && key_bounds.y1 == 282);
     assert(lv_obj_get_width(key) == 704 && lv_obj_get_height(key) == 44);
     assert(key_bounds.x2 <= parent_bounds.x2 && key_bounds.y2 <= parent_bounds.y2);
     lv_area_t input;
@@ -998,5 +1005,45 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     assert(lv_obj_get_height(ui->chat_input_bar) == 56);
     assert(lv_obj_get_width(ui->chat_input) == 704);
     assert(lv_obj_get_style_text_font(ui->chat_input, 0) == smart_home_lvgl_font(17));
+    assert(!find_v9_label(ui->screen_chat, "聊聊日常，也帮你照顾家"));
+    assert(!find_v9_label(ui->screen_settings_v9, "连接家庭，按习惯调整"));
+    lv_area_t list_bounds;
+    lv_obj_get_coords(ui->chat_list, &list_bounds);
+    assert(list_bounds.y1 == 124 && lv_obj_get_height(ui->chat_list) == 304);
+    lv_obj_t *settings_content = lv_obj_get_parent(lv_obj_get_parent(key));
+    lv_obj_get_coords(settings_content, &parent_bounds);
+    assert(parent_bounds.y1 == 112 && lv_obj_get_height(settings_content) == 408);
+
+    /* Every page shares the same compact status cluster and fallback clock. */
+    smart_home_lvgl_update_clock_at(ui, 0);
+    for (int i = 0; i < ui->topbar_clock_count; i++) {
+        lv_obj_t *clock = ui->topbar_clock_labels[i];
+        lv_obj_t *top = lv_obj_get_parent(clock);
+        lv_area_t clock_bounds, previous;
+        lv_obj_update_layout(top);
+        lv_obj_get_coords(clock, &clock_bounds);
+        assert(!strcmp(lv_label_get_text(clock), "12:00"));
+        assert(clock_bounds.x2 == 1007 && lv_obj_get_width(clock) == 56);
+        for (int j = 0; j < 4; j++) {
+            lv_obj_t *icon = lv_obj_get_child(top, 3 + j);
+            lv_area_t icon_bounds;
+            lv_obj_get_coords(icon, &icon_bounds);
+            assert(lv_obj_get_width(icon) == 20);
+            if (j > 0) assert(icon_bounds.x1 - previous.x2 - 1 == 12);
+            previous = icon_bounds;
+        }
+        assert(clock_bounds.x1 - previous.x2 - 1 == 12);
+    }
+    weather.valid = false;
+    smart_home_lvgl_refresh_home(ui);
+    assert(!weather.valid);
+    assert(!strcmp(lv_label_get_text(ui->home_weather_condition_label), "晴天"));
+    assert(lv_image_get_src(lv_obj_get_child(ui->home_weather_badge, 0)) ==
+           smart_home_lvgl_png_icon_get("asset:sun", 32));
+    weather.valid = true;
+    smart_home_lvgl_refresh_home(ui);
+    assert(!strcmp(lv_label_get_text(ui->home_weather_condition_label), "小雨"));
+    assert(lv_image_get_src(lv_obj_get_child(ui->home_weather_badge, 0)) ==
+           smart_home_lvgl_png_icon_get("asset:cloud-rain", 32));
     puts("PASS: all three real navigation bars, pixel colors, tab clicks and chat input geometry");
 }

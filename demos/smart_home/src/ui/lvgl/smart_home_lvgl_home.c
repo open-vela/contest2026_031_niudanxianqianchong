@@ -230,7 +230,6 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title)
 {
-    static const int status_x[4] = { 742, 790, 838, 886 };
     lv_obj_t *bar;
     lv_obj_t *brand;
     lv_obj_t *clock;
@@ -268,10 +267,12 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                          18);
     lv_obj_set_pos(brand, 72, 18);
 
-    clock = smart_home_lvgl_label_create(bar, "--:--",
+    clock = smart_home_lvgl_label_create(bar, SMART_HOME_UI_DEFAULT_CLOCK,
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                          18);
-    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -24, 16);
+    lv_obj_set_width(clock, 56);
+    lv_obj_set_style_text_align(clock, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -16, 16);
     if (ui && ui->topbar_clock_count <
                    (int)(sizeof(ui->topbar_clock_labels) /
                          sizeof(ui->topbar_clock_labels[0]))) {
@@ -299,7 +300,8 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
         }
         color = i == 3 ? topbar_network_color(ui) :
                          SMART_HOME_UI_COLOR_TEXT_SECONDARY;
-        lv_obj_set_pos(icon, status_x[i], 18);
+        /* 16 px right inset, 56 px clock, 12 px gaps and 20 px icons. */
+        lv_obj_align(icon, LV_ALIGN_TOP_RIGHT, -(16 + 56 + 12 + (3 - i) * 32), 18);
         lv_obj_set_style_text_color(icon, color, 0);
         smart_home_lvgl_icon_color(icon, color);
         if (i == 3 && ui && ui->topbar_wifi_icon_count <
@@ -378,6 +380,19 @@ static const char *weather_icon_for(const char *condition_en)
 
     /* 降水/雾/霾类 → 云雨（现有资产中最接近的图形） */
     return "asset:cloud-rain";
+}
+
+static void home_weather_set_icon(smart_home_lvgl_t *ui, const char *name)
+{
+    if (ui->home_weather_badge) {
+        int size = lv_obj_get_width(ui->home_weather_badge) > 40 ? 60 : 32;
+        const lv_image_dsc_t *asset = smart_home_lvgl_png_icon_get(name, size);
+        lv_obj_t *glyph = lv_obj_get_child(ui->home_weather_badge, 0);
+
+        if (asset && glyph && lv_obj_check_type(glyph, &lv_image_class)) {
+            lv_image_set_src(glyph, asset);
+        }
+    }
 }
 
 static lv_obj_t *home_icon_badge(lv_obj_t *card, const char *icon,
@@ -592,16 +607,26 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                 }
                 if (ui->screensaver_weather_label) {
                     snprintf(buf, sizeof(buf), "%s · %d°C",
-                        wx.condition_cn[0] ? wx.condition_cn : "天气", wx.temperature);
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER, wx.temperature);
                     lv_label_set_text(ui->screensaver_weather_label, buf);
                 }
                 snprintf(buf, sizeof(buf), "%d°", wx.temperature);
                 if (ui->home_weather_temp_label) {
                     lv_label_set_text(ui->home_weather_temp_label, buf);
                 }
+                if (ui->screensaver_temp_label) {
+                    lv_label_set_text(ui->screensaver_temp_label, buf);
+                }
+                if (ui->screensaver_condition_label) {
+                    lv_label_set_text(ui->screensaver_condition_label,
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER);
+                }
                 if (ui->home_weather_condition_label) {
                     lv_label_set_text(ui->home_weather_condition_label,
-                                      wx.condition_cn);
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER);
                 }
                 snprintf(buf, sizeof(buf), "%s · 湿度 %d%%\n风速 %d km/h",
                          wx.condition_cn, wx.humidity, wx.wind_kmph);
@@ -609,39 +634,25 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                     lv_label_set_text(ui->home_env_label, buf);
                 }
                 /* 图标随真实天气同步：晴=太阳，降水=云雨，其他保持云雨。 */
-                if (ui->home_weather_badge) {
-                    const char *icon = weather_icon_for(wx.condition_en);
-                    int icon_size =
-                        lv_obj_get_width(ui->home_weather_badge) > 40 ? 60 : 32;
-                    const lv_image_dsc_t *asset =
-                        smart_home_lvgl_png_icon_get(icon, icon_size);
-
-                    if (asset) {
-                        lv_obj_t *glyph =
-                            lv_obj_get_child(ui->home_weather_badge, 0);
-
-                        if (glyph) {
-                            lv_image_set_src(glyph, asset);
-                        }
-                    }
-                }
+                home_weather_set_icon(ui, weather_icon_for(wx.condition_en));
             } else {
                 if (ui->home_weather_temp_label)
                     lv_label_set_text(ui->home_weather_temp_label, "--°");
                 if (ui->home_weather_city_label)
-                    lv_label_set_text(ui->home_weather_city_label, "天气城市待获取");
+                    lv_label_set_text(ui->home_weather_city_label, "");
                 if (ui->home_env_label)
-                    lv_label_set_text(ui->home_env_label, "天气数据暂不可用");
+                    lv_label_set_text(ui->home_env_label, SMART_HOME_UI_DEFAULT_WEATHER);
                 if (ui->home_weather_condition_label)
                     lv_label_set_text(ui->home_weather_condition_label,
-                                      "天气待获取");
+                                      SMART_HOME_UI_DEFAULT_WEATHER);
                 if (ui->screensaver_weather_label)
-                    lv_label_set_text(ui->screensaver_weather_label, "天气数据暂不可用");
+                    lv_label_set_text(ui->screensaver_weather_label, SMART_HOME_UI_DEFAULT_WEATHER);
                 if (ui->screensaver_temp_label)
                     lv_label_set_text(ui->screensaver_temp_label, "--°");
                 if (ui->screensaver_condition_label)
                     lv_label_set_text(ui->screensaver_condition_label,
-                                      "天气待获取");
+                                      SMART_HOME_UI_DEFAULT_WEATHER);
+                home_weather_set_icon(ui, "asset:sun");
             }
         }
         if (ui->home_status_label) {
@@ -673,8 +684,8 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
 void smart_home_lvgl_update_clock_at(smart_home_lvgl_t *ui, time_t utc)
 {
     struct tm tm_now;
-    char clock_text[16] = "--:--";
-    char date_text[40] = "时间待同步";
+    char clock_text[16] = SMART_HOME_UI_DEFAULT_CLOCK;
+    char date_text[40] = "";
     static const char *const weekdays[] = {"日", "一", "二", "三", "四", "五", "六"};
     if (!ui) return;
     if (utc >= 1577836800L) {
@@ -750,13 +761,13 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     ui->home_date_label = smart_home_lvgl_label_create(card, "",
                                                        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_align(ui->home_date_label, LV_ALIGN_TOP_LEFT, 0, 0);
-    ui->home_time_label = smart_home_lvgl_label_create(card, "--:--",
+    ui->home_time_label = smart_home_lvgl_label_create(card, SMART_HOME_UI_DEFAULT_CLOCK,
                                                        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_align(ui->home_time_label, LV_ALIGN_TOP_LEFT, 0, 24);
-    ui->home_weather_city_label = smart_home_lvgl_label_create(card, "天气城市待获取",
+    ui->home_weather_city_label = smart_home_lvgl_label_create(card, "",
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_align(ui->home_weather_city_label, LV_ALIGN_TOP_LEFT, 0, 70);
-    ui->home_weather_badge = home_icon_badge(card, ICON_HUMIDITY,
+    ui->home_weather_badge = home_icon_badge(card, "asset:sun",
                                              lv_color_hex(0xEAF4F5), 76);
     /* Make the weather pictogram the visual anchor of the tall card. */
     lv_obj_align(ui->home_weather_badge, LV_ALIGN_CENTER, 0, -10);

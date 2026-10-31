@@ -614,27 +614,6 @@ static void v9_add_room_cb(lv_event_t *event)
 
 static void v9_update_time(smart_home_lvgl_t *ui)
 {
-    struct timespec ts;
-    struct tm tm_now;
-    char date_buf[48] = "时间待同步";
-    char time_buf[16] = "--:--";
-    static const char *const wd[] = {"日", "一", "二", "三", "四", "五", "六"};
-
-    if (!ui) {
-        return;
-    }
-    if (clock_gettime(CLOCK_REALTIME, &ts) == 0 && ts.tv_sec >= 1000000000L) {
-        ts.tv_sec += 8 * 3600L;
-        if (gmtime_r(&ts.tv_sec, &tm_now)) {
-            snprintf(date_buf, sizeof(date_buf), "%d月%d日 周%s",
-                     tm_now.tm_mon + 1, tm_now.tm_mday,
-                     wd[tm_now.tm_wday % 7]);
-            snprintf(time_buf, sizeof(time_buf), "%02d:%02d",
-                     tm_now.tm_hour, tm_now.tm_min);
-        }
-    }
-    if (ui->home_date_label) lv_label_set_text(ui->home_date_label, date_buf);
-    if (ui->home_time_label) lv_label_set_text(ui->home_time_label, time_buf);
     smart_home_lvgl_update_clock(ui);
 }
 
@@ -982,12 +961,12 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
 
     smart_home_lvgl_build_top_bar(screen, ui, "OpenVela HOME");
 
-    ui->home_date_label = v9_text(screen, "10月30日 周五", 28, 84, 14,
+    ui->home_date_label = v9_text(screen, "", 28, 84, 14,
                                   SMART_HOME_UI_COLOR_TEXT_SECONDARY);
-    ui->home_time_label = v9_text(screen, "19:39", 24, 106, 50,
+    ui->home_time_label = v9_text(screen, SMART_HOME_UI_DEFAULT_CLOCK, 24, 106, 50,
                                   SMART_HOME_UI_COLOR_TEXT_PRIMARY);
     ui->home_weather_condition_label = v9_text(
-        screen, "天气待获取", 244, 84, 14, SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+        screen, SMART_HOME_UI_DEFAULT_WEATHER, 244, 84, 14, SMART_HOME_UI_COLOR_TEXT_SECONDARY);
     ui->home_weather_temp_label = v9_text(
         screen, "--°", 240, 106, 50, SMART_HOME_UI_COLOR_TEXT_PRIMARY);
 
@@ -999,7 +978,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
     ui->home_weather_badge = badge;
     icon = lv_image_create(badge);
-    lv_image_set_src(icon, smart_home_lvgl_png_icon_get("asset:cloud-rain", 32));
+    lv_image_set_src(icon, smart_home_lvgl_png_icon_get("asset:sun", 32));
     lv_obj_set_size(icon, 32, 32);
     lv_obj_center(icon);
 
