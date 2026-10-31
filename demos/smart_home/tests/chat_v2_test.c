@@ -30,6 +30,8 @@ void lv_label_set_text(lv_obj_t *obj, const char *text)
 }
 void lv_obj_set_style_text_color(lv_obj_t *obj, lv_color_t color, lv_style_selector_t selector)
 { (void)obj; (void)color; (void)selector; }
+void lv_obj_set_style_bg_color(lv_obj_t *obj, lv_color_t color, lv_style_selector_t selector)
+{ (void)obj; (void)color; (void)selector; }
 void lv_obj_invalidate(const lv_obj_t *obj) { (void)obj; }
 void lv_obj_update_layout(const lv_obj_t *obj) { (void)obj; }
 void lv_obj_scroll_to_y(lv_obj_t *obj, int32_t y, lv_anim_enable_t animation)
@@ -55,7 +57,7 @@ int main(void)
     assert(!strcmp(tool_text, "未确认") && !strcmp(header_text, "结果待确认"));
     ui.chat_trace_tools[0].state = 1;
     smart_home_lvgl_finish_thinking(&ui);
-    assert(!strcmp(header_text, "已返回"));
+    assert(!strcmp(header_text, "完成"));
     ui.request_inflight = 1;
     assert(smart_home_lvgl_chat_clear(&ui) == AGENT_ERROR_BUSY && clear_calls == 0 && cleaned == 0);
     ui.request_inflight = 0;

@@ -4,6 +4,7 @@
 
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
+#include "icons/smart_home_lvgl_png_icons.h"
 
 #include "../../config/smart_home_config.h"
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
@@ -16,15 +17,19 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SMART_HOME_CHAT_INPUT_H 48
-#define SMART_HOME_CHAT_HEADER_H (SMART_HOME_TOPBAR_H + 54)
+#define SMART_HOME_CHAT_INPUT_H 56
+#define SMART_HOME_CHAT_HEADER_H 148
 #define SMART_HOME_CHAT_STATUS_H 22
+
+static int chat_content_width(void)
+{
+    return smart_home_lvgl_disp_w() - 48;
+}
 
 static int chat_list_height(int keyboard_visible)
 {
     int reserved = SMART_HOME_CHAT_HEADER_H + SMART_HOME_NAV_H +
-                   SMART_HOME_NAV_BOTTOM_PAD + SMART_HOME_CHAT_INPUT_H +
-                   SMART_HOME_CHAT_STATUS_H + 16;
+                   16 + SMART_HOME_CHAT_INPUT_H + SMART_HOME_CHAT_STATUS_H + 14;
     int list_h;
 
     if (keyboard_visible) {
@@ -44,8 +49,8 @@ static void layout_chat_controls(smart_home_lvgl_t *ui, int keyboard_visible)
         return;
     }
 
-    content_w = smart_home_lvgl_content_w();
-    input_y = -SMART_HOME_NAV_H - SMART_HOME_NAV_BOTTOM_PAD - 8;
+    content_w = chat_content_width();
+    input_y = -SMART_HOME_NAV_H - 16;
 
     if (ui->chat_list) {
         lv_obj_set_size(ui->chat_list,
@@ -196,7 +201,8 @@ void smart_home_lvgl_chat_asr_finish(smart_home_lvgl_t *ui)
         smart_home_lvgl_set_bg(ui->chat_mic_btn, SMART_HOME_UI_COLOR_PRIMARY);
     }
     if (ui->chat_mic_label) {
-        lv_label_set_text(ui->chat_mic_label, "语音");
+        lv_image_set_src(ui->chat_mic_label,
+            smart_home_lvgl_png_icon_get("asset:microphone", 32));
     }
 }
 
@@ -225,7 +231,8 @@ void smart_home_lvgl_chat_asr_begin(smart_home_lvgl_t *ui)
         smart_home_lvgl_set_bg(ui->chat_mic_btn, SMART_HOME_UI_COLOR_DANGER);
     }
     if (ui->chat_mic_label) {
-        lv_label_set_text(ui->chat_mic_label, "停止");
+        lv_image_set_src(ui->chat_mic_label,
+            smart_home_lvgl_png_icon_get("asset:microphone-off", 32));
     }
     if (ui->chat_status) {
         lv_label_set_text(ui->chat_status, "正在录音，再点一次结束…");
@@ -256,6 +263,20 @@ static void chat_mic_event_cb(lv_event_t *event)
 }
 #endif
 
+static void chat_avatar(lv_obj_t *row, int is_user)
+{
+    lv_obj_t *avatar = lv_obj_create(row);
+    lv_obj_t *glyph;
+    lv_obj_remove_style_all(avatar);
+    lv_obj_set_size(avatar, is_user ? 44 : 32, 44);
+    lv_obj_set_style_radius(avatar, 22, 0);
+    lv_obj_clear_flag(avatar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    if (is_user) smart_home_lvgl_set_bg(avatar, SMART_HOME_UI_COLOR_SURFACE);
+    glyph = smart_home_lvgl_icon_create(avatar,
+        is_user ? "asset:user" : "asset:setting-ai", 32, 32);
+    if (glyph) lv_obj_center(glyph);
+}
+
 void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
                                        const char *text,
                                        int is_user)
@@ -263,59 +284,45 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
     lv_obj_t *row;
     lv_obj_t *bubble;
     lv_obj_t *label;
-    int width;
+    int width = is_user ? 568 : 696;
 
-    if (!ui || !ui->chat_list || !text) {
-        return;
-    }
-
+    if (!ui || !ui->chat_list || !text) return;
     row = create_chat_row(ui, is_user);
-    lv_obj_set_style_pad_column(row, 8, 0);
-    width = smart_home_lvgl_content_w() * 58 / 100;
+    lv_obj_set_style_pad_column(row, 12, 0);
+    if (is_user) lv_obj_set_style_pad_bottom(row, 14, 0);
+    else chat_avatar(row, 0);
     bubble = lv_obj_create(row);
     lv_obj_remove_style_all(bubble);
     lv_obj_set_width(bubble, width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
-    lv_obj_clear_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_pad_all(bubble, 12, 0);
-    lv_obj_set_style_radius(bubble, 12, 0);
-    smart_home_lvgl_set_bg(bubble,
-                           is_user ? SMART_HOME_UI_COLOR_USER_BUBBLE :
-                                     SMART_HOME_UI_COLOR_SURFACE);
-
-    label = smart_home_lvgl_label_create(bubble,
-                                         text,
-                                         is_user ? SMART_HOME_UI_COLOR_PRIMARY :
-                                                   SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         14);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(label, width - 24);
-    if (is_user) {
-        lv_obj_t *avatar = lv_obj_create(row);
-        lv_obj_t *glyph;
-
-        lv_obj_remove_style_all(avatar);
-        lv_obj_set_size(avatar, 44, 44);
-        lv_obj_set_style_radius(avatar, 22, 0);
-        smart_home_lvgl_set_bg(avatar, SMART_HOME_UI_COLOR_SURFACE_ON);
-        lv_obj_clear_flag(avatar, LV_OBJ_FLAG_CLICKABLE);
-        glyph = smart_home_lvgl_icon_create(avatar, "asset:user", 32, 32);
-        if (glyph) {
-            lv_obj_center(glyph);
-        }
+    lv_obj_set_style_min_height(bubble, is_user ? 60 : 136, 0);
+    lv_obj_clear_flag(bubble, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(bubble, 20, 0);
+    lv_obj_set_style_radius(bubble, is_user ? 16 : 18, 0);
+    smart_home_lvgl_set_bg(bubble, is_user ? SMART_HOME_UI_COLOR_USER_BUBBLE :
+                                            SMART_HOME_UI_COLOR_SURFACE);
+    if (!is_user) {
+        lv_obj_set_style_border_width(bubble, 1, 0);
+        lv_obj_set_style_border_color(bubble, SMART_HOME_UI_COLOR_BORDER, 0);
     }
+    label = smart_home_lvgl_label_create(bubble, text,
+        is_user ? SMART_HOME_UI_COLOR_TEXT_PRIMARY : SMART_HOME_UI_COLOR_TEXT_SECONDARY, 18);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, width - 40);
+    lv_obj_set_style_text_line_space(label, 6, 0);
+    if (is_user) chat_avatar(row, 1);
     scroll_chat_to_bottom(ui);
 }
 
 static const char *tool_status_text(int ok)
 {
     if (ok > 0) {
-        return "已返回";
+        return "完成";
     }
     if (ok == 0) {
-        return "未完成";
+        return "失败";
     }
-    return ok == -2 ? "未确认" : "处理中…";
+    return ok == -2 ? "未确认" : "调用中";
 }
 
 /* Protocol names and call IDs remain internal to event matching. */
@@ -379,13 +386,22 @@ static void refresh_trace_header(smart_home_lvgl_t *ui)
         }
     }
 
+    if (ui->chat_trace_title && ui->chat_trace_tool_count) {
+        lv_label_set_text(ui->chat_trace_title,
+            ui->chat_trace_tool_count == 1 ?
+            smart_home_lvgl_tool_display_name(ui->chat_trace_tools[0].name) : "工具调用");
+    }
+    lv_obj_set_style_bg_color(ui->chat_trace_status,
+        has_failed ? SMART_HOME_UI_COLOR_ERROR_BUBBLE_BG :
+        has_running || has_unknown ? SMART_HOME_UI_COLOR_TOOL_CARD_BG :
+                                     lv_color_hex(0xE4EEE7), 0);
     if (has_running) {
-        lv_label_set_text(ui->chat_trace_status, "处理中…");
+        lv_label_set_text(ui->chat_trace_status, "调用中");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_WARNING,
                                     0);
     } else if (has_failed) {
-        lv_label_set_text(ui->chat_trace_status, "有操作未完成");
+        lv_label_set_text(ui->chat_trace_status, "失败");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_DANGER,
                                     0);
@@ -395,7 +411,7 @@ static void refresh_trace_header(smart_home_lvgl_t *ui)
                                     SMART_HOME_UI_COLOR_WARNING,
                                     0);
     } else {
-        lv_label_set_text(ui->chat_trace_status, "已返回");
+        lv_label_set_text(ui->chat_trace_status, "完成");
         lv_obj_set_style_text_color(ui->chat_trace_status,
                                     SMART_HOME_UI_COLOR_SUCCESS,
                                     0);
@@ -470,18 +486,18 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
     ui->chat_trace_active = 1;
 
     row = create_chat_row(ui, 0);
-    width = smart_home_lvgl_content_w() * 78 / 100;
+    lv_obj_set_style_pad_left(row, 44, 0);
+    width = 696;
     card = lv_obj_create(row);
     lv_obj_remove_style_all(card);
     lv_obj_set_width(card, width);
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     smart_home_lvgl_card_style(card);
-    smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_TOOL_CARD_BG);
+    smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_SURFACE);
     lv_obj_set_style_pad_all(card, 8, 0);
     lv_obj_set_style_pad_row(card, 6, 0);
-    lv_obj_set_style_border_side(card, LV_BORDER_SIDE_LEFT, 0);
-    lv_obj_set_style_border_width(card, 3, 0);
-    lv_obj_set_style_border_color(card, SMART_HOME_UI_COLOR_WARNING, 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_radius(card, 12, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
 
     header = lv_obj_create(card);
@@ -497,16 +513,21 @@ static void ensure_trace_card(smart_home_lvgl_t *ui)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 6, 0);
 
-    smart_home_lvgl_icon_create(header, ICON_TOOL, 14, 14);
+    smart_home_lvgl_icon_create(header, ICON_TOOL, 20, 20);
     ui->chat_trace_title = smart_home_lvgl_label_create(header,
-                                                        "操作记录 · 点按查看",
-                                                        SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                                        12);
+                                                        "工具调用",
+                                                        SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                                        15);
     lv_obj_set_flex_grow(ui->chat_trace_title, 1);
     ui->chat_trace_status = smart_home_lvgl_label_create(header,
-                                                         "处理中…",
+                                                         "调用中",
                                                          SMART_HOME_UI_COLOR_WARNING,
-                                                         12);
+                                                         14);
+    lv_obj_set_size(ui->chat_trace_status, 112, 30);
+    lv_obj_set_style_text_align(ui->chat_trace_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(ui->chat_trace_status, 6, 0);
+    lv_obj_set_style_radius(ui->chat_trace_status, 15, 0);
+    lv_obj_set_style_bg_opa(ui->chat_trace_status, LV_OPA_COVER, 0);
 
     body = lv_obj_create(card);
     lv_obj_remove_style_all(body);
@@ -807,128 +828,105 @@ static void chat_new_event_cb(lv_event_t *event)
 
 void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
 {
-    lv_obj_t *screen;
+    lv_obj_t *screen = lv_obj_create(NULL);
     lv_obj_t *input_bar;
     lv_obj_t *label;
-    lv_obj_t *new_button;
-    int content_w = smart_home_lvgl_content_w();
+    lv_obj_t *button;
+    lv_obj_t *mic;
+    int content_w = chat_content_width();
 
-    screen = lv_obj_create(NULL);
     lv_obj_remove_style_all(screen);
     smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
+    lv_obj_set_style_text_font(screen, smart_home_lvgl_font(16), 0);
     ui->screen_chat = screen;
-
     smart_home_lvgl_build_top_bar(screen, ui, "聊天");
-    label = smart_home_lvgl_label_create(screen, "聊天",
+    label = smart_home_lvgl_label_create(screen, "智能管家",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
     lv_obj_set_pos(label, 24, 76);
+    label = smart_home_lvgl_label_create(screen, "聊聊日常，也帮你照顾家",
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_set_pos(label, 24, 110);
 
-    /* Chat message list — scrollable, fills most of the screen */
+    /* Preserve session clearing without taking space from the input row. */
+    button = lv_button_create(screen);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 96, 36);
+    lv_obj_set_pos(button, smart_home_lvgl_disp_w() - 120, 76);
+    lv_obj_set_style_radius(button, 10, 0);
+    smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, chat_new_event_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "新对话",
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_center(label);
+
     ui->chat_list = lv_obj_create(screen);
     lv_obj_remove_style_all(ui->chat_list);
-    lv_obj_set_size(ui->chat_list,
-                    content_w,
-                    chat_list_height(0));
-    lv_obj_align(ui->chat_list,
-                 LV_ALIGN_TOP_MID,
-                 0,
-                 SMART_HOME_CHAT_HEADER_H);
+    lv_obj_set_size(ui->chat_list, content_w, chat_list_height(0));
     lv_obj_set_flex_flow(ui->chat_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(ui->chat_list, 4, 0);
-    lv_obj_set_style_pad_row(ui->chat_list, 8, 0);
+    lv_obj_set_style_pad_all(ui->chat_list, 0, 0);
+    lv_obj_set_style_pad_row(ui->chat_list, 12, 0);
     smart_home_lvgl_set_bg(ui->chat_list, SMART_HOME_UI_COLOR_BG);
+    lv_obj_set_scrollbar_mode(ui->chat_list, LV_SCROLLBAR_MODE_AUTO);
 
     input_bar = lv_obj_create(screen);
     lv_obj_remove_style_all(input_bar);
     lv_obj_set_size(input_bar, content_w, SMART_HOME_CHAT_INPUT_H);
-    lv_obj_set_flex_flow(input_bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(input_bar,
-                          LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(input_bar, 0, 0);
-    lv_obj_set_style_pad_column(input_bar, 8, 0);
-    smart_home_lvgl_set_bg(input_bar, SMART_HOME_UI_COLOR_BG);
+    smart_home_lvgl_set_bg(input_bar, SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_set_style_border_color(input_bar, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_border_width(input_bar, 1, 0);
+    lv_obj_set_style_radius(input_bar, 18, 0);
+    lv_obj_clear_flag(input_bar, LV_OBJ_FLAG_SCROLLABLE);
     ui->chat_input_bar = input_bar;
 
-    ui->chat_input = lv_textarea_create(input_bar);
+    button = lv_button_create(input_bar);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 48, 48);
+    lv_obj_set_pos(button, 8, 4);
+    lv_obj_set_style_radius(button, 12, 0);
+    mic = smart_home_lvgl_icon_create(button, "asset:microphone", 32, 32);
+    if (mic) lv_obj_center(mic);
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
-    lv_obj_set_size(ui->chat_input, content_w - 208, SMART_HOME_CHAT_INPUT_H);
+    ui->chat_mic_btn = button;
+    ui->chat_mic_label = mic;
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, chat_mic_event_cb, LV_EVENT_CLICKED, ui);
 #else
-    lv_obj_set_size(ui->chat_input, content_w - 152, SMART_HOME_CHAT_INPUT_H);
+    if (mic) lv_image_set_src(mic,
+        smart_home_lvgl_png_icon_get("asset:microphone-off", 32));
+    lv_obj_add_state(button, LV_STATE_DISABLED);
 #endif
+
+    ui->chat_input = lv_textarea_create(input_bar);
+    lv_obj_set_size(ui->chat_input, content_w - 272, 48);
+    lv_obj_set_pos(ui->chat_input, 64, 0);
     lv_textarea_set_one_line(ui->chat_input, true);
-    lv_textarea_set_placeholder_text(ui->chat_input, "问问 OpenVela…");
-    lv_obj_set_style_text_font(ui->chat_input, smart_home_lvgl_font(12), 0);
-    lv_obj_set_style_radius(ui->chat_input, 8, 0);
-    lv_obj_set_style_border_color(ui->chat_input, SMART_HOME_UI_COLOR_BORDER, 0);
-    lv_obj_add_event_cb(ui->chat_input,
-                        chat_input_event_cb,
-                        LV_EVENT_ALL,
-                        ui);
+    lv_textarea_set_placeholder_text(ui->chat_input, "说说你的想法，或输入指令…");
+    smart_home_lvgl_style_input(ui->chat_input, 17);
+    lv_obj_add_event_cb(ui->chat_input, chat_input_event_cb, LV_EVENT_ALL, ui);
 
-    new_button = lv_btn_create(input_bar);
-    lv_obj_remove_style_all(new_button);
-    lv_obj_set_size(new_button, 74, SMART_HOME_CHAT_INPUT_H);
-    lv_obj_set_style_radius(new_button, 8, 0);
-    smart_home_lvgl_set_bg(new_button, SMART_HOME_UI_COLOR_SURFACE);
-    smart_home_lvgl_press_feedback(new_button);
-    lv_obj_add_event_cb(new_button, chat_new_event_cb, LV_EVENT_CLICKED, ui);
-    label = smart_home_lvgl_label_create(new_button, "新对话",
-                                         SMART_HOME_UI_COLOR_PRIMARY, 12);
-    lv_obj_center(label);
-
-#ifdef CONFIG_SMART_HOME_VOICE_ASR
-    ui->chat_mic_btn = lv_btn_create(input_bar);
-    lv_obj_remove_style_all(ui->chat_mic_btn);
-    lv_obj_set_size(ui->chat_mic_btn, 48, SMART_HOME_CHAT_INPUT_H);
-    lv_obj_set_style_radius(ui->chat_mic_btn, 8, 0);
-    smart_home_lvgl_set_bg(ui->chat_mic_btn, SMART_HOME_UI_COLOR_PRIMARY);
-    smart_home_lvgl_press_feedback(ui->chat_mic_btn);
-    lv_obj_add_event_cb(ui->chat_mic_btn,
-                        chat_mic_event_cb,
-                        LV_EVENT_CLICKED,
-                        ui);
-    ui->chat_mic_label = smart_home_lvgl_label_create(ui->chat_mic_btn,
-                                                      "语音",
-                                                      lv_color_white(),
-                                                      12);
-    lv_obj_center(ui->chat_mic_label);
-#endif
-
-    ui->chat_send_btn = lv_btn_create(input_bar);
+    ui->chat_send_btn = lv_button_create(input_bar);
     lv_obj_remove_style_all(ui->chat_send_btn);
-    lv_obj_set_size(ui->chat_send_btn, 62, SMART_HOME_CHAT_INPUT_H);
-    lv_obj_set_style_radius(ui->chat_send_btn, 8, 0);
-    smart_home_lvgl_set_bg(ui->chat_send_btn, SMART_HOME_UI_COLOR_PRIMARY);
-    lv_obj_set_style_opa(ui->chat_send_btn, LV_OPA_50, LV_STATE_DISABLED);
+    lv_obj_set_size(ui->chat_send_btn, 168, 40);
+    lv_obj_set_pos(ui->chat_send_btn, content_w - 188, 8);
+    lv_obj_set_ext_click_area(ui->chat_send_btn, 4);
+    smart_home_lvgl_set_bg(ui->chat_send_btn, SMART_HOME_UI_COLOR_PRIMARY_DARK);
+    lv_obj_set_style_radius(ui->chat_send_btn, 12, 0);
     smart_home_lvgl_press_feedback(ui->chat_send_btn);
-    lv_obj_add_event_cb(ui->chat_send_btn,
-                        chat_send_event_cb,
-                        LV_EVENT_CLICKED,
-                        ui);
-    label = smart_home_lvgl_label_create(ui->chat_send_btn,
-                                         "发送",
-                                         lv_color_white(),
-                                         12);
+    lv_obj_add_event_cb(ui->chat_send_btn, chat_send_event_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(ui->chat_send_btn, "发送",
+                                         SMART_HOME_UI_COLOR_SURFACE, 18);
     lv_obj_center(label);
 
     ui->chat_keyboard = lv_keyboard_create(screen);
-    lv_keyboard_set_textarea(ui->chat_keyboard, ui->chat_input);
     smart_home_lvgl_style_keyboard(ui->chat_keyboard);
-    lv_obj_add_event_cb(ui->chat_keyboard,
-                        chat_keyboard_event_cb,
-                        LV_EVENT_ALL,
-                        ui);
+    lv_keyboard_set_textarea(ui->chat_keyboard, ui->chat_input);
+    lv_obj_add_event_cb(ui->chat_keyboard, chat_keyboard_event_cb, LV_EVENT_ALL, ui);
     lv_obj_add_flag(ui->chat_keyboard, LV_OBJ_FLAG_HIDDEN);
-
-    ui->chat_status = smart_home_lvgl_label_create(screen,
-                                                    "",
-                                                    SMART_HOME_UI_COLOR_TEXT_SECONDARY,
-                                                    12);
+    ui->chat_status = smart_home_lvgl_label_create(screen, "",
+        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 12);
     lv_obj_add_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
-
-    /* Nav bar */
     smart_home_lvgl_build_nav_bar(screen, ui);
+    smart_home_lvgl_update_clock(ui);
     layout_chat_controls(ui, 0);
 }

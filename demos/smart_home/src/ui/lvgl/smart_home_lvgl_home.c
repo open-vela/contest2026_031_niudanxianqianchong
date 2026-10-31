@@ -223,8 +223,7 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
             }
         }
         lv_obj_set_style_text_color(icon, color, 0);
-        lv_obj_set_style_image_recolor(icon, color, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        smart_home_lvgl_icon_color(icon, color);
     }
 }
 
@@ -302,8 +301,7 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                          SMART_HOME_UI_COLOR_TEXT_SECONDARY;
         lv_obj_set_pos(icon, status_x[i], 18);
         lv_obj_set_style_text_color(icon, color, 0);
-        lv_obj_set_style_image_recolor(icon, color, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        smart_home_lvgl_icon_color(icon, color);
         if (i == 3 && ui && ui->topbar_wifi_icon_count <
                            (int)(sizeof(ui->topbar_wifi_icons) /
                                  sizeof(ui->topbar_wifi_icons[0]))) {

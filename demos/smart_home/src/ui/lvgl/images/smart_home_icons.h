@@ -1,7 +1,8 @@
 /**
  * smart_home icon constants.
  *
- * Source: quickapp/smart_home_ui/prototype-web/assets/icons/（全部 PNG 文件）
+ * Source: res/icons/v9/ approved native pixel PNGs override legacy
+ * quickapp/smart_home_ui/prototype-web/assets/icons/ PNGs by size.
  * Build:  scripts/generate_smart_home_lvgl_icons.py -> LVGL A8 / ARGB8888 images
  *
  * Product icons use stable `asset:<png-stem>` names. The icon factory maps
@@ -24,7 +25,7 @@ extern "C" {
 #define ICON_NAV_SCENES      "asset:sparkle-2"
 #define ICON_NAV_SECURITY    "asset:shield"
 #define ICON_NAV_MORE        "asset:dots"
-#define ICON_NAV_CHAT        "asset:sparkle-2"
+#define ICON_NAV_CHAT        "asset:chat"
 #define ICON_NAV_SETTINGS    "asset:settings"
 
 /* ── Top bar status ───────────────────────────────────────── */
@@ -74,7 +75,7 @@ extern "C" {
 #define ICON_DROP            "asset:cloud-rain"
 
 /* ── Settings groups ───────────────────────────────────────── */
-#define ICON_SETTING_AI      "asset:cloud-cog"
+#define ICON_SETTING_AI      "asset:setting-ai"
 #define ICON_WIFI            "asset:wifi"
 #define ICON_LANGUAGE        "icon_language"
 

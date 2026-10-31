@@ -10,6 +10,7 @@
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
+static void test_v9_shell(smart_home_lvgl_t *ui);
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -98,8 +99,10 @@ bool smart_home_miloco_bound(const smart_home_miloco_t *service)
 { (void)service; return true; }
 void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui) { (void)ui; }
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
-void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text)
-{ (void)ui; (void)text; }
+int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
+{ (void)ui; (void)text; return AGENT_ERROR_STATE; }
+int smart_home_agent_app_clear_session(smart_home_agent_app_t *app)
+{ (void)app; return AGENT_ERROR_STATE; }
 
 static lv_point_t pointer_point;
 static lv_indev_state_t pointer_state;
@@ -244,7 +247,12 @@ static void test_home(smart_home_lvgl_t *ui)
     ui->topbar_clock_count = 0;
     ui->topbar_wifi_icon_count = 0;
     ui->topbar_camera_icon_count = 0;
+    weather.valid = true;
+    weather.temperature = 22;
     smart_home_lvgl_build_home_screen_v9(ui);
+    struct tm design_time = {.tm_year = 126, .tm_mon = 9, .tm_mday = 30,
+                              .tm_hour = 11, .tm_min = 39};
+    smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_home != NULL);
     assert(ui->home_weather_condition_label != NULL);
     assert(smart_home_lvgl_v9_visible_card_count() == 6);
@@ -255,6 +263,7 @@ static void test_home(smart_home_lvgl_t *ui)
     test_v9_cards(ui);
 
     smart_home_lvgl_build_settings_screen_v9(ui);
+    smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_settings_v9 != NULL);
     assert(smart_home_lvgl_v9_settings_category_count() == 6);
     assert(smart_home_lvgl_v9_settings_select_category(1) == 1);
@@ -265,10 +274,26 @@ static void test_home(smart_home_lvgl_t *ui)
     /* 非法分类不改选中态，回到第一类再截图，否则这张图和 model 那张重复。 */
     assert(smart_home_lvgl_v9_settings_select_category(0) == 0);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
+    smart_home_lvgl_build_chat_screen(ui);
+    smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
+    smart_home_lvgl_append_msg_bubble(ui,
+        "把客厅空调调到24度，再把风速设为自动。", 1);
+    smart_home_lvgl_trace_tool(ui, "set_ac", "visual-call", -1);
+    smart_home_lvgl_trace_tool(ui, "set_ac", "visual-call", 1);
+    smart_home_lvgl_finish_thinking(ui);
+    smart_home_lvgl_append_msg_bubble(ui,
+        "已将客厅空调设为制冷 24°C，\n风速已调整为自动。", 0);
+    capture_screen(ui->screen_chat, "SMART_HOME_V9_CHAT_CAPTURE");
+    test_v9_shell(ui);
     test_screen_cycle(ui);   /* 首页与设置页都还在，才能做切换稳定性回归 */
     smart_home_lvgl_settings_v9_deinit(ui);
     lv_obj_delete(ui->screen_settings_v9);
     ui->screen_settings_v9 = NULL;
+    lv_obj_delete(ui->screen_chat);
+    ui->screen_chat = NULL;
+    ui->topbar_clock_count = 1;
+    ui->topbar_wifi_icon_count = 1;
+    ui->topbar_camera_icon_count = 1;
 
     test_host_frame_budget(ui);
     lv_timer_delete(ui->home_time_timer);
@@ -854,6 +879,8 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
     assert(cards == 12 && last_card);
     submitted = submissions;
     lv_obj_t *sw = lv_obj_get_child(last_card, -1);
+    assert(lv_obj_get_width(sw) == 54 && lv_obj_get_height(sw) == 30);
+    assert(lv_obj_get_style_pad_top(sw, LV_PART_KNOB) == -4);
     lv_obj_remove_state(sw, LV_STATE_CHECKED);
     lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
     assert(submissions == submitted + 1);
@@ -864,4 +891,66 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
     snapshot_count = 0;
     smart_home_lvgl_v9_refresh_views(ui);
     puts("PASS: all 12 V9 card modals, real switches and readback");
+}
+
+static lv_obj_t *find_v9_input(lv_obj_t *root, const char *placeholder)
+{
+    if (lv_obj_check_type(root, &lv_textarea_class) &&
+        !strcmp(lv_textarea_get_placeholder_text(root), placeholder)) return root;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+        lv_obj_t *found = find_v9_input(lv_obj_get_child(root, i), placeholder);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void test_v9_shell(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *screens[] = {ui->screen_home, ui->screen_chat, ui->screen_settings_v9};
+    for (int tab = 0; tab < 3; tab++) {
+        lv_obj_t *bar = lv_obj_get_child(screens[tab], -1);
+        lv_obj_t *row = lv_obj_get_child(bar, 0);
+        lv_area_t bounds;
+        lv_obj_update_layout(screens[tab]);
+        lv_obj_get_coords(bar, &bounds);
+        assert(bounds.x1 == 0 && bounds.y1 == 536);
+        assert(bounds.x2 == 1023 && bounds.y2 == 599);
+        assert(!lv_obj_has_flag(bar, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_get_style_bg_opa(bar, 0) == LV_OPA_COVER);
+        assert(lv_obj_get_child_count(row) == 3);
+        lv_screen_load(screens[tab]);
+        lv_refr_now(NULL);
+        /* Assert a rendered selected pill, not only an allocated object. */
+        assert(pixels[552 * 1024 + 172 + tab * 248] ==
+               lv_color_to_u16(SMART_HOME_UI_COLOR_SURFACE_ON));
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t *button = lv_obj_get_child(row, i);
+            lv_obj_t *content = lv_obj_get_child(button, 0);
+            lv_obj_t *icon = lv_obj_get_child(content, 0);
+            const lv_image_dsc_t *source = lv_image_get_src(icon);
+            assert(source->header.cf == LV_COLOR_FORMAT_ARGB8888);
+            assert(lv_obj_get_style_image_recolor_opa(icon, 0) == LV_OPA_TRANSP);
+            assert(lv_obj_get_width(button) == 216 && lv_obj_get_height(button) == 52);
+            lv_obj_send_event(content, LV_EVENT_CLICKED, NULL);
+            assert(lv_screen_active() == screens[i]);
+            assert(ui->active_tab == i);
+        }
+    }
+    lv_area_t key_bounds, parent_bounds;
+    lv_obj_t *key = find_v9_input(ui->screen_settings_v9,
+                                 "留空沿用系统凭据，本次运行有效");
+    assert(key);
+    lv_obj_get_coords(key, &key_bounds);
+    lv_obj_get_content_coords(lv_obj_get_parent(key), &parent_bounds);
+    assert(key_bounds.x1 == 272 && key_bounds.y1 == 306);
+    assert(lv_obj_get_width(key) == 704 && lv_obj_get_height(key) == 44);
+    assert(key_bounds.x2 <= parent_bounds.x2 && key_bounds.y2 <= parent_bounds.y2);
+    lv_area_t input;
+    lv_obj_get_coords(ui->chat_input_bar, &input);
+    assert(input.x1 == 24 && input.y1 == 464);
+    assert(lv_obj_get_width(ui->chat_input_bar) == 976);
+    assert(lv_obj_get_height(ui->chat_input_bar) == 56);
+    assert(lv_obj_get_width(ui->chat_input) == 704);
+    assert(lv_obj_get_style_text_font(ui->chat_input, 0) == smart_home_lvgl_font(17));
+    puts("PASS: all three real navigation bars, pixel colors, tab clicks and chat input geometry");
 }

@@ -723,7 +723,7 @@ static void v9_make_card(smart_home_lvgl_t *ui, int index)
 
     sw = lv_switch_create(card);
     lv_obj_set_size(sw, 54, 30);
-    lv_obj_set_pos(sw, 112, 14);
+    lv_obj_set_pos(sw, 111, 13);
     lv_obj_set_ext_click_area(sw, 9);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0xCCD6D6), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
@@ -736,8 +736,9 @@ static void v9_make_card(smart_home_lvgl_t *ui, int index)
     lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
     lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
     lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
-    lv_obj_set_style_radius(sw, 13, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(sw, 2, LV_PART_KNOB);
+    lv_obj_set_style_radius(sw, 11, LV_PART_KNOB);
+    /* LVGL knob padding expands outward; -4 yields the design's 22 px circle. */
+    lv_obj_set_style_pad_all(sw, -4, LV_PART_KNOB);
     lv_obj_set_style_shadow_width(sw, 0, LV_PART_KNOB);
     lv_obj_set_user_data(sw, (void *)(intptr_t)index);
     lv_obj_add_event_cb(sw, v9_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
@@ -835,7 +836,7 @@ static void v9_make_dynamic_card(smart_home_lvgl_t *ui, int index,
 
     sw = lv_switch_create(card);
     lv_obj_set_size(sw, 54, 30);
-    lv_obj_set_pos(sw, 112, 14);
+    lv_obj_set_pos(sw, 111, 13);
     lv_obj_set_ext_click_area(sw, 9);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0xCCD6D6), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
@@ -847,8 +848,9 @@ static void v9_make_dynamic_card(smart_home_lvgl_t *ui, int index,
     lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
     lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
     lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
-    lv_obj_set_style_radius(sw, 13, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(sw, 2, LV_PART_KNOB);
+    lv_obj_set_style_radius(sw, 11, LV_PART_KNOB);
+    /* LVGL knob padding expands outward; -4 yields the design's 22 px circle. */
+    lv_obj_set_style_pad_all(sw, -4, LV_PART_KNOB);
     lv_obj_set_style_shadow_width(sw, 0, LV_PART_KNOB);
     lv_obj_set_user_data(sw, (void *)(intptr_t)index);
     lv_obj_add_event_cb(sw, v9_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
@@ -1070,6 +1072,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     v9_update_time(ui);
     smart_home_lvgl_refresh_home(ui);
     v9_reflow();
+    smart_home_lvgl_build_nav_bar(screen, ui);
 }
 
 int smart_home_lvgl_v9_visible_card_count(void)

@@ -1,0 +1,286 @@
+/* Run the real V9 callbacks with controlled, blocking service doubles. */
+#include "smart_home_lvgl_settings_v9.c"
+#include <assert.h>
+#include <time.h>
+
+void *smart_home_bulk_alloc(size_t size) { return malloc(size); }
+void smart_home_bulk_free(void *ptr) { free(ptr); }
+
+static pthread_mutex_t gate_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gate_cond = PTHREAD_COND_INITIALIZER;
+static struct {
+    int entered;
+    int released;
+    int done;
+    int result;
+    pthread_t thread;
+} gates[2];
+static int mcp_calls;
+static smart_home_mcp_runtime_config_t applied_mcp;
+static smart_home_model_config_t applied_model;
+static const smart_home_llm_backend_preset_t preset = {
+    .id = "test", .name = "测试服务", .host = "example.invalid",
+    .path = "/chat", .port = "443", .default_model = "test-model",
+    .default_timeout_ms = 30000
+};
+
+size_t smart_home_llm_backend_count(void) { return 1; }
+const smart_home_llm_backend_preset_t *smart_home_llm_backend_get(size_t index)
+{ return index == 0 ? &preset : NULL; }
+int smart_home_llm_backend_index_for_config(const smart_home_model_config_t *config)
+{ (void)config; return 0; }
+int smart_home_model_config_from_preset(smart_home_model_config_t *config,
+    const smart_home_llm_backend_preset_t *value, int keep_key)
+{
+    (void)keep_key;
+    memset(config, 0, sizeof(*config));
+    snprintf(config->backend_id, sizeof(config->backend_id), "%s", value->id);
+    return AGENT_OK;
+}
+
+static void wait_entered(int index)
+{
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += 3;
+    pthread_mutex_lock(&gate_mutex);
+    while (!gates[index].entered)
+        assert(pthread_cond_timedwait(&gate_cond, &gate_mutex, &deadline) == 0);
+    pthread_mutex_unlock(&gate_mutex);
+}
+
+static int block_service(int index)
+{
+    int result;
+    pthread_mutex_lock(&gate_mutex);
+    gates[index].entered++;
+    gates[index].thread = pthread_self();
+    pthread_cond_broadcast(&gate_cond);
+    while (!gates[index].released) pthread_cond_wait(&gate_cond, &gate_mutex);
+    gates[index].done = 1;
+    result = gates[index].result;
+    pthread_mutex_unlock(&gate_mutex);
+    return result;
+}
+
+static void release_service(int index)
+{
+    pthread_mutex_lock(&gate_mutex);
+    gates[index].released = 1;
+    pthread_cond_broadcast(&gate_cond);
+    pthread_mutex_unlock(&gate_mutex);
+}
+
+int smart_home_network_connect_credentials(smart_home_network_status_t *status,
+                                           const char *ssid, const char *password)
+{
+    assert(!strcmp(ssid, "test-ssid"));
+    assert(!strcmp(password, "test-password"));
+    memset(status, 0, sizeof(*status));
+    status->online = true;
+    return block_service(0);
+}
+
+int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,
+                                           const smart_home_model_config_t *config)
+{
+    int result = block_service(1);
+    pthread_mutex_lock(&app->agent_mutex);
+    applied_model = *config;
+    pthread_mutex_unlock(&app->agent_mutex);
+    return result;
+}
+
+void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
+{ (void)ui; }
+int smart_home_mcp_bridge_reconfigure(smart_home_mcp_bridge_t *bridge,
+                                     const smart_home_mcp_runtime_config_t *config)
+{
+    assert(bridge);
+    applied_mcp = *config;
+    mcp_calls++;
+    return AGENT_OK;
+}
+
+static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
+{ (void)area; (void)pixels; lv_display_flush_ready(display); }
+static void heartbeat(lv_timer_t *timer)
+{ (*(unsigned *)lv_timer_get_user_data(timer))++; }
+
+static void wait_ready(smart_home_lvgl_t *ui, int model)
+{
+    const struct timespec pause = {.tv_nsec = 1000000};
+    for (unsigned i = 0; i < 3000; i++) {
+        int ready;
+        pthread_mutex_lock(&ui->pending_mutex);
+        ready = model ? g_model.ready : g_net.ready;
+        pthread_mutex_unlock(&ui->pending_mutex);
+        if (ready) return;
+        nanosleep(&pause, NULL);
+    }
+    assert(!"service did not publish its result");
+}
+
+static void click(lv_obj_t *button, lv_event_cb_t callback, smart_home_lvgl_t *ui)
+{
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, ui);
+    lv_obj_send_event(button, LV_EVENT_CLICKED, NULL);
+}
+
+static void *release_pending(void *unused)
+{
+    const struct timespec pause = {.tv_nsec = 20000000};
+    (void)unused;
+    nanosleep(&pause, NULL);
+    release_service(0);
+    release_service(1);
+    return NULL;
+}
+
+static smart_home_lvgl_t *setup(smart_home_agent_app_t *app)
+{
+    smart_home_lvgl_t *ui = calloc(1, sizeof(*ui));
+    assert(ui && pthread_mutex_init(&ui->pending_mutex, NULL) == 0);
+    ui->app = app;
+    memset(&g_settings, 0, sizeof(g_settings));
+    g_settings.screen = lv_obj_create(NULL);
+    lv_screen_load(g_settings.screen);
+    build_model_panel(ui, g_settings.screen);
+    build_network_panel(ui, g_settings.screen);
+    g_settings.keyboard = lv_keyboard_create(g_settings.screen);
+    lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_textarea_set_text(g_settings.net_ssid, "test-ssid");
+    lv_textarea_set_text(g_settings.net_password, "test-password");
+    lv_textarea_set_text(g_settings.model_name, "test-model");
+    lv_textarea_set_text(g_settings.model_key, "test-key");
+    lv_textarea_set_text(g_settings.model_timeout, "30000");
+    lv_textarea_set_text(g_settings.model_tokens, "512");
+    ui->v9_network_timer = lv_timer_create(v9_net_timer_cb, 250, ui);
+    assert(lv_textarea_get_password_mode(g_settings.model_key));
+    assert(lv_obj_get_width(g_settings.model_key) == 704);
+    assert(lv_obj_get_width(g_settings.model_dd) == 336);
+    assert(lv_obj_get_style_text_font(g_settings.model_key, 0) == smart_home_lvgl_font(17));
+    assert(lv_obj_get_style_text_font(g_settings.model_key,
+        LV_PART_TEXTAREA_PLACEHOLDER) == smart_home_lvgl_font(17));
+    assert(lv_obj_get_style_text_font(lv_dropdown_get_list(g_settings.model_dd), 0) ==
+        smart_home_lvgl_font(17));
+    const uint32_t required[] = {0x6a21, 0x578b, 0x670d, 0x52a1, 0x5bc6, 0x94a5, '*'};
+    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++) {
+        lv_font_glyph_dsc_t glyph;
+        assert(lv_font_get_glyph_dsc(smart_home_lvgl_font(17), &glyph, required[i], 0));
+        assert(!glyph.is_placeholder);
+    }
+    const void *symbol = lv_dropdown_get_symbol(g_settings.model_dd);
+    assert(symbol && lv_image_src_get_type(symbol) == LV_IMAGE_SRC_VARIABLE);
+    return ui;
+}
+
+int main(void)
+{
+    static uint16_t pixels[1024 * 600];
+    smart_home_agent_app_t app = {0};
+    lv_obj_t *screen;
+    smart_home_lvgl_t *ui;
+    unsigned ticks = 0;
+    pthread_t releaser;
+    lv_timer_t *pulse;
+
+    lv_init();
+    lv_display_t *display = lv_display_create(1024, 600);
+    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_buffers(display, pixels, NULL, sizeof(pixels),
+                            LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_flush_cb(display, flush);
+    assert(smart_home_lvgl_style_init() == 0);
+    assert(pthread_mutex_init(&app.agent_mutex, NULL) == 0);
+    app.mcp_bridge = (smart_home_mcp_bridge_t *)&app;
+    ui = setup(&app);
+    screen = g_settings.screen;
+
+    mcp_config_open(ui);
+    assert(lv_dropdown_get_selected(g_settings.mcp_protocol) == 0);
+    assert(lv_textarea_get_password_mode(g_settings.mcp_auth));
+    lv_textarea_set_text(g_settings.mcp_server, "test-server");
+    lv_textarea_set_text(g_settings.mcp_host, "example.invalid");
+    lv_textarea_set_text(g_settings.mcp_path, "/mcp");
+    lv_textarea_set_text(g_settings.mcp_auth, "Bearer test-token");
+    lv_obj_t *apply = lv_button_create(screen);
+    click(apply, mcp_apply_cb, ui);
+    assert(mcp_calls == 1 && applied_mcp.use_tls && applied_mcp.port == 443);
+    lv_dropdown_set_selected(g_settings.mcp_protocol, 1);
+    lv_textarea_set_text(g_settings.mcp_port, "80");
+    lv_obj_send_event(apply, LV_EVENT_CLICKED, NULL);
+    assert(mcp_calls == 2 && !applied_mcp.use_tls && applied_mcp.port == 80);
+    const char *bad_ports[] = {"65537", "0", "abc", "443x", "9999999999999999999999"};
+    for (size_t i = 0; i < sizeof(bad_ports) / sizeof(bad_ports[0]); i++) {
+        lv_textarea_set_text(g_settings.mcp_port, bad_ports[i]);
+        lv_obj_send_event(apply, LV_EVENT_CLICKED, NULL);
+        assert(mcp_calls == 2);
+    }
+    puts("PASS: explicit MCP TLS, HTTP, port validation and masked credentials");
+
+    /* A held Agent lock must not block the UI callback or LVGL timers. */
+    pthread_mutex_lock(&app.agent_mutex);
+    lv_obj_send_event(g_settings.model_apply, LV_EVENT_CLICKED, NULL);
+    wait_entered(1);
+    assert(!pthread_equal(pthread_self(), gates[1].thread));
+    assert(g_model.active && lv_obj_has_state(g_settings.model_apply, LV_STATE_DISABLED));
+    lv_obj_send_event(g_settings.model_apply, LV_EVENT_CLICKED, NULL);
+    assert(gates[1].entered == 1);
+    release_service(1);
+    pulse = lv_timer_create(heartbeat, 1, &ticks);
+    lv_tick_inc(5);
+    lv_timer_handler();
+    assert(ticks > 0);
+    lv_timer_delete(pulse);
+    pthread_mutex_unlock(&app.agent_mutex);
+    wait_ready(ui, 1);
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(!g_model.active && !lv_obj_has_state(g_settings.model_apply, LV_STATE_DISABLED));
+    assert(!strcmp(applied_model.model, "test-model"));
+    assert(!strcmp(applied_model.api_key, "test-key"));
+    assert(!strcmp(lv_label_get_text(g_settings.model_status), "本次配置已应用"));
+
+    memset(gates, 0, sizeof(gates));
+    gates[1].result = AGENT_ERROR_INVALID;
+    lv_obj_send_event(g_settings.model_apply, LV_EVENT_CLICKED, NULL);
+    wait_entered(1);
+    release_service(1);
+    wait_ready(ui, 1);
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(!strcmp(lv_label_get_text(g_settings.model_status), "配置应用失败"));
+    puts("PASS: async model apply, UI heartbeat, duplicate rejection and failure feedback");
+
+    /* Teardown must join both pending services before ui/mutex destruction. */
+    memset(gates, 0, sizeof(gates));
+    v9_net_connect(ui);
+    lv_obj_send_event(g_settings.model_apply, LV_EVENT_CLICKED, NULL);
+    wait_entered(0);
+    wait_entered(1);
+    assert(pthread_create(&releaser, NULL, release_pending, NULL) == 0);
+    smart_home_lvgl_settings_v9_deinit(ui);
+    pthread_join(releaser, NULL);
+    assert(gates[0].done && gates[1].done);
+    assert(!g_net.active && !g_net.owner && !g_model.active && !g_model.owner);
+    assert(!ui->v9_network_timer);
+    assert(pthread_mutex_destroy(&ui->pending_mutex) == 0);
+    free(ui);
+    lv_obj_delete(screen);
+
+    memset(gates, 0, sizeof(gates));
+    ui = setup(&app);
+    screen = g_settings.screen;
+    v9_net_connect(ui);
+    wait_entered(0);
+    release_service(0);
+    wait_ready(ui, 0);
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(app.system_status.network_status.online && !g_net.active);
+    smart_home_lvgl_settings_v9_deinit(ui);
+    assert(pthread_mutex_destroy(&ui->pending_mutex) == 0);
+    free(ui);
+    lv_obj_delete(screen);
+    assert(pthread_mutex_destroy(&app.agent_mutex) == 0);
+    puts("PASS: pending network/model teardown, mutex lifetime and UI reinitialization");
+    return 0;
+}

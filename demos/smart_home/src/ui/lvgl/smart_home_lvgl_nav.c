@@ -143,8 +143,7 @@ static lv_obj_t *nav_item_content(lv_obj_t *button, const char *icon_name,
     icon = smart_home_lvgl_icon_create(content, icon_name, 32, 32);
     if (icon) {
         lv_obj_set_pos(icon, 58, 10);
-        lv_obj_set_style_image_recolor(icon, color, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        smart_home_lvgl_icon_color(icon, color);
         lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
     }
 

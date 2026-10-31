@@ -22,6 +22,11 @@
 
 #define V9_SETTINGS_CATEGORIES 6
 
+static const char *const g_category_icons[V9_SETTINGS_CATEGORIES] = {
+    "asset:sun", "asset:wifi", "asset:setting-ai", "asset:shield",
+    "asset:devices", "asset:status-ok"
+};
+
 static const char *const g_category_names[V9_SETTINGS_CATEGORIES] = {
     "显示与声音", "网络连接", "模型服务", "工具权限", "设备与服务", "系统健康"
 };
@@ -86,7 +91,7 @@ static void panel_show(int category)
         lv_obj_t *btn = g_settings.button[i];
         lv_obj_t *label;
         if (btn) {
-            label = lv_obj_get_child(btn, 0);
+            label = lv_obj_get_child(btn, 1);
             if (i == category) {
                 lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
                 lv_obj_set_style_bg_color(btn, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
@@ -192,14 +197,65 @@ static const char *state_text(int ready)
     return ready ? "已就绪" : "未就绪";
 }
 
+static void display_unavailable(lv_obj_t *panel, const char *icon_name,
+                                const char *title, int y)
+{
+    lv_obj_t *icon = smart_home_lvgl_icon_create(panel, icon_name, 32, 32);
+    lv_obj_t *label;
+    lv_obj_t *track = lv_obj_create(panel);
+
+    if (icon) lv_obj_set_pos(icon, 0, y - 4);
+    label = smart_home_lvgl_label_create(panel, title,
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 18);
+    lv_obj_set_pos(label, 46, y);
+    label = smart_home_lvgl_label_create(panel, "暂不可用",
+                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
+    lv_obj_align(label, LV_ALIGN_TOP_RIGHT, 0, y);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_size(track, 628, 8);
+    lv_obj_set_pos(track, 46, y + 49);
+    lv_obj_set_style_radius(track, 4, 0);
+    smart_home_lvgl_set_bg(track, SMART_HOME_UI_COLOR_SURFACE_ON);
+    lv_obj_clear_flag(track, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+}
+
 static void build_display_panel(lv_obj_t *panel, lv_obj_t *settings_target)
 {
-    panel_title(panel, "显示与声音");
-    panel_row(panel, 56, "屏幕亮度", "由板级接口提供");
-    panel_row(panel, 106, "播报音量", "由音频服务提供");
-    panel_row(panel, 156, "自动进入屏保", "5 分钟");
-    panel_row(panel, 206, "设备状态动效", "开启");
-    panel_button(panel, "打开完整设置", settings_target);
+    lv_obj_t *label;
+    lv_obj_t *sw;
+    const char *choices[] = {"1分钟", "5分钟", "永不"};
+
+    (void)settings_target;
+    display_unavailable(panel, "asset:sun", "屏幕亮度", 0);
+    display_unavailable(panel, "asset:volume", "播报音量", 102);
+    label = smart_home_lvgl_label_create(panel, "自动进入屏保",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 18);
+    lv_obj_set_pos(label, 0, 202);
+    label = smart_home_lvgl_label_create(panel, "自动屏保暂不可用",
+                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
+    lv_obj_set_pos(label, 0, 230);
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 120, 48);
+        lv_obj_set_pos(button, 316 + i * 128, 204);
+        lv_obj_set_style_radius(button, 12, 0);
+        smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
+        lv_obj_add_state(button, LV_STATE_DISABLED);
+        label = smart_home_lvgl_label_create(button, choices[i],
+                                             SMART_HOME_UI_COLOR_TEXT_MUTED, 18);
+        lv_obj_center(label);
+    }
+    label = smart_home_lvgl_label_create(panel, "设备状态动效",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 18);
+    lv_obj_set_pos(label, 0, 290);
+    label = smart_home_lvgl_label_create(panel, "当前显示静态设备图标",
+                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
+    lv_obj_set_pos(label, 0, 318);
+    sw = lv_switch_create(panel);
+    lv_obj_set_size(sw, 54, 30);
+    lv_obj_set_pos(sw, 650, 302);
+    lv_obj_add_state(sw, LV_STATE_DISABLED);
 }
 
 typedef struct {
@@ -486,9 +542,10 @@ static lv_obj_t *model_input(lv_obj_t *panel, const char *caption, int x,
         panel, caption, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_t *textarea = lv_textarea_create(panel);
 
-    lv_obj_set_pos(label, x, y - 20);
+    lv_obj_set_pos(label, x, y - 24);
     lv_obj_set_pos(textarea, x, y);
-    lv_obj_set_size(textarea, width, 40);
+    lv_obj_set_size(textarea, width, 44);
+    smart_home_lvgl_style_input(textarea, 17);
     lv_textarea_set_one_line(textarea, true);
     lv_textarea_set_placeholder_text(textarea, placeholder);
     lv_obj_add_event_cb(textarea, model_focus_cb, LV_EVENT_FOCUSED, NULL);
@@ -561,7 +618,8 @@ static void model_load(smart_home_lvgl_t *ui, int index)
                                  g_settings.model_tokens_draft[index]);
         } else if (ui && ui->app) {
             snprintf(buffer, sizeof(buffer), "%u",
-                     (unsigned)ui->app->model_config.max_output_tokens);
+                     (unsigned)(ui->app->model_config.max_output_tokens ?
+                         ui->app->model_config.max_output_tokens : 512));
             lv_textarea_set_text(g_settings.model_tokens, buffer);
         }
     }
@@ -667,7 +725,22 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     panel_title(panel, "模型服务");
     g_settings.model_dd = lv_dropdown_create(panel);
     lv_obj_set_pos(g_settings.model_dd, 0, 68);
-    lv_obj_set_size(g_settings.model_dd, 240, 40);
+    lv_obj_set_size(g_settings.model_dd, 336, 44);
+    smart_home_lvgl_style_dropdown(g_settings.model_dd, 17);
+    {
+        lv_obj_t *label = smart_home_lvgl_label_create(panel, "模型服务",
+            SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+        lv_obj_set_pos(label, 0, 44);
+        lv_obj_t *badge = lv_obj_create(panel);
+        lv_obj_remove_style_all(badge);
+        lv_obj_set_size(badge, 154, 30);
+        lv_obj_set_pos(badge, 550, -4);
+        lv_obj_set_style_radius(badge, 15, 0);
+        smart_home_lvgl_set_bg(badge, SMART_HOME_UI_COLOR_SURFACE_ON);
+        label = smart_home_lvgl_label_create(badge, "手动输入密钥",
+            SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+        lv_obj_center(label);
+    }
     for (size_t i = 0; i < count; i++) {
         const smart_home_llm_backend_preset_t *preset =
             smart_home_llm_backend_get(i);
@@ -679,34 +752,34 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     lv_obj_add_event_cb(g_settings.model_dd, model_dropdown_cb,
                         LV_EVENT_VALUE_CHANGED, ui);
 
-    g_settings.model_name = model_input(panel, "模型标识", 260, 68, 300,
+    g_settings.model_name = model_input(panel, "模型标识", 360, 68, 344,
                                         "模型名称");
-    g_settings.model_key = model_input(panel, "API 密钥", 0, 136, 560,
+    g_settings.model_key = model_input(panel, "API 密钥", 0, 146, 704,
                                        "留空沿用系统凭据，本次运行有效");
     lv_textarea_set_password_mode(g_settings.model_key, true);
-    g_settings.model_timeout = model_input(panel, "请求超时 / 毫秒", 0, 204,
-                                           160, "30000");
-    g_settings.model_tokens = model_input(panel, "最大输出 / 词元", 180, 204,
-                                          160, "512");
+    g_settings.model_timeout = model_input(panel, "请求超时 / 毫秒", 0, 224,
+                                           336, "30000");
+    g_settings.model_tokens = model_input(panel, "最大输出 / 词元", 360, 224,
+                                          344, "512");
 
     g_settings.model_status = smart_home_lvgl_label_create(
         panel, "", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
-    lv_obj_set_pos(g_settings.model_status, 0, 258);
+    lv_obj_set_pos(g_settings.model_status, 0, 282);
 
     {
         lv_obj_t *button = lv_button_create(panel);
         lv_obj_t *label;
         lv_obj_remove_style_all(button);
-        lv_obj_set_size(button, 180, 40);
-        lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+        lv_obj_set_size(button, 168, 40);
+        lv_obj_set_pos(button, 536, 312);
+        lv_obj_set_ext_click_area(button, 4);
         lv_obj_set_style_radius(button, 10, 0);
-        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
-        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY_DARK);
         smart_home_lvgl_press_feedback(button);
         g_settings.model_apply = button;
         lv_obj_add_event_cb(button, model_apply_cb, LV_EVENT_CLICKED, ui);
         label = smart_home_lvgl_label_create(button, "应用本次配置",
-                                             SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+                                             SMART_HOME_UI_COLOR_SURFACE, 17);
         lv_obj_center(label);
     }
 
@@ -1059,7 +1132,8 @@ static void mcp_config_open(smart_home_lvgl_t *ui)
                                         "server id");
     g_settings.mcp_protocol = lv_dropdown_create(panel);
     lv_obj_set_pos(g_settings.mcp_protocol, 260, 60);
-    lv_obj_set_size(g_settings.mcp_protocol, 200, 40);
+    lv_obj_set_size(g_settings.mcp_protocol, 200, 44);
+    smart_home_lvgl_style_dropdown(g_settings.mcp_protocol, 17);
     lv_dropdown_set_options(g_settings.mcp_protocol, "HTTPS (TLS)\nHTTP");
     lv_dropdown_set_selected(g_settings.mcp_protocol, 0);
     g_settings.mcp_host = model_input(panel, "主机", 0, 120, 340, "host");
@@ -1238,6 +1312,7 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     screen = lv_obj_create(NULL);
     lv_obj_remove_style_all(screen);
     smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
+    lv_obj_set_style_text_font(screen, smart_home_lvgl_font(16), 0);
     ui->screen_settings_v9 = screen;
     g_settings.screen = screen;
     smart_home_lvgl_build_top_bar(screen, ui, "设置");
@@ -1263,7 +1338,8 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_set_pos(right, 248, 136);
     smart_home_lvgl_card_style(right);
     lv_obj_set_style_radius(right, 18, 0);
-    lv_obj_set_style_pad_all(right, 24, 0);
+    lv_obj_set_style_pad_all(right, 23, 0);
+    lv_obj_set_style_pad_bottom(right, 7, 0);
 
     for (int i = 0; i < V9_SETTINGS_CATEGORIES; i++) {
         lv_obj_t *button = lv_button_create(left);
@@ -1271,17 +1347,23 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
 
         lv_obj_remove_style_all(button);
         lv_obj_set_size(button, 184, 50);
-        lv_obj_set_pos(button, 12, 12 + i * 58);
+        lv_obj_set_pos(button, 11, 11 + i * 58);
         lv_obj_set_style_radius(button, 12, 0);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
         lv_obj_add_event_cb(button, category_cb, LV_EVENT_CLICKED, NULL);
         smart_home_lvgl_press_feedback(button);
         g_settings.button[i] = button;
 
+        lv_obj_t *icon = smart_home_lvgl_icon_create(button,
+                                                     g_category_icons[i], 20, 20);
+        if (icon) {
+            lv_obj_set_pos(icon, 12, 15);
+            lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+        }
         label = smart_home_lvgl_label_create(button, g_category_names[i],
                                              SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                              16);
-        lv_obj_set_pos(label, 34, 14);
+        lv_obj_set_pos(label, 46, 14);
     }
 
     g_settings.panel[0] = make_panel(right);
@@ -1313,6 +1395,7 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
 
     panel_show(0);
     smart_home_lvgl_build_nav_bar(screen, ui);
+    smart_home_lvgl_update_clock(ui);
 }
 
 int smart_home_lvgl_v9_settings_category_count(void)

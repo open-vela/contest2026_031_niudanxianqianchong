@@ -18,6 +18,7 @@ add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${UI}/smart_home_lvgl_nav.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_home_v9.c"
   "${UI}/smart_home_lvgl_settings_v9.c"
+  "${UI}/smart_home_lvgl_chat.c"
   "${UI}/smart_home_v9_device_view.c"
   "${UI}/smart_home_lvgl_screensaver.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
@@ -51,6 +52,25 @@ foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OP
   set_target_properties(settings_check PROPERTIES ${property} "${value}")
 endforeach()
 add_test(NAME settings_check COMMAND settings_check)
+
+add_executable(settings_v9_check test_settings_v9.c
+  "${UI}/smart_home_lvgl_style.c"
+  "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(settings_v9_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(settings_v9_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1)
+add_test(NAME settings_v9_check COMMAND settings_v9_check)
+set_tests_properties(settings_v9_check PROPERTIES TIMEOUT 15)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME board_measure_check COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../test_v9_board_measure.py")
+set_tests_properties(board_measure_check PROPERTIES TIMEOUT 15)
+add_test(NAME pixel_assets_check COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../test_v9_visual_assets.py")
+
 
 add_executable(chat_check test_chat.c "${UI}/smart_home_lvgl_chat.c"
   "${UI}/smart_home_lvgl_history.c" "${UI}/smart_home_lvgl_style.c"

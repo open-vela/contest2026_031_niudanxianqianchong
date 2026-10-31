@@ -491,3 +491,61 @@ lv_obj_t *smart_home_lvgl_icon_with_text(lv_obj_t *parent,
 
     return cont;
 }
+
+
+void smart_home_lvgl_style_input(lv_obj_t *input, int size)
+{
+    lv_obj_set_style_text_font(input, smart_home_lvgl_font(size), 0);
+    lv_obj_set_style_text_color(input, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(input, smart_home_lvgl_font(size),
+                               LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_text_color(input, SMART_HOME_UI_COLOR_TEXT_MUTED,
+                                LV_PART_TEXTAREA_PLACEHOLDER);
+    smart_home_lvgl_set_bg(input, SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_set_style_radius(input, 10, 0);
+    lv_obj_set_style_border_width(input, 1, 0);
+    lv_obj_set_style_border_color(input, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_hor(input, 14, 0);
+    lv_obj_set_style_pad_ver(input, 10, 0);
+    /* A known MiSans glyph instead of a theme font's private-use bullet. */
+    lv_textarea_set_password_bullet(input, "*");
+}
+
+void smart_home_lvgl_style_dropdown(lv_obj_t *dropdown, int size)
+{
+    lv_obj_t *list = lv_dropdown_get_list(dropdown);
+    const lv_image_dsc_t *arrow = smart_home_lvgl_png_icon_get("asset:chevron-right", 20);
+    if (arrow) lv_dropdown_set_symbol(dropdown, arrow);
+    lv_obj_set_style_text_font(dropdown, smart_home_lvgl_font(size), 0);
+    lv_obj_set_style_text_color(dropdown, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+    smart_home_lvgl_set_bg(dropdown, SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_set_style_radius(dropdown, 10, 0);
+    lv_obj_set_style_border_width(dropdown, 1, 0);
+    lv_obj_set_style_border_color(dropdown, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_hor(dropdown, 14, 0);
+    lv_obj_set_style_pad_ver(dropdown, 10, 0);
+    if (list) {
+        lv_obj_set_style_text_font(list, smart_home_lvgl_font(size), 0);
+        lv_obj_set_style_text_color(list, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+        smart_home_lvgl_set_bg(list, SMART_HOME_UI_COLOR_SURFACE);
+        lv_obj_set_style_bg_color(list, SMART_HOME_UI_COLOR_SURFACE_ON,
+                                  LV_PART_SELECTED);
+    }
+}
+
+void smart_home_lvgl_icon_color(lv_obj_t *icon, lv_color_t color)
+{
+    if (!icon) return;
+    if (lv_obj_check_type(icon, &lv_image_class)) {
+        const void *src = lv_image_get_src(icon);
+        if (src && lv_image_src_get_type(src) == LV_IMAGE_SRC_VARIABLE &&
+            ((const lv_image_dsc_t *)src)->header.cf != LV_COLOR_FORMAT_A8) {
+            lv_obj_set_style_image_recolor_opa(icon, LV_OPA_TRANSP, 0);
+        } else {
+            lv_obj_set_style_image_recolor(icon, color, 0);
+            lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        }
+    } else {
+        lv_obj_set_style_text_color(icon, color, 0);
+    }
+}

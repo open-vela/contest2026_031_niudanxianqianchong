@@ -1,0 +1,301 @@
+{
+  "source": "approved design assets; missing native sizes use the approved optimized icon bundle",
+  "style": "Modern Semi-Flat Pixel Art",
+  "conversion": "native-size BGRA; no crop, rescale or recolor",
+  "assets": [
+    {
+      "asset": "home",
+      "size": 20,
+      "file": "20/home.png",
+      "sha256": "30874ceaccb465a1ee556a4d59c29268f500c3b3bf0eb4cfd9d5b6a0d3ab9ff3",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/20/home.png"
+    },
+    {
+      "asset": "home",
+      "size": 32,
+      "file": "32/home.png",
+      "sha256": "c8e595022b950d7ed720cc055a039352e5ebfb3df1dc8301e842317702bcba28",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/home.png"
+    },
+    {
+      "asset": "chat",
+      "size": 20,
+      "file": "20/chat.png",
+      "sha256": "db5586ecb6436b8bcd9f244ca9f2d85b860abc8143e8e13054a123fa7fde8969",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/chat.png"
+    },
+    {
+      "asset": "chat",
+      "size": 32,
+      "file": "32/chat.png",
+      "sha256": "9ebcb1eb6ddce47a1facc15b6621449878594a1b914b588836a7dcb058590c86",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/chat.png"
+    },
+    {
+      "asset": "settings",
+      "size": 20,
+      "file": "20/settings.png",
+      "sha256": "ced160779e75508f443c194ec4fdb3e892a105d51891f655be8ffafe0665f4c1",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/20/settings.png"
+    },
+    {
+      "asset": "settings",
+      "size": 32,
+      "file": "32/settings.png",
+      "sha256": "08d71ca3bf61d5a2b85f475ac6c1d69f58429535a93d72942849d78f6070daa2",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/settings.png"
+    },
+    {
+      "asset": "microphone",
+      "size": 20,
+      "file": "20/microphone.png",
+      "sha256": "fd3f1d8a6545fc543b9abce27c200b5bcbe794a341e7f25866966e9ebe5e9ca6",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/microphone.png"
+    },
+    {
+      "asset": "microphone",
+      "size": 32,
+      "file": "32/microphone.png",
+      "sha256": "1117a51059ac78af97d1dfbd300c804eedf45ac2bc4fdacafae7338f076f418a",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/microphone.png"
+    },
+    {
+      "asset": "microphone-off",
+      "size": 20,
+      "file": "20/microphone-off.png",
+      "sha256": "4849223a9732f4971234613187e38b445648eec9dbcb72430196ddf5c5bf222c",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/microphone-off.png"
+    },
+    {
+      "asset": "microphone-off",
+      "size": 32,
+      "file": "32/microphone-off.png",
+      "sha256": "d2d0b12eda2951de405de12db019e3b7d2aede0b9f59dcf0c9679fb06f2a1c60",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/microphone-off.png"
+    },
+    {
+      "asset": "camera",
+      "size": 20,
+      "file": "20/camera.png",
+      "sha256": "5069cb166be6318b908335e14f9c4a262417c7b524db43668e9a0ac902f448d4",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/camera.png"
+    },
+    {
+      "asset": "camera",
+      "size": 32,
+      "file": "32/camera.png",
+      "sha256": "0f3b742fe36338b2dcad5af26e68fb461eda31f737e226638031126fab6d01bd",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/camera.png"
+    },
+    {
+      "asset": "camera-off",
+      "size": 20,
+      "file": "20/camera-off.png",
+      "sha256": "0aa5b1bc578d44c6c5674f8da25ec3c8fe5d6bfee840517f51b82ce775e36d0c",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/camera-off.png"
+    },
+    {
+      "asset": "camera-off",
+      "size": 32,
+      "file": "32/camera-off.png",
+      "sha256": "24dfbee3be8882f56ff2b3606bf0f31fa29aa7d385f11dca09e11901250c979b",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/camera-off.png"
+    },
+    {
+      "asset": "volume",
+      "size": 20,
+      "file": "20/volume.png",
+      "sha256": "828b0ff0bd00eab089df67191c0681c25c35353fb5cdca607be4f6dec5e91f18",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/volume.png"
+    },
+    {
+      "asset": "volume",
+      "size": 32,
+      "file": "32/volume.png",
+      "sha256": "794da9a733d198ced95fc22495c1f095226618a43153a907f532cf16b4b63e07",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/volume.png"
+    },
+    {
+      "asset": "wifi",
+      "size": 20,
+      "file": "20/wifi.png",
+      "sha256": "d71f5508605c82c12951b559bd0cdf71bd134d90944c44e9dfde5c1a99cc8257",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/wifi.png"
+    },
+    {
+      "asset": "wifi",
+      "size": 32,
+      "file": "32/wifi.png",
+      "sha256": "b858e2aa7f09d014b507afeea620037324987f89ff4544456244a0b4c16f74bb",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/wifi.png"
+    },
+    {
+      "asset": "wifi-off",
+      "size": 20,
+      "file": "20/wifi-off.png",
+      "sha256": "6afe750c287523f0582a0f444dacb6d155d62df1b23097ac9a7dee23a6a3d5e8",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/wifi-off.png"
+    },
+    {
+      "asset": "wifi-off",
+      "size": 32,
+      "file": "32/wifi-off.png",
+      "sha256": "83f4ea030b47095f464715c081c214dc2da81d11cb41fb18822f0d3cda1f632c",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/wifi-off.png"
+    },
+    {
+      "asset": "sun",
+      "size": 20,
+      "file": "20/sun.png",
+      "sha256": "dfcbf3019d5f486b549c166b993d396d9a328b8789c799edf39a8cc650d2df65",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/sun.png"
+    },
+    {
+      "asset": "sun",
+      "size": 32,
+      "file": "32/sun.png",
+      "sha256": "c76929ceab5504865172103be1de7e72e83d4459fe1fd50f5d4466cb84a052e8",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/sun.png"
+    },
+    {
+      "asset": "cloud-rain",
+      "size": 20,
+      "file": "20/cloud-rain.png",
+      "sha256": "61fb0203e901f3a8d3a7f082d91b4ba2129827b11450e7268b65451eda1a006b",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/20/cloud-rain.png"
+    },
+    {
+      "asset": "cloud-rain",
+      "size": 32,
+      "file": "32/cloud-rain.png",
+      "sha256": "c073f247413fe16e621747c76997e193532433fbd4e643d77afae64c8b21a82d",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/cloud-rain.png"
+    },
+    {
+      "asset": "setting-ai",
+      "size": 20,
+      "file": "20/setting-ai.png",
+      "sha256": "e78234ffe2ac7faae855e116d50fae2ac416d359883e2d64e4784786e90f1b5c",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/setting-ai.png"
+    },
+    {
+      "asset": "setting-ai",
+      "size": 32,
+      "file": "32/setting-ai.png",
+      "sha256": "bb82d1355788bb8a4c6bcc13f5bf477a70dd9c2dc8eaf8793d9b9e5ee0bcfac6",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/setting-ai.png"
+    },
+    {
+      "asset": "shield",
+      "size": 20,
+      "file": "20/shield.png",
+      "sha256": "78c45e838e49cdcef2d404d0f68c22b7d2e7301fd85b626a34b2a402db13ec9c",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/shield.png"
+    },
+    {
+      "asset": "shield",
+      "size": 32,
+      "file": "32/shield.png",
+      "sha256": "9ac17c777fd12731e59893402677e71e276f5ed8929a7a24c8e89d040097e8bc",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/shield.png"
+    },
+    {
+      "asset": "devices",
+      "size": 20,
+      "file": "20/devices.png",
+      "sha256": "94904765a8290858ce77ebff189e8c530468459d054b215cb75e4240cd2a3290",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/devices.png"
+    },
+    {
+      "asset": "devices",
+      "size": 32,
+      "file": "32/devices.png",
+      "sha256": "858f68c024a874f1c2d47992da6b158af85cf58883e11d7ceb66dbd6c9c1faad",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/devices.png"
+    },
+    {
+      "asset": "status-ok",
+      "size": 20,
+      "file": "20/status-ok.png",
+      "sha256": "0d316d84adefbfee753558257dcf42fcc4a822d7728aacb6b3dfa734e11d58c2",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/status-ok.png"
+    },
+    {
+      "asset": "status-ok",
+      "size": 32,
+      "file": "32/status-ok.png",
+      "sha256": "e6bf1dd28f6641525feb2ec565be4ef3b4b20b6a5486b5b5dea19207348f5e36",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/status-ok.png"
+    },
+    {
+      "asset": "tool",
+      "size": 20,
+      "file": "20/tool.png",
+      "sha256": "7d265e1a3e7738951e51657d6fa51a551345b71b93f6084969e939d6de39b4d1",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/tool.png"
+    },
+    {
+      "asset": "tool",
+      "size": 32,
+      "file": "32/tool.png",
+      "sha256": "2a94a1b0221336f8611dbd7ae3557863558ee3a848790e212ed6db74f64863bd",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/tool.png"
+    },
+    {
+      "asset": "user",
+      "size": 20,
+      "file": "20/user.png",
+      "sha256": "8b16638367d96bbb3e99e466332e7eb4a07eb318844c7fbc3bfc06b2bdfcfac5",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/user.png"
+    },
+    {
+      "asset": "user",
+      "size": 32,
+      "file": "32/user.png",
+      "sha256": "66dff8be06fed635a3c8f400ddd5fe74b6aac31432bd07ee4c5030211c84fc2c",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/32/user.png"
+    },
+    {
+      "asset": "chevron-right",
+      "size": 20,
+      "file": "20/chevron-right.png",
+      "sha256": "c51fc021f49d80c8c4f6fe7c98a2bd6cac5351e4557f8c2cbdbe8b7e67ec3142",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/chevron-right.png"
+    },
+    {
+      "asset": "chevron-right",
+      "size": 32,
+      "file": "32/chevron-right.png",
+      "sha256": "95cf678f68f829956fb60e9cb0c8b9d45fcbbd6b743dc939d3af91d3cd63c0d8",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/chevron-right.png"
+    },
+    {
+      "asset": "dots",
+      "size": 20,
+      "file": "20/dots.png",
+      "sha256": "48baaa9639172f5c30400d430c7f0239386573c6ea54b94224ccdd727d2e36b9",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/dots.png"
+    },
+    {
+      "asset": "dots",
+      "size": 32,
+      "file": "32/dots.png",
+      "sha256": "df7aa0b6b0d2026ef022241cf7cf7df70aba31fc30f741d72039cc043182770e",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/dots.png"
+    },
+    {
+      "asset": "back",
+      "size": 20,
+      "file": "20/back.png",
+      "sha256": "36ae9d40eae0811fe7799a09c81747142ac4e642ab0134204a04ace7bc1c1edb",
+      "source_asset": "smart-home-ui-design-v9-card-layout-20261030/assets/ui/20/back.png"
+    },
+    {
+      "asset": "back",
+      "size": 32,
+      "file": "32/back.png",
+      "sha256": "2727c6dafe3ec6bd43c87a80a404e7c3c1930f3ce0bda534355eb8cdef47716f",
+      "source_asset": "smart-home-optimized-assets-20261029/01-ui-icons/png/32/back.png"
+    }
+  ]
+}

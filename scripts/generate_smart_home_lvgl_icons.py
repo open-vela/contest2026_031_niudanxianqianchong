@@ -6,7 +6,9 @@ fits the glyph into a standard canvas and writes uncompressed LVGL v9 A8 image
 descriptors.  Generated C files are intentionally committed: firmware builds
 must not depend on Pillow or the QuickApp tooling.
 
-Color brand assets retain their full canvas and RGBA colors as little-endian
+Approved V9 pixel PNGs under demos/smart_home/res/icons/v9 override native
+20/32 px sizes without crop, resampling or recolor. Other icons retain the
+legacy A8 conversion. Brand and V9 pixels are emitted as little-endian
 ARGB8888 bitmaps, matching ESP32-P4 and the LVGL software renderer.
 """
 
@@ -32,6 +34,9 @@ LARGE_SIZE = 48
 # Brand artwork already includes its own background and transparent corners.
 COLOR_ICONS = {"openvela": 36}
 
+# Approved V9 pixels override only the sizes supplied here.
+V9_SOURCE_DIR = ROOT / "demos/smart_home/res/icons/v9"
+
 # Top/status/navigation and compact device glyphs need a native 20 px source.
 SMALL_ICONS = {
     "air-conditioning", "bulb", "camera", "camera-off", "cloud-rain", "devices", "dots",
@@ -54,7 +59,7 @@ def icon_sizes(stem: str) -> list[int]:
     if stem in COLOR_ICONS:
         return [COLOR_ICONS[stem]]
     sizes = [BASE_SIZE]
-    if stem in SMALL_ICONS:
+    if stem in SMALL_ICONS or (V9_SOURCE_DIR / "20" / (stem + ".png")).exists():
         sizes.insert(0, SMALL_SIZE)
     if stem in LARGE_ICONS:
         sizes.append(LARGE_SIZE)
@@ -107,8 +112,17 @@ def byte_rows(data: bytes, width: int = 12) -> Iterable[str]:
 def write_icon(source: Path, size: int) -> None:
     stem = source.stem
     symbol = symbol_name(stem, size)
-    is_color = stem in COLOR_ICONS
-    data = color_data(source, size) if is_color else alpha_data(alpha_canvas(source, size))
+    pixel_source = V9_SOURCE_DIR / str(size) / source.name
+    is_pixel = pixel_source.exists()
+    is_color = stem in COLOR_ICONS or is_pixel
+    if is_pixel:
+        # Keep the approved canvas, palette and exact alpha bytes.
+        with Image.open(pixel_source) as pixels:
+            if pixels.size != (size, size):
+                raise ValueError(f"invalid native V9 size: {pixel_source}")
+            data = pixels.convert("RGBA").tobytes("raw", "BGRA")
+    else:
+        data = color_data(source, size) if is_color else alpha_data(alpha_canvas(source, size))
     color_format = "LV_COLOR_FORMAT_ARGB8888" if is_color else "LV_COLOR_FORMAT_A8"
     stride = size * (4 if is_color else 1)
     output = OUTPUT_DIR / f"{stem}_{size}.c"
@@ -186,7 +200,7 @@ def write_lookup(sources: list[Path]) -> None:
     for source in sources:
         stem = source.stem
         base_size = COLOR_ICONS.get(stem, BASE_SIZE)
-        small = f"&{symbol_name(stem, SMALL_SIZE)}" if stem in SMALL_ICONS else "NULL"
+        small = f"&{symbol_name(stem, SMALL_SIZE)}" if SMALL_SIZE in icon_sizes(stem) else "NULL"
         large = f"&{symbol_name(stem, LARGE_SIZE)}" if stem in LARGE_ICONS else "NULL"
         lines.append(
             f'    {{"asset:{stem}", {small}, &{symbol_name(stem, base_size)}, {large}}},'
@@ -226,7 +240,10 @@ def main() -> None:
     if not SOURCE_DIR.is_dir():
         raise SystemExit(f"missing source directory: {SOURCE_DIR}")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    sources = sorted(SOURCE_DIR.glob("*.png"))
+    by_name = {p.name: p for p in SOURCE_DIR.glob("*.png")}
+    for pixel in (V9_SOURCE_DIR / "32").glob("*.png"):
+        by_name.setdefault(pixel.name, pixel)
+    sources = sorted(by_name.values(), key=lambda p: p.name)
     if not sources:
         raise SystemExit(f"no PNG icons under: {SOURCE_DIR}")
 

@@ -64,6 +64,10 @@ void smart_home_lvgl_card_style(lv_obj_t *obj);
 void smart_home_lvgl_press_feedback(lv_obj_t *obj);
 void smart_home_lvgl_soft_card_style(lv_obj_t *obj);
 void smart_home_lvgl_style_keyboard(lv_obj_t *keyboard);
+void smart_home_lvgl_style_input(lv_obj_t *input, int size);
+void smart_home_lvgl_style_dropdown(lv_obj_t *dropdown, int size);
+/* Tint legacy alpha masks while preserving approved pixel-art colors. */
+void smart_home_lvgl_icon_color(lv_obj_t *icon, lv_color_t color);
 
 lv_obj_t *smart_home_lvgl_label_create(lv_obj_t *parent,
                                        const char *text,
