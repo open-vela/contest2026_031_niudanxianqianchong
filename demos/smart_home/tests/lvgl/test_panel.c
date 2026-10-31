@@ -3,7 +3,11 @@
 #include "smart_home_v9_device_view.h"
 #include "../../src/config/smart_home_backends.h"
 #include <assert.h>
+#include <malloc.h>
 #include <stdlib.h>
+#include <time.h>
+
+static void test_host_frame_budget(smart_home_lvgl_t *ui);
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -259,6 +263,7 @@ static void test_home(smart_home_lvgl_t *ui)
     lv_obj_delete(ui->screen_settings_v9);
     ui->screen_settings_v9 = NULL;
 
+    test_host_frame_budget(ui);
     lv_timer_delete(ui->home_time_timer);
     ui->home_time_timer = NULL;
     lv_obj_delete(ui->screen_home);
@@ -545,6 +550,55 @@ int smart_home_network_connect_credentials(
         status->ip_status = SMART_HOME_NETWORK_ERR_DHCP;
     }
     return AGENT_ERROR_INVALID;
+}
+
+static void test_host_frame_budget(smart_home_lvgl_t *ui)
+{
+    /* Host 侧帧预算基线：不是板端性能，只用来在改动前后对比回归。
+     * 每轮强制整屏失效再跑一次 lv_timer_handler()，统计单帧耗时分布。
+     */
+    enum { kSamples = 300 };
+    static uint32_t samples[kSamples];
+    struct mallinfo before;
+    struct timespec started, finished;
+    unsigned i;
+
+    if (!getenv("SMART_HOME_HOST_PERF")) return;
+
+    /* 前面的截图流程会把活动屏切到设置页并随后删除，这里先回到首页，
+     * 否则 lv_timer_handler() 会渲染已释放的屏幕。
+     */
+    lv_screen_load(ui->screen_home);
+    lv_refr_now(NULL);
+    before = mallinfo();
+    for (i = 0; i < kSamples; i++) {
+        lv_obj_invalidate(ui->screen_home);
+        clock_gettime(CLOCK_MONOTONIC, &started);
+        lv_refr_now(NULL);   /* 强制走完整重绘，而不是等刷新定时器 */
+        clock_gettime(CLOCK_MONOTONIC, &finished);
+        samples[i] = (uint32_t)((finished.tv_sec - started.tv_sec) * 1000000u
+                                + (finished.tv_nsec - started.tv_nsec) / 1000u);
+    }
+
+    /* 采样已是很小的整数毫秒，直接插入排序后取分位。 */
+    for (i = 1; i < kSamples; i++) {
+        uint32_t value = samples[i];
+        unsigned j = i;
+
+        while (j > 0 && samples[j - 1] > value) {
+            samples[j] = samples[j - 1];
+            j--;
+        }
+        samples[j] = value;
+    }
+
+    printf("[host-perf] scene=home samples=%u p50_us=%u p95_us=%u p99_us=%u "
+           "max_us=%u heap_used=%u heap_free=%u\n",
+           (unsigned)kSamples, (unsigned)samples[kSamples / 2],
+           (unsigned)samples[(kSamples * 95) / 100],
+           (unsigned)samples[(kSamples * 99) / 100],
+           (unsigned)samples[kSamples - 1],
+           (unsigned)before.uordblks, (unsigned)before.fordblks);
 }
 
 static void test_v9_views(void)
