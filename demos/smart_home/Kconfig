@@ -583,6 +583,15 @@ endchoice
 
 if SMART_HOME_DEMO_UI_LVGL
 
+config SMART_HOME_V9_DEVICE_ANIMATION
+    bool "Enable V9 device pixel-frame animation"
+    default n
+    help
+      V9 device cards use static on/off art by default.  Pixel-frame
+      animation is opt-in until the target PSRAM/Flash/stack budget and
+      frame-cache policy have been measured.  Disabling it is the
+      documented static fallback, not a claim that animation is ready.
+
 config SMART_HOME_CAMERA_PREVIEW
     bool "Enable local SC2336 security-camera preview"
     depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
