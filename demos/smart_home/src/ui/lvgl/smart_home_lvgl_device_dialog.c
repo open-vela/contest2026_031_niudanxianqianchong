@@ -1,6 +1,7 @@
 /* Capability-driven device controls. All network I/O stays in the gateway worker. */
 #include "smart_home_lvgl_internal.h"
 #include "smart_home_lvgl_device_dialog.h"
+#include "smart_home_lvgl_room_dialog.h"
 #include "../../smart_home_memory.h"
 #include "../../miloco/smart_home_miloco.h"
 #include <stdlib.h>
@@ -60,6 +61,13 @@ void smart_home_lvgl_device_dialog_close(void) {
 static void close_cb(lv_event_t *event) {
     (void)event;
     smart_home_lvgl_device_dialog_close();
+}
+static void room_cb(lv_event_t *event) {
+    device_dialog_t *ctx = lv_event_get_user_data(event);
+    smart_home_lvgl_t *ui = ctx->ui;
+    smart_home_v9_device_view_t view = ctx->view;
+    smart_home_lvgl_device_dialog_close();
+    smart_home_lvgl_room_assign_open(ui, &view);
 }
 static void stop_cb(lv_event_t *event) {
     lv_event_stop_bubbling(event);
@@ -363,9 +371,21 @@ void smart_home_lvgl_device_dialog_open(smart_home_lvgl_t *ui,
     lv_obj_t *label = smart_home_lvgl_label_create(
         panel, view->name, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
     lv_obj_set_pos(label, 0, 0);
-    label = smart_home_lvgl_label_create(panel, view->room_label,
+    label = smart_home_lvgl_label_create(panel, smart_home_lvgl_room_display(view->room_label),
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
     lv_obj_set_pos(label, 0, 42);
+    if (view->source == SMART_HOME_V9_SOURCE_LOCAL || view->source == SMART_HOME_V9_SOURCE_MILOCO) {
+        lv_obj_t *room = lv_button_create(panel);
+        lv_obj_remove_style_all(room);
+        lv_obj_set_pos(room, 180, 36);
+        lv_obj_set_size(room, 108, 32);
+        smart_home_lvgl_set_bg(room, SMART_HOME_UI_COLOR_SURFACE_ON);
+        lv_obj_set_style_radius(room, 8, 0);
+        smart_home_lvgl_press_feedback(room);
+        lv_obj_add_event_cb(room, room_cb, LV_EVENT_CLICKED, ctx);
+        label = smart_home_lvgl_label_create(room, "分配房间", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+        lv_obj_center(label);
+    }
     lv_obj_t *art_area = lv_obj_create(panel);
     lv_obj_remove_style_all(art_area);
     lv_obj_set_size(art_area, 264, 280);

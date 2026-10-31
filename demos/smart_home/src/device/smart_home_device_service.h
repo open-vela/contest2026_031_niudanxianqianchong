@@ -123,3 +123,11 @@ int smart_home_device_service_run_scene(smart_home_device_service_t *service,
 
 int smart_home_device_service_register_context(agent_t *agent,
                                                 smart_home_device_service_t *service);
+
+int smart_home_device_service_assign_room(smart_home_device_service_t *service,
+                                          const char *key, const char *room);
+
+/* Atomically migrate known gateway devices together with local metadata. */
+int smart_home_device_service_delete_room_with_keys(
+    smart_home_device_service_t *service, const char *source, const char *target,
+    const char keys[][SMART_HOME_ROOM_KEY_SIZE], size_t count);

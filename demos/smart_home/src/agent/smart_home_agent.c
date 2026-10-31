@@ -377,6 +377,12 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     smart_home_init_trace("status-ready", AGENT_OK);
 
     smart_home_device_init(&app->device_state);
+    /* Startup runs outside the LVGL display lock. Invalid saved metadata leaves
+     * the factory state intact because the parser commits atomically. */
+    cJSON *saved_state = NULL;
+    if (smart_home_config_state_load(&saved_state, NULL, 0) == AGENT_OK)
+        (void)smart_home_device_state_from_json(&app->device_state, saved_state);
+    cJSON_Delete(saved_state);
     smart_home_init_trace("device-state-ready", AGENT_OK);
 
     smart_home_init_trace("device-service-begin", AGENT_OK);

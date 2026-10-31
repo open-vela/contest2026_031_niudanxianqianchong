@@ -7,7 +7,9 @@
 
 #define SMART_HOME_MAX_DEVICES 8
 #define SMART_HOME_MAX_ROOMS 6
-#define SMART_HOME_ROOM_NAME_SIZE 16
+#define SMART_HOME_ROOM_NAME_SIZE 24
+#define SMART_HOME_ROOM_BINDINGS 16
+#define SMART_HOME_ROOM_KEY_SIZE 48
 #define SMART_HOME_DEVICE_NAME_SIZE 32
 
 typedef enum {
@@ -30,6 +32,8 @@ typedef struct {
 
 typedef struct {
     smart_home_device_t devices[SMART_HOME_MAX_DEVICES];
+    struct { char key[SMART_HOME_ROOM_KEY_SIZE]; char room[SMART_HOME_ROOM_NAME_SIZE]; }
+        room_bindings[SMART_HOME_ROOM_BINDINGS];
     char rooms[SMART_HOME_MAX_ROOMS][SMART_HOME_ROOM_NAME_SIZE];
     int room_count;
     int next_device_id;
@@ -122,3 +126,8 @@ int smart_home_ac_parse_fan_speed(const char *name);
 int smart_home_device_build_status_json(const smart_home_state_t *state,
                                         char *buffer,
                                         size_t buffer_size);
+
+/* Stable remote keys are panel-local room overrides, independent of cloud rooms. */
+const char *smart_home_device_room_override(const smart_home_state_t *state, const char *key);
+int smart_home_device_assign_room(smart_home_state_t *state, const char *key,
+                                   const char *room);

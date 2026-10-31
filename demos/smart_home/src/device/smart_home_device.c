@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <limits.h>
 
 static int room_is(const char *room, const char *name)
 {
@@ -16,13 +18,25 @@ static int valid_room_name(const char *room)
         return 0;
     }
 
-    for (i = 0; room[i]; i++) {
-        char ch = room[i];
-
-        if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
-              ch == '_')) {
-            return 0;
+    for (i = 0; room[i];) {
+        unsigned char ch = (unsigned char)room[i++];
+        if (ch < 0x80) {
+            if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                  (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) return 0;
+            continue;
         }
+        unsigned code, need, minimum;
+        if (ch >= 0xc2 && ch <= 0xdf) { code = ch & 31; need = 1; minimum = 0x80; }
+        else if (ch >= 0xe0 && ch <= 0xef) { code = ch & 15; need = 2; minimum = 0x800; }
+        else if (ch >= 0xf0 && ch <= 0xf4) { code = ch & 7; need = 3; minimum = 0x10000; }
+        else return 0;
+        while (need--) {
+            unsigned char next = (unsigned char)room[i++];
+            if ((next & 0xc0) != 0x80) return 0;
+            code = (code << 6) | (next & 63);
+        }
+        if (code < minimum || code > 0x10ffff ||
+            (code >= 0xd800 && code <= 0xdfff)) return 0;
     }
     return 1;
 }
@@ -192,7 +206,7 @@ int smart_home_room_add(smart_home_state_t *state, const char *room)
         return AGENT_ERROR_INVALID;
     }
     if (smart_home_room_index(state, room) >= 0) {
-        return AGENT_OK;
+        return AGENT_ERROR_INVALID;
     }
     if (state->room_count >= SMART_HOME_MAX_ROOMS) {
         return AGENT_ERROR_LIMIT;
@@ -237,6 +251,12 @@ int smart_home_room_delete_and_reassign(smart_home_state_t *state,
         device->room[sizeof(device->room) - 1u] = '\0';
     }
 
+    for (i = 0; i < SMART_HOME_ROOM_BINDINGS; i++) {
+        if (state->room_bindings[i].key[0] &&
+            !strcmp(state->room_bindings[i].room, source_room))
+            snprintf(state->room_bindings[i].room, SMART_HOME_ROOM_NAME_SIZE,
+                     "%s", target_room);
+    }
     for (i = source_index; i < state->room_count - 1; i++) {
         memcpy(state->rooms[i], state->rooms[i + 1],
                sizeof(state->rooms[i]));
@@ -412,6 +432,46 @@ int smart_home_device_remove(smart_home_state_t *state, int device_id)
     }
 
     memset(device, 0, sizeof(*device));
+    return AGENT_OK;
+}
+
+const char *smart_home_device_room_override(const smart_home_state_t *state, const char *key)
+{
+    if (!state || !key || !key[0]) return NULL;
+    for (int i = 0; i < SMART_HOME_ROOM_BINDINGS; i++)
+        if (!strcmp(state->room_bindings[i].key, key)) return state->room_bindings[i].room;
+    return NULL;
+}
+int smart_home_device_assign_room(smart_home_state_t *state, const char *key,
+                                   const char *room)
+{
+    if (!state || !key || !key[0] || smart_home_room_index(state, room) < 0)
+        return AGENT_ERROR_INVALID;
+    if (!strncmp(key, "local:", 6)) {
+        char *end;
+        long id = strtol(key + 6, &end, 10);
+        if (end == key + 6 || *end || id <= 0 || id > INT_MAX) return AGENT_ERROR_INVALID;
+        smart_home_device_t *device = smart_home_device_find_by_id(state, (int)id);
+        if (!device) return AGENT_ERROR_NOT_FOUND;
+        snprintf(device->room, sizeof device->room, "%s", room);
+        return AGENT_OK;
+    }
+    if (strncmp(key, "milo:", 5) || !key[5] || strlen(key) >= SMART_HOME_ROOM_KEY_SIZE)
+        return AGENT_ERROR_INVALID;
+    for (size_t n = 5; key[n]; n++) {
+        unsigned char ch = (unsigned char)key[n];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '_' || ch == ':'))
+            return AGENT_ERROR_INVALID;
+    }
+    int slot = -1;
+    for (int i = 0; i < SMART_HOME_ROOM_BINDINGS; i++) {
+        if (!strcmp(state->room_bindings[i].key, key)) { slot = i; break; }
+        if (!state->room_bindings[i].key[0] && slot < 0) slot = i;
+    }
+    if (slot < 0) return AGENT_ERROR_LIMIT;
+    snprintf(state->room_bindings[slot].key, SMART_HOME_ROOM_KEY_SIZE, "%s", key);
+    snprintf(state->room_bindings[slot].room, SMART_HOME_ROOM_NAME_SIZE, "%s", room);
     return AGENT_OK;
 }
 
@@ -748,6 +808,18 @@ cJSON *smart_home_device_state_to_json(const smart_home_state_t *state)
         cJSON_AddItemToArray(rooms, room);
     }
 
+    cJSON *bindings = cJSON_AddArrayToObject(root, "room_bindings");
+    if (!bindings) { cJSON_Delete(root); return NULL; }
+    for (i = 0; i < SMART_HOME_ROOM_BINDINGS; i++) {
+        if (!state->room_bindings[i].key[0]) continue;
+        cJSON *binding = cJSON_CreateObject();
+        if (!binding || !cJSON_AddStringToObject(binding, "key", state->room_bindings[i].key) ||
+            !cJSON_AddStringToObject(binding, "room", state->room_bindings[i].room)) {
+            cJSON_Delete(binding); cJSON_Delete(root); return NULL;
+        }
+        cJSON_AddItemToArray(bindings, binding);
+    }
+
     devices = cJSON_AddArrayToObject(root, "devices");
     if (!devices) {
         cJSON_Delete(root);
@@ -843,6 +915,21 @@ int smart_home_device_state_from_json(smart_home_state_t *state,
         (void)smart_home_room_add(&tmp, "bedroom");
     }
 
+    if (tmp.room_count == 0) return AGENT_ERROR_PARSE;
+    const cJSON *bindings = cJSON_GetObjectItemCaseSensitive(root, "room_bindings");
+    if (bindings) {
+        if (!cJSON_IsArray(bindings)) return AGENT_ERROR_PARSE;
+        cJSON_ArrayForEach(item, bindings) {
+            const cJSON *key = cJSON_GetObjectItemCaseSensitive(item, "key");
+            const cJSON *room = cJSON_GetObjectItemCaseSensitive(item, "room");
+            if (!cJSON_IsString(key) || !cJSON_IsString(room) ||
+                strncmp(key->valuestring, "milo:", 5) ||
+                smart_home_device_room_override(&tmp, key->valuestring) ||
+                smart_home_device_assign_room(&tmp, key->valuestring, room->valuestring) != AGENT_OK)
+                return AGENT_ERROR_PARSE;
+        }
+    }
+
     cJSON_ArrayForEach(item, devices) {
         const cJSON *id;
         const cJSON *room;
@@ -901,6 +988,7 @@ int smart_home_device_state_from_json(smart_home_state_t *state,
                 }
             }
 
+            device_id = id->valueint;
             /* 校验/应用亮度 */
             {
                 const cJSON *brightness =

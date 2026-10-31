@@ -380,19 +380,37 @@ int smart_home_device_service_delete_room(smart_home_device_service_t *service,
                                           const char *source_room,
                                           const char *target_room)
 {
+    return smart_home_device_service_delete_room_with_keys(service, source_room,
+                                                            target_room, NULL, 0);
+}
+int smart_home_device_service_delete_room_with_keys(
+    smart_home_device_service_t *service, const char *source, const char *target,
+    const char keys[][SMART_HOME_ROOM_KEY_SIZE], size_t count)
+{
     char data[SMART_HOME_DEVICE_EVENT_DATA_SIZE];
-    int ret;
-
-    if (!service || !source_room || !target_room ||
-        !service->mutex_initialized) {
-        return AGENT_ERROR_INVALID;
-    }
+    smart_home_state_t next;
+    if (!service || !source || !target || !service->mutex_initialized ||
+        count > SMART_HOME_ROOM_BINDINGS || (count && !keys)) return AGENT_ERROR_INVALID;
     pthread_mutex_lock(&service->mutex);
-    ret = smart_home_room_delete_and_reassign(service->state,
-                                              source_room, target_room);
-    snprintf(data, sizeof(data),
-             "{\"from\":\"%s\",\"to\":\"%s\",\"operation\":\"room_deleted\"}",
-             source_room, target_room);
+    next = *service->state;
+    int ret = AGENT_OK;
+    for (size_t i = 0; i < count && ret == AGENT_OK; i++)
+        ret = smart_home_device_assign_room(&next, keys[i], target);
+    if (ret == AGENT_OK) ret = smart_home_room_delete_and_reassign(&next, source, target);
+    if (ret == AGENT_OK) *service->state = next;
+    snprintf(data, sizeof data,
+        "{\"from\":\"%s\",\"to\":\"%s\",\"operation\":\"room_deleted\"}", source, target);
+    return commit_mutation(service, ret, "device_state_changed", data);
+}
+
+int smart_home_device_service_assign_room(smart_home_device_service_t *service,
+                                          const char *key, const char *room)
+{
+    char data[192];
+    if (!service || !service->mutex_initialized || !key || !room) return AGENT_ERROR_INVALID;
+    pthread_mutex_lock(&service->mutex);
+    int ret = smart_home_device_assign_room(service->state, key, room);
+    snprintf(data, sizeof data, "{\"key\":\"%s\",\"room\":\"%s\"}", key, room);
     return commit_mutation(service, ret, "device_state_changed", data);
 }
 

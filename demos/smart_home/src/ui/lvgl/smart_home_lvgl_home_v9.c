@@ -5,6 +5,7 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "smart_home_v9_device_view.h"
 #include "smart_home_lvgl_device_dialog.h"
+#include "smart_home_lvgl_room_dialog.h"
 #include "../../device/smart_home_device_service.h"
 #include "../../smart_home_memory.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -23,6 +24,7 @@
 #define V9_DEVICE_COUNT 6
 #define V9_MAX_CARDS    12
 #define V9_ROOM_COUNT   5
+#define V9_MAX_ROOMS (SMART_HOME_MAX_ROOMS + SMART_HOME_V9_MAX_VIEWS)
 #define V9_CARD_W       176
 #define V9_CARD_H       244
 #define V9_CARD_GAP     16
@@ -70,7 +72,11 @@ typedef struct {
     lv_obj_t *screen;
     lv_obj_t *view;
     lv_obj_t *empty;
-    lv_obj_t *room_btn[V9_ROOM_COUNT + 1];
+    lv_obj_t *source_label;
+    lv_obj_t *room_btn[V9_MAX_ROOMS + 1];
+    lv_obj_t *room_strip;
+    char rooms[V9_MAX_ROOMS][SMART_HOME_ROOM_NAME_SIZE];
+    int room_count;
     lv_obj_t *card[V9_MAX_CARDS];
     lv_obj_t *room_label[V9_MAX_CARDS];
     lv_obj_t *name_label[V9_MAX_CARDS];
@@ -106,6 +112,7 @@ static void v9_camera_preview_stop(void);
 static void v9_close_modal(void)
 {
     smart_home_lvgl_device_dialog_close();
+    smart_home_lvgl_room_dialog_close();
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
     v9_camera_preview_stop();
 #endif
@@ -302,7 +309,7 @@ static void v9_reflow(void)
     for (int i = 0; i < g_v9.card_count; i++) {
         int match = g_v9.room_filter == 0 ||
                     !strcmp(g_v9.room_text[i],
-                            g_v9_rooms[g_v9.room_filter - 1]);
+                            g_v9.rooms[g_v9.room_filter - 1]);
 
         if (!match) {
             lv_obj_add_flag(g_v9.card[i], LV_OBJ_FLAG_HIDDEN);
@@ -324,11 +331,11 @@ static void v9_reflow(void)
 
 int smart_home_lvgl_v9_select_room(int index)
 {
-    if (index < 0 || index > V9_ROOM_COUNT) {
+    if (index < 0 || index > g_v9.room_count) {
         return -1;
     }
     g_v9.room_filter = index;
-    for (int i = 0; i <= V9_ROOM_COUNT; i++) {
+    for (int i = 0; i <= g_v9.room_count; i++) {
         lv_obj_t *btn = g_v9.room_btn[i];
         lv_obj_t *label;
         if (!btn) continue;
@@ -353,7 +360,7 @@ int smart_home_lvgl_v9_select_room(int index)
 
 static void v9_room_click_cb(lv_event_t *event)
 {
-    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    int index = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(event));
 
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
@@ -624,7 +631,8 @@ static void v9_family_cb(lv_event_t *event)
 static void v9_add_room_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        v9_info_modal("房间管理", "房间新增、删除与设备迁移将在 M3 接入。");
+        v9_close_modal();
+        smart_home_lvgl_room_dialog_open(lv_event_get_user_data(event));
     }
 }
 
@@ -654,7 +662,8 @@ static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
 
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 78, 40);
-    lv_obj_set_pos(button, 28 + index * 84, 204);
+    lv_obj_set_pos(button, index * 96, 0);
+    lv_obj_set_width(button, 92);
     lv_obj_set_style_radius(button, 20, 0);
     lv_obj_set_ext_click_area(button, 4);
     if (index == 0) {
@@ -671,9 +680,49 @@ static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
         button, text,
         index == 0 ? SMART_HOME_UI_COLOR_TEXT_PRIMARY :
                      SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
+    lv_obj_set_width(label, 80);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
     lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
     return button;
+}
+
+static void v9_refresh_rooms(smart_home_lvgl_t *ui)
+{
+    char rooms[V9_MAX_ROOMS][SMART_HOME_ROOM_NAME_SIZE] = {{0}};
+    smart_home_state_t state;
+    int count = 0;
+    if (ui->app && smart_home_device_service_copy_state(&ui->app->device_service, &state) == AGENT_OK) {
+        for (int i = 0; i < state.room_count; i++)
+            snprintf(rooms[count++], SMART_HOME_ROOM_NAME_SIZE, "%s",
+                     display_room(state.rooms[i]));
+    } else {
+        for (int i = 0; i < V9_ROOM_COUNT; i++)
+            snprintf(rooms[count++], SMART_HOME_ROOM_NAME_SIZE, "%s", g_v9_rooms[i]);
+    }
+    /* Gateway rooms remain visible even when not part of the local catalog. */
+    for (int i = 0; i < g_v9.card_count && count < V9_MAX_ROOMS; i++) {
+        int found = 0;
+        for (int n = 0; n < count; n++) if (!strcmp(rooms[n], g_v9.room_text[i])) found = 1;
+        if (!found && g_v9.room_text[i][0])
+            snprintf(rooms[count++], SMART_HOME_ROOM_NAME_SIZE, "%s", g_v9.room_text[i]);
+    }
+    if (count == g_v9.room_count && !memcmp(rooms, g_v9.rooms, sizeof rooms)) return;
+    char selected[SMART_HOME_ROOM_NAME_SIZE] = "";
+    if (g_v9.room_filter > 0)
+        snprintf(selected, sizeof selected, "%s", g_v9.rooms[g_v9.room_filter - 1]);
+    memcpy(g_v9.rooms, rooms, sizeof rooms);
+    g_v9.room_count = count;
+    g_v9.room_filter = 0;
+    memset(g_v9.room_btn, 0, sizeof g_v9.room_btn);
+    lv_obj_clean(g_v9.room_strip);
+    g_v9.room_btn[0] = v9_make_room_button(g_v9.room_strip, 0, "全部");
+    for (int i = 0; i < count; i++) {
+        g_v9.room_btn[i + 1] = v9_make_room_button(g_v9.room_strip, i + 1, rooms[i]);
+        if (!strcmp(rooms[i], selected)) g_v9.room_filter = i + 1;
+    }
+    smart_home_lvgl_v9_select_room(g_v9.room_filter);
 }
 
 static void v9_make_card(smart_home_lvgl_t *ui, int index)
@@ -860,6 +909,9 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
     smart_home_v9_device_view_t views[V9_MAX_CARDS];
     size_t count = 0;
     size_t valid = 0;
+    smart_home_state_t local;
+    int have_local = ui && ui->app && smart_home_device_service_copy_state(
+        &ui->app->device_service, &local) == AGENT_OK;
 
     if (!ui || !g_v9.screen) {
         return;
@@ -874,7 +926,7 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
 #endif
     if (count == 0 && ui->app && ui->device_state &&
         ui->app->device_service.mutex_initialized) {
-        count = smart_home_v9_collect_views(ui->device_state, NULL, raw,
+        count = smart_home_v9_collect_views(have_local ? &local : NULL, NULL, raw,
                                             V9_MAX_CARDS);
     }
     for (size_t i = 0; i < count; i++) {
@@ -885,11 +937,29 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
             raw[i].name[0] == '\0') {
             continue;
         }
+        if (have_local && raw[i].source == SMART_HOME_V9_SOURCE_MILOCO) {
+            const char *room = smart_home_device_room_override(&local, raw[i].key);
+            if (room) {
+                snprintf(raw[i].room_id, sizeof raw[i].room_id, "%s", room);
+                snprintf(raw[i].room_label, sizeof raw[i].room_label, "%s", display_room(room));
+            }
+        }
         views[valid++] = raw[i];
     }
+    if (g_v9.source_label) lv_label_set_text(g_v9.source_label,
+        valid ? (views[0].source == SMART_HOME_V9_SOURCE_MILOCO ? "米家设备" : "本地设备") :
+        (have_local ? "暂无设备" : "演示数据"));
     if (valid == 0) {
+        if (have_local) {
+            if (g_v9.card_count) v9_destroy_cards();
+            g_v9.dynamic = 1;
+            v9_refresh_rooms(ui);
+            v9_reflow();
+            return;
+        }
         if (g_v9.dynamic || g_v9.card_count == 0) {
             v9_create_demo_cards(ui);
+            v9_refresh_rooms(ui);
             v9_reflow();
         }
         return;
@@ -925,6 +995,8 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
                     }
                 }
             }
+            v9_refresh_rooms(ui);
+            v9_reflow();
             return;
         }
     }
@@ -935,6 +1007,7 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
     }
     g_v9.card_count = (int)valid;
     g_v9.dynamic = 1;
+    v9_refresh_rooms(ui);
     v9_reflow();
 }
 
@@ -1016,21 +1089,23 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     label = smart_home_lvgl_label_create(screen, "演示数据",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
     lv_obj_set_pos(label, 838, 142);
+    g_v9.source_label = label;
 
-    g_v9.room_btn[0] = v9_make_room_button(screen, 0, "全部");
-    for (int i = 0; i < V9_ROOM_COUNT; i++) {
-        g_v9.room_btn[i + 1] = v9_make_room_button(screen, i + 1,
-                                                    g_v9_rooms[i]);
-    }
+    g_v9.room_strip = lv_obj_create(screen);
+    lv_obj_remove_style_all(g_v9.room_strip);
+    lv_obj_set_pos(g_v9.room_strip, 28, 204);
+    lv_obj_set_size(g_v9.room_strip, 650, 44);
+    lv_obj_set_scroll_dir(g_v9.room_strip, LV_DIR_HOR);
+    lv_obj_set_scrollbar_mode(g_v9.room_strip, LV_SCROLLBAR_MODE_OFF);
     button = lv_button_create(screen);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 48, 40);
-    lv_obj_set_pos(button, 532, 204);
+    lv_obj_set_pos(button, 690, 204);
     lv_obj_set_style_radius(button, 16, 0);
     lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_ext_click_area(button, 4);
-    lv_obj_add_event_cb(button, v9_add_room_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(button, v9_add_room_cb, LV_EVENT_CLICKED, ui);
     smart_home_lvgl_press_feedback(button);
     label = smart_home_lvgl_label_create(button, "+",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
@@ -1053,6 +1128,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_add_flag(g_v9.empty, LV_OBJ_FLAG_HIDDEN);
 
     v9_create_demo_cards(ui);
+    v9_refresh_rooms(ui);
     smart_home_lvgl_v9_refresh_views(ui);
 
     if (ui->home_time_timer) {

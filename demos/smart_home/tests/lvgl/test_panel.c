@@ -11,6 +11,8 @@
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
+static void test_v9_room_catalog(smart_home_lvgl_t *ui);
+static int local_state_enabled;
 static void capture_v9_device_modals(smart_home_lvgl_t *ui);
 static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
 static void capture_v9_model_menu(smart_home_lvgl_t *ui);
@@ -292,6 +294,7 @@ static void test_home(smart_home_lvgl_t *ui)
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
     capture_v9_device_modals(ui);
     test_v9_cards(ui);
+    test_v9_room_catalog(ui);
 
     smart_home_lvgl_build_settings_screen_v9(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
@@ -785,6 +788,21 @@ int smart_home_device_service_get_device(smart_home_device_service_t *service,
                                           int id, smart_home_device_t *out)
 { (void)service; (void)id; (void)out; return AGENT_ERROR_NOT_FOUND; }
 
+int smart_home_device_service_copy_state(smart_home_device_service_t *s, smart_home_state_t *out)
+{ if (!local_state_enabled || !s->state) return AGENT_ERROR_INVALID;
+  *out = *s->state; return AGENT_OK; }
+int smart_home_device_service_add_room(smart_home_device_service_t *s, const char *room)
+{ (void)s; (void)room; return AGENT_ERROR_INVALID; }
+int smart_home_device_service_delete_room(smart_home_device_service_t *s, const char *a, const char *b)
+{ (void)s; (void)a; (void)b; return AGENT_ERROR_INVALID; }
+int smart_home_device_service_delete_room_with_keys(smart_home_device_service_t *s,
+    const char *a, const char *b, const char keys[][SMART_HOME_ROOM_KEY_SIZE], size_t n)
+{ (void)s; (void)a; (void)b; (void)keys; (void)n; return AGENT_ERROR_INVALID; }
+int smart_home_device_service_assign_room(smart_home_device_service_t *s, const char *key, const char *room)
+{ (void)s; (void)key; (void)room; return AGENT_ERROR_INVALID; }
+int smart_home_config_state_save(const cJSON *root)
+{ (void)root; return AGENT_ERROR_INVALID; }
+
 static void test_room_transaction(void)
 {
     smart_home_state_t state;
@@ -1080,6 +1098,38 @@ static lv_obj_t *find_v9_label(lv_obj_t *root, const char *text)
         if (found) return found;
     }
     return NULL;
+}
+
+static void test_v9_room_catalog(smart_home_lvgl_t *ui)
+{
+    snapshot_count = 12;
+    smart_home_device_init(&ui->app->device_state);
+    assert(!smart_home_room_add(&ui->app->device_state, "书房"));
+    assert(!smart_home_device_assign_room(&ui->app->device_state, "milo:v9-light-0", "书房"));
+    ui->app->device_service.state = &ui->app->device_state;
+    local_state_enabled = 1;
+    smart_home_lvgl_v9_refresh_views(ui);
+    assert(smart_home_lvgl_v9_select_room(3) == 1);
+    lv_obj_t *bedroom = find_v9_label(ui->screen_home, "卧室");
+    assert(bedroom);
+    lv_obj_send_event(lv_obj_get_parent(bedroom), LV_EVENT_CLICKED, NULL);
+    assert(smart_home_lvgl_v9_visible_card_count() == 0);
+    smart_home_lvgl_v9_select_room(3);
+    assert(!smart_home_room_delete_and_reassign(&ui->app->device_state, "书房", "living_room"));
+    smart_home_lvgl_v9_refresh_views(ui);
+    assert(!find_v9_label(ui->screen_home, "书房"));
+    assert(smart_home_lvgl_v9_visible_card_count() == 12);
+    snapshot_count = 0;
+    memset(ui->app->device_state.devices, 0, sizeof ui->app->device_state.devices);
+    ui->app->device_service.mutex_initialized = 1;
+    smart_home_lvgl_v9_refresh_views(ui);
+    assert(smart_home_lvgl_v9_visible_card_count() == 0);
+    ui->app->device_service.mutex_initialized = 0;
+    local_state_enabled = 0;
+    snapshot_count = 0;
+    ui->app->device_service.state = NULL;
+    smart_home_lvgl_v9_refresh_views(ui);
+    puts("PASS: dynamic room catalog, actual filter click, remote assignment and deleted filter reset");
 }
 
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui)

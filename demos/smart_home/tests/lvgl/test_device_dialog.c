@@ -1,6 +1,9 @@
 #include "smart_home_lvgl_device_dialog.c"
 #include "../../src/miloco/smart_home_miloco_specscan.h"
 #include <assert.h>
+void smart_home_lvgl_room_assign_open(smart_home_lvgl_t *ui, const smart_home_v9_device_view_t *view)
+{ (void)ui; (void)view; }
+const char *smart_home_lvgl_room_display(const char *room) { return room; }
 static smart_home_miloco_device_t remote;
 static int online = 1, submit_result, completed, completion_result;
 static uint32_t request_id;

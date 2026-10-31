@@ -18,6 +18,8 @@ add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${UI}/smart_home_lvgl_nav.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_home_v9.c"
   "${UI}/smart_home_lvgl_device_dialog.c"
+  "${UI}/smart_home_lvgl_room_dialog.c"
+  "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
   "${UI}/smart_home_lvgl_settings_v9.c"
   "${UI}/smart_home_lvgl_chat.c"
   "${UI}/smart_home_v9_device_view.c"
@@ -138,3 +140,19 @@ foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OP
   set_target_properties(device_dialog_check PROPERTIES ${property} "${value}")
 endforeach()
 add_test(NAME device_dialog_check COMMAND device_dialog_check)
+
+add_executable(room_dialog_check test_room_dialog.c
+  "${REPO}/demos/smart_home/src/device/smart_home_device.c"
+  "${REPO}/demos/smart_home/src/device/smart_home_device_service.c"
+  "${REPO}/demos/smart_home/src/config/smart_home_config_store.c"
+  "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
+  "${UI}/smart_home_lvgl_style.c" "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(room_dialog_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(room_dialog_check PRIVATE
+  SMART_HOME_CONFIG_STATE_PATH="${CMAKE_CURRENT_BINARY_DIR}/rooms-state.json")
+target_link_options(room_dialog_check PRIVATE -Wl,--wrap=smart_home_config_state_save)
+add_test(NAME room_dialog_check COMMAND room_dialog_check)
+set_tests_properties(room_dialog_check PROPERTIES TIMEOUT 15)
