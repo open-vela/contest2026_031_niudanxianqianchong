@@ -667,6 +667,7 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
         lv_label_set_text(ui->home_status_label, text);
     }
 #endif
+    smart_home_lvgl_v9_refresh_views(ui);
     (void)on_count;
 }
 

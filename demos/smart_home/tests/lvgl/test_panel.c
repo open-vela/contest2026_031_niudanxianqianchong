@@ -525,6 +525,18 @@ static void test_v9_views(void)
     puts("PASS: V9 view mapping and async control readback/timeout");
 }
 
+/* The panel harness does not link the full device service; local real
+ * control is exercised on target.  The V9 view/control state machine has its
+ * own host test below. */
+int smart_home_device_service_set_device_control(
+    smart_home_device_service_t *service, int device_id, int on, int value,
+    int mode, int fan_speed)
+{
+    (void)service; (void)device_id; (void)on; (void)value; (void)mode;
+    (void)fan_speed;
+    return AGENT_ERROR_INVALID;
+}
+
 static void test_room_transaction(void)
 {
     smart_home_state_t state;
