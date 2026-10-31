@@ -43,6 +43,37 @@ static void smart_home_lvgl_log_build_stage(const char *stage,
 #define smart_home_lvgl_log_build_stage(stage, phase) ((void)0)
 #endif
 
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+/* 给性能行打上当前页面标签，板端一份日志就能按场景分组回填 P01-P12。
+ * 弹窗叠加在所在页面上，不单独计数。
+ */
+static const char *v9_perf_scene(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *active;
+
+    if (!ui) {
+        return "none";
+    }
+    active = lv_screen_active();
+    if (active == ui->screen_home) return "home";
+    if (active == ui->screen_chat) return "chat";
+    if (active == ui->screen_settings_v9) return "settings";
+    if (active == ui->screen_screensaver) return "screensaver";
+    if (active == ui->screen_panel) return "panel";
+    if (active == ui->screen_security) return "security";
+    if (active == ui->screen_network) return "network";
+    if (active == ui->screen_settings) return "settings-legacy";
+    if (active == ui->screen_miloco) return "miloco";
+    if (active == ui->screen_miloco_bind) return "miloco-bind";
+    if (active == ui->screen_model) return "model";
+    if (active == ui->screen_tools) return "tools";
+    if (active == ui->screen_mcp) return "mcp";
+    if (active == ui->screen_node) return "node";
+    if (active == ui->screen_more) return "more";
+    return "other";
+}
+#endif
+
 smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
 {
     smart_home_lvgl_t *ui;
@@ -382,12 +413,12 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
                 struct mallinfo mem = mallinfo();
 
                 printf("[v9-perf] frames=%u avg_ms=%u max_ms=%u "
-                       "heap_used=%u heap_free=%u heap_largest=%u\n",
+                       "heap_used=%u heap_free=%u heap_largest=%u scene=%s\n",
                        (unsigned)perf_frames,
                        (unsigned)(perf_sum_ms / (perf_frames ? perf_frames : 1)),
                        (unsigned)perf_max_ms,
                        (unsigned)mem.uordblks, (unsigned)mem.fordblks,
-                       (unsigned)mem.mxordblk);
+                       (unsigned)mem.mxordblk, v9_perf_scene(ui));
                 perf_frames = 0;
                 perf_sum_ms = 0;
                 perf_max_ms = 0;
