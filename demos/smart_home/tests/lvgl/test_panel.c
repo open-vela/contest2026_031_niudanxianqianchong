@@ -9,6 +9,7 @@
 
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
+static void test_v9_cards(smart_home_lvgl_t *ui);
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -251,6 +252,7 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
     assert(smart_home_lvgl_v9_select_room(0) == 6);
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
+    test_v9_cards(ui);
 
     smart_home_lvgl_build_settings_screen_v9(ui);
     assert(ui->screen_settings_v9 != NULL);
@@ -260,8 +262,11 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_settings_select_category(2) == 2);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MODEL_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(99) == -1);
+    /* 非法分类不改选中态，回到第一类再截图，否则这张图和 model 那张重复。 */
+    assert(smart_home_lvgl_v9_settings_select_category(0) == 0);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     test_screen_cycle(ui);   /* 首页与设置页都还在，才能做切换稳定性回归 */
+    smart_home_lvgl_settings_v9_deinit(ui);
     lv_obj_delete(ui->screen_settings_v9);
     ui->screen_settings_v9 = NULL;
 
@@ -789,4 +794,74 @@ int main(void)
     test_home(&ui);
     lv_obj_delete(screen);
     return 0;
+}
+
+/* Exercise actual V9 card callbacks, including cards past the six demo kinds. */
+static lv_obj_t *find_v9_carousel(lv_obj_t *root)
+{
+    if (lv_obj_get_width(root) == 976 && lv_obj_get_height(root) == 256)
+        return root;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+        lv_obj_t *found = find_v9_carousel(lv_obj_get_child(root, i));
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void test_v9_cards(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *carousel;
+    lv_obj_t *last_card = NULL;
+    unsigned cards = 0;
+    unsigned before;
+    int submitted;
+
+    memset(snapshot, 0, sizeof(snapshot));
+    snapshot_count = 12;
+    for (size_t i = 0; i < snapshot_count; i++) {
+        snprintf(snapshot[i].did, sizeof(snapshot[i].did), "v9-light-%u",
+                 (unsigned)i);
+        snprintf(snapshot[i].name, sizeof(snapshot[i].name), "灯具-%u",
+                 (unsigned)i);
+        strcpy(snapshot[i].room, "living_room");
+        snapshot[i].category = SMART_HOME_MILOCO_CATEGORY_LIGHT;
+        snapshot[i].online = true;
+        snapshot[i].controllable = true;
+        snapshot[i].power_on = true;
+    }
+    smart_home_lvgl_v9_refresh_views(ui);
+    lv_obj_update_layout(ui->screen_home);
+    assert(smart_home_lvgl_v9_visible_card_count() == 12);
+    carousel = find_v9_carousel(ui->screen_home);
+    assert(carousel);
+    before = lv_obj_get_child_count(ui->screen_home);
+    for (uint32_t i = 0; i < lv_obj_get_child_count(carousel); i++) {
+        lv_obj_t *card = lv_obj_get_child(carousel, i);
+        lv_obj_t *mask;
+        char expected[40];
+        if (lv_obj_get_width(card) != 176 || lv_obj_get_height(card) != 244)
+            continue;
+        snprintf(expected, sizeof(expected), "灯具-%u", cards++);
+        assert(!strcmp(lv_label_get_text(lv_obj_get_child(card, 1)), expected));
+        assert(!strcmp(lv_label_get_text(lv_obj_get_child(card, 2)), "已开启"));
+        lv_obj_send_event(card, LV_EVENT_CLICKED, NULL);
+        assert(lv_obj_get_child_count(ui->screen_home) == before + 1);
+        mask = lv_obj_get_child(ui->screen_home, -1);
+        lv_obj_send_event(mask, LV_EVENT_CLICKED, NULL);
+        assert(lv_obj_get_child_count(ui->screen_home) == before);
+        last_card = card;
+    }
+    assert(cards == 12 && last_card);
+    submitted = submissions;
+    lv_obj_t *sw = lv_obj_get_child(last_card, -1);
+    lv_obj_remove_state(sw, LV_STATE_CHECKED);
+    lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(submissions == submitted + 1);
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), "等待确认"));
+    snapshot[11].power_on = false;
+    smart_home_lvgl_v9_refresh_views(ui);
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), "已关闭"));
+    snapshot_count = 0;
+    smart_home_lvgl_v9_refresh_views(ui);
+    puts("PASS: all 12 V9 card modals, real switches and readback");
 }

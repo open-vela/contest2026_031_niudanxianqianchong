@@ -38,6 +38,7 @@ typedef struct {
     lv_obj_t *mcp_port;
     lv_obj_t *mcp_path;
     lv_obj_t *mcp_auth;
+    lv_obj_t *mcp_protocol;
     lv_obj_t *mcp_status;
 #endif
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
@@ -50,6 +51,7 @@ typedef struct {
     lv_obj_t *model_timeout;
     lv_obj_t *model_tokens;
     lv_obj_t *model_status;
+    lv_obj_t *model_apply;
     lv_obj_t *net_ssid;
     lv_obj_t *net_password;
     lv_obj_t *net_status;
@@ -208,16 +210,78 @@ typedef struct {
 
 static struct {
     pthread_t thread;
-    v9_net_job_t *job;
+    smart_home_lvgl_t *owner;
     int active;
     int ready;
     int result;
+    smart_home_network_status_t status;
 } g_net;
+
+typedef struct {
+    smart_home_lvgl_t *ui;
+    smart_home_model_config_t config;
+} v9_model_job_t;
+
+static struct {
+    pthread_t thread;
+    smart_home_lvgl_t *owner;
+    int active;
+    int ready;
+    int result;
+} g_model;
+
+static void model_set_busy(int busy)
+{
+    lv_obj_t *controls[] = {
+        g_settings.model_dd, g_settings.model_name, g_settings.model_key,
+        g_settings.model_timeout, g_settings.model_tokens, g_settings.model_apply
+    };
+
+    for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); i++) {
+        if (!controls[i]) continue;
+        if (busy) lv_obj_add_state(controls[i], LV_STATE_DISABLED);
+        else lv_obj_remove_state(controls[i], LV_STATE_DISABLED);
+    }
+}
+
+static void *v9_model_worker(void *argument)
+{
+    v9_model_job_t *job = argument;
+    smart_home_lvgl_t *ui = job->ui;
+    int ret = smart_home_agent_app_apply_model_config(ui->app, &job->config);
+
+    memset(&job->config, 0, sizeof(job->config));
+    free(job);
+    pthread_mutex_lock(&ui->pending_mutex);
+    g_model.result = ret;
+    g_model.ready = 1;
+    pthread_mutex_unlock(&ui->pending_mutex);
+    return NULL;
+}
+
+/* Called on the LVGL thread before any screen, app or mutex is released. */
+void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui)
+{
+    if (!ui) return;
+    if (ui->v9_network_timer) {
+        lv_timer_delete(ui->v9_network_timer);
+        ui->v9_network_timer = NULL;
+    }
+    if (g_net.owner == ui) {
+        if (g_net.active) pthread_join(g_net.thread, NULL);
+        memset(&g_net, 0, sizeof(g_net));
+    }
+    if (g_model.owner == ui) {
+        if (g_model.active) pthread_join(g_model.thread, NULL);
+        memset(&g_model, 0, sizeof(g_model));
+    }
+    memset(&g_settings, 0, sizeof(g_settings));
+}
 
 static void *v9_net_worker(void *argument)
 {
     v9_net_job_t *job = argument;
-    smart_home_network_status_t status;
+    smart_home_network_status_t status = {0};
     int ret;
 
     if (!job || !job->ui || !job->ui->app) {
@@ -227,7 +291,7 @@ static void *v9_net_worker(void *argument)
     ret = smart_home_network_connect_credentials(&status, job->ssid,
                                                  job->password);
     pthread_mutex_lock(&job->ui->pending_mutex);
-    job->ui->app->system_status.network_status = status;
+    g_net.status = status;
     g_net.result = ret;
     g_net.ready = 1;
     pthread_mutex_unlock(&job->ui->pending_mutex);
@@ -274,13 +338,33 @@ static void v9_net_timer_cb(lv_timer_t *timer)
 {
     smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
     int ready = 0;
+    int model_ready = 0;
+    int model_result = 0;
 
     pthread_mutex_lock(&ui->pending_mutex);
     if (g_net.ready) {
         ready = 1;
         g_net.ready = 0;
+        ui->app->system_status.network_status = g_net.status;
+    }
+    if (g_model.ready) {
+        model_ready = 1;
+        model_result = g_model.result;
+        g_model.ready = 0;
     }
     pthread_mutex_unlock(&ui->pending_mutex);
+    if (model_ready) {
+        pthread_join(g_model.thread, NULL);
+        g_model.active = 0;
+        model_set_busy(0);
+        if (g_settings.model_status) {
+            lv_label_set_text(g_settings.model_status,
+                model_result == AGENT_OK ? "本次配置已应用" : "配置应用失败");
+            lv_obj_set_style_text_color(g_settings.model_status,
+                model_result == AGENT_OK ? SMART_HOME_UI_COLOR_SUCCESS :
+                                          SMART_HOME_UI_COLOR_DANGER, 0);
+        }
+    }
     if (ready) {
         pthread_join(g_net.thread, NULL);
         g_net.active = 0;
@@ -314,7 +398,7 @@ static void v9_net_connect(smart_home_lvgl_t *ui)
     job->ui = ui;
     snprintf(job->ssid, sizeof(job->ssid), "%s", ssid);
     snprintf(job->password, sizeof(job->password), "%s", password);
-    g_net.job = job;
+    g_net.owner = ui;
     g_net.result = 0;
     g_net.ready = 0;
     g_net.active = 1;
@@ -324,8 +408,8 @@ static void v9_net_connect(smart_home_lvgl_t *ui)
         g_net.active = 0;
         return;
     }
-    (void)pthread_attr_setstacksize(&attr, 8192u);
-    ret = pthread_create(&g_net.thread, &attr, v9_net_worker, job);
+    ret = pthread_attr_setstacksize(&attr, 16384u);
+    if (ret == 0) ret = pthread_create(&g_net.thread, &attr, v9_net_worker, job);
     pthread_attr_destroy(&attr);
     if (ret != 0) {
         free(job);
@@ -510,10 +594,13 @@ static void model_apply_cb(lv_event_t *event)
     int timeout;
     int tokens;
     int ret;
+    pthread_attr_t attr;
+    v9_model_job_t *job;
 
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app) {
         return;
     }
+    if (g_model.active) return;
     index = (int)lv_dropdown_get_selected(g_settings.model_dd);
     preset = smart_home_llm_backend_get((size_t)index);
     if (!preset) {
@@ -536,14 +623,36 @@ static void model_apply_cb(lv_event_t *event)
     if (tokens > 0) {
         config.max_output_tokens = (uint32_t)tokens;
     }
-    ret = smart_home_agent_app_apply_model_config(ui->app, &config);
-    if (g_settings.model_status) {
-        lv_label_set_text(g_settings.model_status,
-                          ret == AGENT_OK ? "本次配置已应用" : "配置应用失败");
-        lv_obj_set_style_text_color(g_settings.model_status,
-            ret == AGENT_OK ? SMART_HOME_UI_COLOR_SUCCESS :
-                              SMART_HOME_UI_COLOR_DANGER, 0);
+    job = calloc(1u, sizeof(*job));
+    if (!job) {
+        memset(&config, 0, sizeof(config));
+        lv_label_set_text(g_settings.model_status, "内存不足，无法应用配置");
+        return;
     }
+    job->ui = ui;
+    job->config = config;
+    memset(&config, 0, sizeof(config));
+    ret = pthread_attr_init(&attr);
+    if (ret == 0) {
+        ret = pthread_attr_setstacksize(&attr, 16384u);
+        g_model.owner = ui;
+        g_model.ready = 0;
+        g_model.active = 1;
+        if (ret == 0)
+            ret = pthread_create(&g_model.thread, &attr, v9_model_worker, job);
+        pthread_attr_destroy(&attr);
+    }
+    if (ret != 0) {
+        memset(&job->config, 0, sizeof(job->config));
+        free(job);
+        g_model.active = 0;
+        lv_label_set_text(g_settings.model_status, "无法创建配置任务");
+        return;
+    }
+    model_set_busy(1);
+    lv_label_set_text(g_settings.model_status, "正在应用，等待当前请求完成…");
+    lv_obj_set_style_text_color(g_settings.model_status,
+                                SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
     if (g_settings.keyboard) {
         lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
     }
@@ -574,6 +683,7 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
                                         "模型名称");
     g_settings.model_key = model_input(panel, "API 密钥", 0, 136, 560,
                                        "留空沿用系统凭据，本次运行有效");
+    lv_textarea_set_password_mode(g_settings.model_key, true);
     g_settings.model_timeout = model_input(panel, "请求超时 / 毫秒", 0, 204,
                                            160, "30000");
     g_settings.model_tokens = model_input(panel, "最大输出 / 词元", 180, 204,
@@ -593,6 +703,7 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
         lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
         lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
         smart_home_lvgl_press_feedback(button);
+        g_settings.model_apply = button;
         lv_obj_add_event_cb(button, model_apply_cb, LV_EVENT_CLICKED, ui);
         label = smart_home_lvgl_label_create(button, "应用本次配置",
                                              SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
@@ -902,6 +1013,9 @@ static void mcp_apply_cb(lv_event_t *event)
     smart_home_lvgl_t *ui = lv_event_get_user_data(event);
     smart_home_mcp_runtime_config_t config;
     int ret;
+    char *end;
+    long port;
+    const char *port_text;
 
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app ||
         !ui->app->mcp_bridge || !g_settings.mcp_server) {
@@ -916,8 +1030,17 @@ static void mcp_apply_cb(lv_event_t *event)
              lv_textarea_get_text(g_settings.mcp_path));
     snprintf(config.authorization, sizeof(config.authorization), "%s",
              lv_textarea_get_text(g_settings.mcp_auth));
-    config.port = (uint16_t)atoi(lv_textarea_get_text(g_settings.mcp_port));
+    port_text = lv_textarea_get_text(g_settings.mcp_port);
+    port = strtol(port_text, &end, 10);
+    if (end == port_text || *end != '\0' || port < 1 || port > 65535) {
+        memset(&config, 0, sizeof(config));
+        lv_label_set_text(g_settings.mcp_status, "端口须为 1～65535 的整数");
+        return;
+    }
+    config.port = (uint16_t)port;
+    config.use_tls = lv_dropdown_get_selected(g_settings.mcp_protocol) == 0;
     ret = smart_home_mcp_bridge_reconfigure(ui->app->mcp_bridge, &config);
+    memset(&config, 0, sizeof(config));
     if (g_settings.mcp_status) {
         lv_label_set_text(g_settings.mcp_status,
                           ret == AGENT_OK ? "配置已应用，请重新发现工具" :
@@ -934,11 +1057,18 @@ static void mcp_config_open(smart_home_lvgl_t *ui)
 
     g_settings.mcp_server = model_input(panel, "服务名称", 0, 60, 240,
                                         "server id");
+    g_settings.mcp_protocol = lv_dropdown_create(panel);
+    lv_obj_set_pos(g_settings.mcp_protocol, 260, 60);
+    lv_obj_set_size(g_settings.mcp_protocol, 200, 40);
+    lv_dropdown_set_options(g_settings.mcp_protocol, "HTTPS (TLS)\nHTTP");
+    lv_dropdown_set_selected(g_settings.mcp_protocol, 0);
     g_settings.mcp_host = model_input(panel, "主机", 0, 120, 340, "host");
     g_settings.mcp_port = model_input(panel, "端口", 360, 120, 100, "443");
+    lv_textarea_set_text(g_settings.mcp_port, "443");
     g_settings.mcp_path = model_input(panel, "路径", 0, 180, 500, "/mcp");
     g_settings.mcp_auth = model_input(panel, "Authorization", 0, 240, 500,
                                       "Bearer ...");
+    lv_textarea_set_password_mode(g_settings.mcp_auth, true);
     g_settings.mcp_status = smart_home_lvgl_label_create(
         panel, "本次运行有效", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
     lv_obj_set_pos(g_settings.mcp_status, 0, 300);

@@ -398,13 +398,17 @@ static const char *view_status(const smart_home_v9_device_view_t *view)
 static void v9_apply_view(int index,
                           const smart_home_v9_device_view_t *view)
 {
-    const v9_device_def_t *def = &g_v9_devices[g_v9.def_index[index]];
+    const v9_device_def_t *def;
     char text[64];
-    const char *state = view->on ? "on" : "off";
+    const char *state;
 
-    if (!view || index < 0 || index >= V9_DEVICE_COUNT) {
+    if (!view || index < 0 || index >= V9_MAX_CARDS ||
+        g_v9.def_index[index] < 0 ||
+        g_v9.def_index[index] >= V9_DEVICE_COUNT) {
         return;
     }
+    def = &g_v9_devices[g_v9.def_index[index]];
+    state = view->on ? "on" : "off";
     g_v9.device_view[index] = *view;
     g_v9.real[index] = 1;
     g_v9.source[index] = view->source;
@@ -521,10 +525,12 @@ static void v9_switch_cb(lv_event_t *event)
 }
 
 static void v9_route_cb(lv_event_t *event);
+static int kind_def_index(smart_home_v9_kind_t kind);
 
 static void v9_card_click_cb(lv_event_t *event)
 {
-    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    lv_obj_t *card = lv_event_get_current_target(event);
+    int index = (int)(intptr_t)lv_obj_get_user_data(card);
     lv_obj_t *panel;
     lv_obj_t *label;
     char text[160];
@@ -552,7 +558,8 @@ static void v9_card_click_cb(lv_event_t *event)
     label = smart_home_lvgl_label_create(panel, "设备详情控制将在 M3 接入",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
     lv_obj_set_pos(label, 0, 152);
-    if (index == 4) {
+    if (g_v9.def_index[index] == kind_def_index(SMART_HOME_V9_KIND_CAMERA) &&
+        !g_v9.real[index]) {
         smart_home_lvgl_t *ui = lv_event_get_user_data(event);
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
         (void)v9_camera_preview_start(ui, panel);

@@ -173,6 +173,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         return;
     }
 
+    smart_home_lvgl_settings_v9_deinit(ui);
     if (ui->agent_worker_active) {
         pthread_join(ui->agent_worker, NULL);
         ui->agent_worker_active = 0;
@@ -220,10 +221,6 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
     if (ui->v9_poll_timer) {
         lv_timer_delete(ui->v9_poll_timer);
         ui->v9_poll_timer = NULL;
-    }
-    if (ui->v9_network_timer) {
-        lv_timer_delete(ui->v9_network_timer);
-        ui->v9_network_timer = NULL;
     }
     if (ui->screen_screensaver) {
         lv_obj_del(ui->screen_screensaver);

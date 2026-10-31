@@ -110,6 +110,7 @@ int smart_home_lvgl_v9_visible_card_count(void);
 void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui);
 int smart_home_lvgl_v9_select_room(int index);
 void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui);
+void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui);
 int smart_home_lvgl_v9_settings_category_count(void);
 int smart_home_lvgl_v9_settings_select_category(int index);
 void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui);
