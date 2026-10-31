@@ -186,6 +186,10 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         lv_timer_delete(ui->home_time_timer);
         ui->home_time_timer = NULL;
     }
+    if (ui->v9_poll_timer) {
+        lv_timer_delete(ui->v9_poll_timer);
+        ui->v9_poll_timer = NULL;
+    }
     if (ui->screen_screensaver) {
         lv_obj_del(ui->screen_screensaver);
     }

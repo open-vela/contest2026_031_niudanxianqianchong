@@ -5,6 +5,9 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "smart_home_v9_device_view.h"
 #include "../../device/smart_home_device_service.h"
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#include "../../miloco/smart_home_miloco.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +19,7 @@
 #endif
 
 #define V9_DEVICE_COUNT 6
+#define V9_MAX_CARDS    12
 #define V9_ROOM_COUNT   5
 #define V9_CARD_W       176
 #define V9_CARD_H       244
@@ -65,20 +69,27 @@ typedef struct {
     lv_obj_t *view;
     lv_obj_t *empty;
     lv_obj_t *room_btn[V9_ROOM_COUNT + 1];
-    lv_obj_t *card[V9_DEVICE_COUNT];
-    lv_obj_t *room_label[V9_DEVICE_COUNT];
-    lv_obj_t *name_label[V9_DEVICE_COUNT];
-    lv_obj_t *status[V9_DEVICE_COUNT];
-    lv_obj_t *metric[V9_DEVICE_COUNT];
-    lv_obj_t *sw[V9_DEVICE_COUNT];
-    lv_obj_t *art[V9_DEVICE_COUNT];
-    char art_path[V9_DEVICE_COUNT][256];
-    char key[V9_DEVICE_COUNT][SMART_HOME_V9_KEY_SIZE];
-    char room_text[V9_DEVICE_COUNT][SMART_HOME_V9_ROOM_SIZE];
-    char name_text[V9_DEVICE_COUNT][SMART_HOME_V9_NAME_SIZE];
-    smart_home_v9_device_view_t device_view[V9_DEVICE_COUNT];
-    int real[V9_DEVICE_COUNT];
-    int on[V9_DEVICE_COUNT];
+    lv_obj_t *card[V9_MAX_CARDS];
+    lv_obj_t *room_label[V9_MAX_CARDS];
+    lv_obj_t *name_label[V9_MAX_CARDS];
+    lv_obj_t *status[V9_MAX_CARDS];
+    lv_obj_t *metric[V9_MAX_CARDS];
+    lv_obj_t *sw[V9_MAX_CARDS];
+    lv_obj_t *art[V9_MAX_CARDS];
+    char art_path[V9_MAX_CARDS][256];
+    char key[V9_MAX_CARDS][SMART_HOME_V9_KEY_SIZE];
+    char room_text[V9_MAX_CARDS][SMART_HOME_V9_ROOM_SIZE];
+    char name_text[V9_MAX_CARDS][SMART_HOME_V9_NAME_SIZE];
+    smart_home_v9_device_view_t device_view[V9_MAX_CARDS];
+    int real[V9_MAX_CARDS];
+    int on[V9_MAX_CARDS];
+    int def_index[V9_MAX_CARDS];
+    int source[V9_MAX_CARDS];
+    int pending[V9_MAX_CARDS];
+    int pending_desired[V9_MAX_CARDS];
+    uint32_t pending_ms[V9_MAX_CARDS];
+    int card_count;
+    int dynamic;
     int room_filter;
     int visible;
     lv_obj_t *modal;
@@ -169,7 +180,7 @@ static void v9_info_modal(const char *title, const char *body)
 
 static void v9_update_card(int index)
 {
-    const v9_device_def_t *def = &g_v9_devices[index];
+    const v9_device_def_t *def = &g_v9_devices[g_v9.def_index[index]];
     int on = g_v9.on[index];
     const char *state = on ? "on" : "off";
 
@@ -198,7 +209,7 @@ static void v9_reflow(void)
 {
     int visible = 0;
 
-    for (int i = 0; i < V9_DEVICE_COUNT; i++) {
+    for (int i = 0; i < g_v9.card_count; i++) {
         int match = g_v9.room_filter == 0 ||
                     !strcmp(g_v9.room_text[i],
                             g_v9_rooms[g_v9.room_filter - 1]);
@@ -299,7 +310,7 @@ static const char *view_status(const smart_home_v9_device_view_t *view)
 static void v9_apply_view(int index,
                           const smart_home_v9_device_view_t *view)
 {
-    const v9_device_def_t *def = &g_v9_devices[index];
+    const v9_device_def_t *def = &g_v9_devices[g_v9.def_index[index]];
     char text[64];
     const char *state = view->on ? "on" : "off";
 
@@ -308,6 +319,7 @@ static void v9_apply_view(int index,
     }
     g_v9.device_view[index] = *view;
     g_v9.real[index] = 1;
+    g_v9.source[index] = view->source;
     g_v9.on[index] = view->on ? 1 : 0;
     snprintf(g_v9.key[index], sizeof(g_v9.key[index]), "%s", view->key);
     snprintf(g_v9.name_text[index], sizeof(g_v9.name_text[index]), "%s",
@@ -325,7 +337,10 @@ static void v9_apply_view(int index,
         lv_label_set_text(g_v9.status[index], view_status(view));
     }
     if (g_v9.metric[index]) {
-        if (view->primary_value > 0) {
+        if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
+            snprintf(text, sizeof(text), "%s",
+                     view->online ? "在线" : "离线");
+        } else if (view->primary_value > 0) {
             snprintf(text, sizeof(text), "%d%s", view->primary_value,
                      view->unit ? view->unit : "");
         } else {
@@ -348,31 +363,6 @@ static void v9_apply_view(int index,
     }
 }
 
-void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
-{
-    smart_home_v9_device_view_t views[V9_DEVICE_COUNT];
-    size_t count;
-
-    if (!ui || !g_v9.screen || !ui->app || !ui->device_state ||
-        !ui->app->device_service.mutex_initialized) {
-        return;
-    }
-    count = smart_home_v9_collect_views(ui->device_state, NULL, views,
-                                        V9_DEVICE_COUNT);
-    for (size_t i = 0; i < count; i++) {
-        int index;
-
-        if (views[i].source != SMART_HOME_V9_SOURCE_LOCAL) {
-            continue;
-        }
-        index = card_index_for_kind(views[i].kind);
-        if (index < 0) {
-            continue;
-        }
-        v9_apply_view(index, &views[i]);
-    }
-}
-
 static void v9_switch_cb(lv_event_t *event)
 {
     smart_home_lvgl_t *ui = lv_event_get_user_data(event);
@@ -381,37 +371,61 @@ static void v9_switch_cb(lv_event_t *event)
     int desired;
 
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || index < 0 ||
-        index >= V9_DEVICE_COUNT) {
+        index >= g_v9.card_count) {
         return;
     }
     desired = lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0;
 
-    if (g_v9.real[index] && ui && ui->app && ui->device_state) {
-        smart_home_device_t *device;
-        int id = atoi(g_v9.key[index] + 6); /* "local:" */
-        int value;
-        int ret;
+    if (g_v9.real[index]) {
+        if (g_v9.source[index] == SMART_HOME_V9_SOURCE_LOCAL &&
+            ui && ui->app && ui->device_state) {
+            smart_home_device_t *device;
+            int id = atoi(g_v9.key[index] + 6); /* "local:" */
+            int value;
+            int ret;
 
-        device = smart_home_device_find_by_id(ui->device_state, id);
-        if (!device) {
-            if (g_v9.on[index]) lv_obj_add_state(sw, LV_STATE_CHECKED);
-            else lv_obj_remove_state(sw, LV_STATE_CHECKED);
+            device = smart_home_device_find_by_id(ui->device_state, id);
+            if (!device) {
+                if (g_v9.on[index]) lv_obj_add_state(sw, LV_STATE_CHECKED);
+                else lv_obj_remove_state(sw, LV_STATE_CHECKED);
+                return;
+            }
+            value = device->type == SMART_HOME_DEVICE_LIGHT ?
+                    device->brightness : device->temperature;
+            ret = smart_home_device_service_set_device_control(
+                &ui->app->device_service, id, desired, value,
+                device->ac_mode, device->ac_fan_speed);
+            if (ret == AGENT_OK) {
+                g_v9.device_view[index].on = desired != 0;
+                v9_apply_view(index, &g_v9.device_view[index]);
+            } else {
+                if (g_v9.on[index]) lv_obj_add_state(sw, LV_STATE_CHECKED);
+                else lv_obj_remove_state(sw, LV_STATE_CHECKED);
+                v9_info_modal("操作未完成", "设备服务未确认本次操作。");
+            }
             return;
         }
-        value = device->type == SMART_HOME_DEVICE_LIGHT ?
-                device->brightness : device->temperature;
-        ret = smart_home_device_service_set_device_control(
-            &ui->app->device_service, id, desired, value,
-            device->ac_mode, device->ac_fan_speed);
-        if (ret == AGENT_OK) {
-            g_v9.device_view[index].on = desired != 0;
-            v9_apply_view(index, &g_v9.device_view[index]);
-        } else {
-            if (g_v9.on[index]) lv_obj_add_state(sw, LV_STATE_CHECKED);
-            else lv_obj_remove_state(sw, LV_STATE_CHECKED);
-            v9_info_modal("操作未完成", "设备服务未确认本次操作。");
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+        if (g_v9.source[index] == SMART_HOME_V9_SOURCE_MILOCO &&
+            ui && ui->app && ui->app->miloco) {
+            const char *did = g_v9.key[index] + 5; /* "milo:" */
+            int ret = smart_home_miloco_submit_power(ui->app->miloco, did,
+                                                     desired);
+            if (ret == AGENT_OK) {
+                g_v9.pending[index] = 1;
+                g_v9.pending_desired[index] = desired;
+                g_v9.pending_ms[index] = lv_tick_get();
+                if (g_v9.status[index]) {
+                    lv_label_set_text(g_v9.status[index], "等待确认");
+                }
+            } else {
+                if (g_v9.on[index]) lv_obj_add_state(sw, LV_STATE_CHECKED);
+                else lv_obj_remove_state(sw, LV_STATE_CHECKED);
+                v9_info_modal("提交失败", "米家网关未接受本次操作。");
+            }
+            return;
         }
-        return;
+#endif
     }
 
     g_v9.on[index] = desired;
@@ -429,7 +443,7 @@ static void v9_card_click_cb(lv_event_t *event)
 
     if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
         lv_event_get_target(event) != lv_event_get_current_target(event) ||
-        index < 0 || index >= V9_DEVICE_COUNT) {
+        index < 0 || index >= g_v9.card_count) {
         return;
     }
 
@@ -585,6 +599,8 @@ static void v9_make_card(smart_home_lvgl_t *ui, int index)
     lv_obj_set_user_data(card, (void *)(intptr_t)index);
     lv_obj_add_event_cb(card, v9_card_click_cb, LV_EVENT_CLICKED, ui);
     g_v9.card[index] = card;
+    g_v9.def_index[index] = index;
+    g_v9.source[index] = SMART_HOME_V9_SOURCE_DEMO;
 
     g_v9.room_label[index] = v9_text(card, def->room, 14, 16, 15,
                                      SMART_HOME_UI_COLOR_TEXT_SECONDARY);
@@ -631,6 +647,206 @@ static void v9_make_card(smart_home_lvgl_t *ui, int index)
 
     g_v9.on[index] = def->on;
     v9_update_card(index);
+}
+
+static int kind_def_index(smart_home_v9_kind_t kind)
+{
+    switch (kind) {
+    case SMART_HOME_V9_KIND_LIGHT:  return 0;
+    case SMART_HOME_V9_KIND_AC:     return 1;
+    case SMART_HOME_V9_KIND_WASHER: return 2;
+    case SMART_HOME_V9_KIND_ROBOT:  return 3;
+    case SMART_HOME_V9_KIND_CAMERA: return 4;
+    case SMART_HOME_V9_KIND_FAN:    return 5;
+    default:                        return -1;
+    }
+}
+
+static void v9_destroy_cards(void)
+{
+    for (int i = 0; i < g_v9.card_count; i++) {
+        if (g_v9.card[i]) {
+            lv_obj_delete(g_v9.card[i]);
+        }
+        g_v9.card[i] = NULL;
+        g_v9.room_label[i] = NULL;
+        g_v9.name_label[i] = NULL;
+        g_v9.status[i] = NULL;
+        g_v9.metric[i] = NULL;
+        g_v9.sw[i] = NULL;
+        g_v9.art[i] = NULL;
+        g_v9.real[i] = 0;
+        g_v9.pending[i] = 0;
+    }
+    g_v9.card_count = 0;
+    g_v9.dynamic = 0;
+}
+
+static void v9_create_demo_cards(smart_home_lvgl_t *ui)
+{
+    v9_destroy_cards();
+    for (int i = 0; i < V9_DEVICE_COUNT; i++) {
+        v9_make_card(ui, i);
+    }
+    g_v9.card_count = V9_DEVICE_COUNT;
+}
+
+static void v9_make_dynamic_card(smart_home_lvgl_t *ui, int index,
+                                 const smart_home_v9_device_view_t *view)
+{
+    int def_index = kind_def_index(view->kind);
+    const v9_device_def_t *def;
+    lv_obj_t *card;
+    lv_obj_t *sw;
+
+    if (def_index < 0) {
+        return;
+    }
+    def = &g_v9_devices[def_index];
+    card = lv_obj_create(g_v9.view);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, V9_CARD_W, V9_CARD_H);
+    lv_obj_set_pos(card, 4 + index * (V9_CARD_W + V9_CARD_GAP), 6);
+    smart_home_lvgl_card_style(card);
+    lv_obj_set_style_radius(card, 16, 0);
+    lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(card, (void *)(intptr_t)index);
+    lv_obj_add_event_cb(card, v9_card_click_cb, LV_EVENT_CLICKED, ui);
+    g_v9.card[index] = card;
+    g_v9.def_index[index] = def_index;
+    g_v9.source[index] = view->source;
+    g_v9.real[index] = 0;
+    g_v9.pending[index] = 0;
+
+    g_v9.room_label[index] = v9_text(card, "", 14, 16, 15,
+                                     SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+    g_v9.name_label[index] = v9_text(card, "", 14, 49, 18,
+                                     SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+    g_v9.status[index] = v9_text(card, "", 14, 79, 12,
+                                 SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+    g_v9.metric[index] = v9_text(card, "", 14, 204, 20,
+                                 SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+    v9_text(card, def->caption, 14, 228, 11,
+            SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+
+    g_v9.art[index] = lv_image_create(card);
+    lv_obj_set_pos(g_v9.art[index], def->art_x, def->art_y);
+    lv_obj_set_size(g_v9.art[index], def->art_w, def->art_h);
+    lv_obj_clear_flag(g_v9.art[index], LV_OBJ_FLAG_CLICKABLE);
+
+    sw = lv_switch_create(card);
+    lv_obj_set_size(sw, 54, 30);
+    lv_obj_set_pos(sw, 112, 14);
+    lv_obj_set_ext_click_area(sw, 9);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0xCCD6D6), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(sw, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(sw, 15, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, SMART_HOME_UI_COLOR_PRIMARY,
+                              LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
+    lv_obj_set_style_radius(sw, 13, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(sw, 2, LV_PART_KNOB);
+    lv_obj_set_style_shadow_width(sw, 0, LV_PART_KNOB);
+    lv_obj_set_user_data(sw, (void *)(intptr_t)index);
+    lv_obj_add_event_cb(sw, v9_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
+    g_v9.sw[index] = sw;
+
+    v9_apply_view(index, view);
+}
+
+void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
+{
+    smart_home_v9_device_view_t raw[V9_MAX_CARDS];
+    smart_home_v9_device_view_t views[V9_MAX_CARDS];
+    size_t count = 0;
+    size_t valid = 0;
+
+    if (!ui || !g_v9.screen) {
+        return;
+    }
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (ui->app && ui->app->miloco &&
+        smart_home_miloco_reachable(ui->app->miloco) &&
+        smart_home_miloco_bound(ui->app->miloco)) {
+        count = smart_home_v9_collect_views(NULL, ui->app->miloco, raw,
+                                            V9_MAX_CARDS);
+    }
+#endif
+    if (count == 0 && ui->app && ui->device_state &&
+        ui->app->device_service.mutex_initialized) {
+        count = smart_home_v9_collect_views(ui->device_state, NULL, raw,
+                                            V9_MAX_CARDS);
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (kind_def_index(raw[i].kind) < 0) {
+            continue;
+        }
+        if (raw[i].source == SMART_HOME_V9_SOURCE_MILOCO &&
+            raw[i].name[0] == '\0') {
+            continue;
+        }
+        views[valid++] = raw[i];
+    }
+    if (valid == 0) {
+        if (g_v9.dynamic || g_v9.card_count == 0) {
+            v9_create_demo_cards(ui);
+            v9_reflow();
+        }
+        return;
+    }
+
+    if (g_v9.card_count == (int)valid) {
+        int same = 1;
+
+        for (size_t i = 0; i < valid; i++) {
+            if (!g_v9.real[i] ||
+                strcmp(g_v9.key[i], views[i].key) != 0) {
+                same = 0;
+                break;
+            }
+        }
+        if (same) {
+            for (size_t i = 0; i < valid; i++) {
+                int index = (int)i;
+
+                v9_apply_view(index, &views[i]);
+                if (g_v9.pending[index]) {
+                    if (views[i].state_valid &&
+                        views[i].on == g_v9.pending_desired[index]) {
+                        g_v9.pending[index] = 0;
+                    } else if ((uint32_t)(lv_tick_get() -
+                                          g_v9.pending_ms[index]) >= 10000u) {
+                        g_v9.pending[index] = 0;
+                        if (g_v9.status[index]) {
+                            lv_label_set_text(g_v9.status[index], "未确认");
+                        }
+                    } else if (g_v9.status[index]) {
+                        lv_label_set_text(g_v9.status[index], "等待确认");
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+    v9_destroy_cards();
+    for (size_t i = 0; i < valid; i++) {
+        v9_make_dynamic_card(ui, (int)i, &views[i]);
+    }
+    g_v9.card_count = (int)valid;
+    g_v9.dynamic = 1;
+    v9_reflow();
+}
+
+static void v9_poll_timer_cb(lv_timer_t *timer)
+{
+    smart_home_lvgl_v9_refresh_views(
+        (smart_home_lvgl_t *)lv_timer_get_user_data(timer));
 }
 
 void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
@@ -741,15 +957,17 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_center(g_v9.empty);
     lv_obj_add_flag(g_v9.empty, LV_OBJ_FLAG_HIDDEN);
 
-    for (int i = 0; i < V9_DEVICE_COUNT; i++) {
-        v9_make_card(ui, i);
-    }
+    v9_create_demo_cards(ui);
     smart_home_lvgl_v9_refresh_views(ui);
 
     if (ui->home_time_timer) {
         lv_timer_delete(ui->home_time_timer);
     }
     ui->home_time_timer = lv_timer_create(v9_time_timer_cb, 30000, ui);
+    if (ui->v9_poll_timer) {
+        lv_timer_delete(ui->v9_poll_timer);
+    }
+    ui->v9_poll_timer = lv_timer_create(v9_poll_timer_cb, 1000, ui);
 
     v9_update_time(ui);
     smart_home_lvgl_refresh_home(ui);

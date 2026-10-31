@@ -262,6 +262,7 @@ typedef struct {
     lv_obj_t *home_date_label;
     lv_obj_t *home_time_label;
     lv_timer_t *home_time_timer;
+    lv_timer_t *v9_poll_timer;
     lv_obj_t *screensaver_time_label;
     lv_obj_t *screensaver_date_label;
     lv_obj_t *screensaver_weather_label;
