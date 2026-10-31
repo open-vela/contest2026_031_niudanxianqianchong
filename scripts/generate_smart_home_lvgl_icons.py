@@ -30,6 +30,9 @@ LOOKUP_SOURCE = ICON_DIR / "smart_home_lvgl_png_icons.c"
 BASE_SIZE = 32
 SMALL_SIZE = 20
 LARGE_SIZE = 48
+# Home weather badge uses a dedicated 64 px asset so the glyph is rendered
+# natively instead of being upscaled from 32 px.
+WEATHER_SIZE = 64
 
 # Brand artwork already includes its own background and transparent corners.
 COLOR_ICONS = {"openvela": 36}
@@ -50,6 +53,9 @@ LARGE_ICONS = {
     "music-circle-outline", "robot", "sparkle-2",
 }
 
+# Weather glyphs additionally get a native 64 px bitmap for the home badge.
+WEATHER_ICONS = {"sun", "cloud-rain", "cloud", "cloud-cog"}
+
 
 def symbol_name(stem: str, size: int) -> str:
     return "smart_home_icon_{}_{}".format(stem.replace("-", "_"), size)
@@ -63,6 +69,8 @@ def icon_sizes(stem: str) -> list[int]:
         sizes.insert(0, SMALL_SIZE)
     if stem in LARGE_ICONS:
         sizes.append(LARGE_SIZE)
+    if stem in WEATHER_ICONS:
+        sizes.append(WEATHER_SIZE)
     return sizes
 
 
@@ -114,13 +122,26 @@ def write_icon(source: Path, size: int) -> None:
     symbol = symbol_name(stem, size)
     pixel_source = V9_SOURCE_DIR / str(size) / source.name
     is_pixel = pixel_source.exists()
-    is_color = stem in COLOR_ICONS or is_pixel
+    # Icons that ship native V9 pixels must stay full colour at every size;
+    # otherwise a 64 px weather glyph would fall back to an A8 mask and lose
+    # its palette (the sun would render as a monochrome outline).
+    has_v9_pixels = any((V9_SOURCE_DIR / str(s) / source.name).exists()
+                        for s in (SMALL_SIZE, BASE_SIZE, LARGE_SIZE))
+    is_color = stem in COLOR_ICONS or is_pixel or has_v9_pixels
     if is_pixel:
         # Keep the approved canvas, palette and exact alpha bytes.
         with Image.open(pixel_source) as pixels:
             if pixels.size != (size, size):
                 raise ValueError(f"invalid native V9 size: {pixel_source}")
             data = pixels.convert("RGBA").tobytes("raw", "BGRA")
+    elif has_v9_pixels:
+        # No native bitmap at this size: upscale the largest approved V9 bitmap
+        # with NEAREST so the pixel-art edges stay crisp instead of blurring.
+        native = max(s for s in (SMALL_SIZE, BASE_SIZE, LARGE_SIZE)
+                     if (V9_SOURCE_DIR / str(s) / source.name).exists())
+        with Image.open(V9_SOURCE_DIR / str(native) / source.name) as pixels:
+            scaled = pixels.convert("RGBA").resize((size, size), Image.NEAREST)
+        data = scaled.tobytes("raw", "BGRA")
     else:
         data = color_data(source, size) if is_color else alpha_data(alpha_canvas(source, size))
     color_format = "LV_COLOR_FORMAT_ARGB8888" if is_color else "LV_COLOR_FORMAT_A8"
@@ -193,6 +214,7 @@ def write_lookup(sources: list[Path]) -> None:
         "    const lv_image_dsc_t *small;",
         "    const lv_image_dsc_t *base;",
         "    const lv_image_dsc_t *large;",
+        "    const lv_image_dsc_t *weather;",
         "} smart_home_png_icon_entry_t;",
         "",
         "static const smart_home_png_icon_entry_t g_png_icons[] = {",
@@ -202,8 +224,11 @@ def write_lookup(sources: list[Path]) -> None:
         base_size = COLOR_ICONS.get(stem, BASE_SIZE)
         small = f"&{symbol_name(stem, SMALL_SIZE)}" if SMALL_SIZE in icon_sizes(stem) else "NULL"
         large = f"&{symbol_name(stem, LARGE_SIZE)}" if stem in LARGE_ICONS else "NULL"
+        weather = (f"&{symbol_name(stem, WEATHER_SIZE)}"
+                   if stem in WEATHER_ICONS else "NULL")
         lines.append(
-            f'    {{"asset:{stem}", {small}, &{symbol_name(stem, base_size)}, {large}}},'
+            f'    {{"asset:{stem}", {small}, &{symbol_name(stem, base_size)}, '
+            f'{large}, {weather}}},'
         )
     lines += [
         "};",
@@ -224,8 +249,11 @@ def write_lookup(sources: list[Path]) -> None:
         "        if (requested_size <= 24 && entry->small) {",
         "            return entry->small;",
         "        }",
-        "        if (requested_size > 32 && entry->large) {",
+        "        if (requested_size > 32 && requested_size <= 48 && entry->large) {",
         "            return entry->large;",
+        "        }",
+        "        if (requested_size > 48 && entry->weather) {",
+        "            return entry->weather;",
         "        }",
         "        return entry->base;",
         "    }",

@@ -32,6 +32,8 @@
 #define V9_CARD_W       176
 #define V9_CARD_H       244
 #define V9_CARD_GAP     16
+/* 右上角天气图标尺寸；取 64px 让天气成为右侧视觉锚点。 */
+#define V9_WEATHER_ICON_PX 64
 #define V9_VIEW_X       24
 #define V9_VIEW_Y       260
 #define V9_VIEW_W       976
@@ -946,36 +948,44 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     ui->home_weather_temp_label = v9_text(
         screen, "--°", 240, 106, 50, SMART_HOME_UI_COLOR_TEXT_PRIMARY);
 
+    /* 天气图标放大到 64px 并移到右上角，占用原「家庭模式」按钮的位置。
+     * 时间/温度留在左上，天气条件文字移到图标下方右对齐，形成右侧视觉重心。
+     */
     badge = lv_obj_create(screen);
     lv_obj_remove_style_all(badge);
-    lv_obj_set_size(badge, 32, 32);
-    lv_obj_set_pos(badge, 348, 124);
+    lv_obj_set_size(badge, V9_WEATHER_ICON_PX, V9_WEATHER_ICON_PX);
+    lv_obj_set_pos(badge, 1024 - 24 - V9_WEATHER_ICON_PX, 72);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
     ui->home_weather_badge = badge;
     icon = lv_image_create(badge);
-    lv_image_set_src(icon, smart_home_lvgl_png_icon_get("asset:sun", 32));
-    lv_obj_set_size(icon, 32, 32);
+    lv_image_set_src(icon, smart_home_lvgl_png_icon_get("asset:sun",
+                                                     V9_WEATHER_ICON_PX));
+    lv_obj_set_size(icon, V9_WEATHER_ICON_PX, V9_WEATHER_ICON_PX);
+    /* 默认 inner_align 为 AUTO_TRANSFORM，缩放时会按原图尺寸居中并裁切；
+     * 天气图标需要铺满徽标，因此显式设为 STRETCH。
+     */
+    lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_center(icon);
 
+    /* 家庭模式按钮暂时移到图标下方，缩小为轻量文字入口；
+     * 后续按评审结果决定保留、移位还是移除。
+     */
     button = lv_button_create(screen);
     lv_obj_remove_style_all(button);
-    lv_obj_set_size(button, 158, 40);
-    lv_obj_set_pos(button, 838, 96);
-    lv_obj_set_style_radius(button, 12, 0);
-    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE, 0);
-    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_size(button, 112, 28);
+    lv_obj_set_pos(button, 1024 - 24 - 112, 146);
+    lv_obj_set_style_radius(button, 14, 0);
+    smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
     lv_obj_add_event_cb(button, v9_family_cb, LV_EVENT_CLICKED, ui);
     smart_home_lvgl_press_feedback(button);
     label = smart_home_lvgl_label_create(button, "家庭模式",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 18);
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
     lv_obj_center(label);
 
     label = smart_home_lvgl_label_create(screen, "演示数据",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
-    lv_obj_set_pos(label, 838, 142);
+    lv_obj_set_pos(label, 1024 - 24 - 48, 182);
     g_v9.source_label = label;
 
     g_v9.room_strip = lv_obj_create(screen);

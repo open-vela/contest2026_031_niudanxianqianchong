@@ -1299,12 +1299,34 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     smart_home_lvgl_refresh_home(ui);
     assert(!weather.valid);
     assert(!strcmp(lv_label_get_text(ui->home_weather_condition_label), "晴天"));
-    assert(lv_image_get_src(lv_obj_get_child(ui->home_weather_badge, 0)) ==
-           smart_home_lvgl_png_icon_get("asset:sun", 32));
+    /* 图标尺寸跟随徽标实际宽度（现为 64），不写死 32。 */
+    {
+        lv_obj_t *glyph = lv_obj_get_child(ui->home_weather_badge, 0);
+        const lv_image_dsc_t *src = lv_image_get_src(glyph);
+
+        lv_area_t badge_coords;
+        lv_area_t glyph_coords;
+
+        lv_obj_get_coords(ui->home_weather_badge, &badge_coords);
+        lv_obj_get_coords(glyph, &glyph_coords);
+        /* 天气徽标 64px：图标必须同为 64px 且铺满（STRETCH），
+         * 否则 AUTO_TRANSFORM 会按原图居中裁切，只画出中间一小块。
+         */
+        assert(lv_obj_get_width(ui->home_weather_badge) == 64);
+        assert(src && src->header.w == 64);
+        assert(badge_coords.x1 == glyph_coords.x1 &&
+               badge_coords.y1 == glyph_coords.y1 &&
+               badge_coords.x2 == glyph_coords.x2 &&
+               badge_coords.y2 == glyph_coords.y2);
+        assert(lv_image_get_inner_align(glyph) == LV_IMAGE_ALIGN_STRETCH);
+        assert(src == smart_home_lvgl_png_icon_get(
+                    "asset:sun", lv_obj_get_width(ui->home_weather_badge)));
+    }
     weather.valid = true;
     smart_home_lvgl_refresh_home(ui);
     assert(!strcmp(lv_label_get_text(ui->home_weather_condition_label), "小雨"));
     assert(lv_image_get_src(lv_obj_get_child(ui->home_weather_badge, 0)) ==
-           smart_home_lvgl_png_icon_get("asset:cloud-rain", 32));
+           smart_home_lvgl_png_icon_get(
+               "asset:cloud-rain", lv_obj_get_width(ui->home_weather_badge)));
     puts("PASS: all three real navigation bars, pixel colors, tab clicks and chat input geometry");
 }

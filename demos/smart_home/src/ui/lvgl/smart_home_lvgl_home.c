@@ -385,7 +385,9 @@ static const char *weather_icon_for(const char *condition_en)
 static void home_weather_set_icon(smart_home_lvgl_t *ui, const char *name)
 {
     if (ui->home_weather_badge) {
-        int size = lv_obj_get_width(ui->home_weather_badge) > 40 ? 60 : 32;
+        /* 尺寸取徽标自身宽度，避免与构建时设置的 64/32 不一致。 */
+        int size = smart_home_lvgl_disp_w() > 0 ?
+                   (int)lv_obj_get_width(ui->home_weather_badge) : 32;
         const lv_image_dsc_t *asset = smart_home_lvgl_png_icon_get(name, size);
         lv_obj_t *glyph = lv_obj_get_child(ui->home_weather_badge, 0);
 
