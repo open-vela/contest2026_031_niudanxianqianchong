@@ -67,6 +67,9 @@ int smart_home_room_count(const smart_home_state_t *state);
 const char *smart_home_room_get(const smart_home_state_t *state, int index);
 int smart_home_room_index(const smart_home_state_t *state, const char *room);
 int smart_home_room_add(smart_home_state_t *state, const char *room);
+int smart_home_room_delete_and_reassign(smart_home_state_t *state,
+                                        const char *source_room,
+                                        const char *target_room);
 
 int smart_home_device_count(const smart_home_state_t *state);
 smart_home_device_t *smart_home_device_get_by_slot(smart_home_state_t *state,

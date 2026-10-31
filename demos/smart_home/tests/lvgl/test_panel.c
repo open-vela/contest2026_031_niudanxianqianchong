@@ -470,8 +470,40 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
     puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
 }
 
+static void test_room_transaction(void)
+{
+    smart_home_state_t state;
+    smart_home_device_t *device;
+    int device_id = 0;
+
+    smart_home_device_init(&state);
+    assert(state.room_count == 2);
+    assert(smart_home_room_add(&state, "balcony") == AGENT_OK);
+    assert(smart_home_device_add(&state, "balcony", "Washer",
+                                 SMART_HOME_DEVICE_LIGHT,
+                                 &device_id) == AGENT_OK);
+    assert(smart_home_room_delete_and_reassign(&state, "balcony",
+                                               "living_room") == AGENT_OK);
+    assert(smart_home_room_index(&state, "balcony") < 0);
+    assert(state.room_count == 2);
+    device = smart_home_device_find_by_id(&state, device_id);
+    assert(device && !strcmp(device->room, "living_room"));
+
+    assert(smart_home_room_delete_and_reassign(&state, "living_room",
+                                               "bedroom") == AGENT_OK);
+    assert(state.room_count == 1);
+    assert(smart_home_room_delete_and_reassign(&state, "bedroom",
+                                               "living_room") ==
+           AGENT_ERROR_NOT_FOUND);
+    assert(smart_home_room_delete_and_reassign(&state, "bedroom",
+                                               "bedroom") ==
+           AGENT_ERROR_INVALID);
+    puts("PASS: room delete reassigns devices and refuses last/duplicate rooms");
+}
+
 int main(void)
 {
+    test_room_transaction();
     lv_init();
     lv_display_t *display = lv_display_create(1024, 600);
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);

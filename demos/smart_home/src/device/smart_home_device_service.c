@@ -376,6 +376,26 @@ int smart_home_device_service_add_room(smart_home_device_service_t *service,
     return commit_mutation(service, ret, "device_state_changed", data);
 }
 
+int smart_home_device_service_delete_room(smart_home_device_service_t *service,
+                                          const char *source_room,
+                                          const char *target_room)
+{
+    char data[SMART_HOME_DEVICE_EVENT_DATA_SIZE];
+    int ret;
+
+    if (!service || !source_room || !target_room ||
+        !service->mutex_initialized) {
+        return AGENT_ERROR_INVALID;
+    }
+    pthread_mutex_lock(&service->mutex);
+    ret = smart_home_room_delete_and_reassign(service->state,
+                                              source_room, target_room);
+    snprintf(data, sizeof(data),
+             "{\"from\":\"%s\",\"to\":\"%s\",\"operation\":\"room_deleted\"}",
+             source_room, target_room);
+    return commit_mutation(service, ret, "device_state_changed", data);
+}
+
 int smart_home_device_service_update_meta(smart_home_device_service_t *service,
                                           int device_id, const char *room,
                                           const char *name)

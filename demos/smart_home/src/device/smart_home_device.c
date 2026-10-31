@@ -186,6 +186,49 @@ int smart_home_room_add(smart_home_state_t *state, const char *room)
     return AGENT_OK;
 }
 
+int smart_home_room_delete_and_reassign(smart_home_state_t *state,
+                                        const char *source_room,
+                                        const char *target_room)
+{
+    int source_index;
+    int target_index;
+    int i;
+
+    if (!state || !valid_room_name(source_room) ||
+        !valid_room_name(target_room) ||
+        strcmp(source_room, target_room) == 0) {
+        return AGENT_ERROR_INVALID;
+    }
+    source_index = smart_home_room_index(state, source_room);
+    target_index = smart_home_room_index(state, target_room);
+    if (source_index < 0 || target_index < 0) {
+        return AGENT_ERROR_NOT_FOUND;
+    }
+    if (state->room_count <= 1) {
+        return AGENT_ERROR_LIMIT;
+    }
+
+    /* Move every locally managed device before removing the room. */
+    for (i = 0; i < SMART_HOME_MAX_DEVICES; i++) {
+        smart_home_device_t *device = &state->devices[i];
+
+        if (!device->used || strcmp(device->room, source_room) != 0) {
+            continue;
+        }
+        strncpy(device->room, target_room, sizeof(device->room) - 1u);
+        device->room[sizeof(device->room) - 1u] = '\0';
+    }
+
+    for (i = source_index; i < state->room_count - 1; i++) {
+        memcpy(state->rooms[i], state->rooms[i + 1],
+               sizeof(state->rooms[i]));
+    }
+    memset(state->rooms[state->room_count - 1], 0,
+           sizeof(state->rooms[state->room_count - 1]));
+    state->room_count--;
+    return AGENT_OK;
+}
+
 const char *smart_home_ac_mode_name(int mode)
 {
     switch (mode) {

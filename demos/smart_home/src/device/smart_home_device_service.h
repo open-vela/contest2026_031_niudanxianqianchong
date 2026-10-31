@@ -80,6 +80,9 @@ int smart_home_device_service_add(smart_home_device_service_t *service,
                                   int *device_id);
 int smart_home_device_service_add_room(smart_home_device_service_t *service,
                                        const char *room);
+int smart_home_device_service_delete_room(smart_home_device_service_t *service,
+                                          const char *source_room,
+                                          const char *target_room);
 int smart_home_device_service_update_meta(smart_home_device_service_t *service,
                                           int device_id,
                                           const char *room,
