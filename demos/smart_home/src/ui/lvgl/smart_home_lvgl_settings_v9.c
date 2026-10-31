@@ -4,6 +4,12 @@
 #include "images/smart_home_icons.h"
 #include "../../config/smart_home_backends.h"
 #include "../../net/smart_home_network.h"
+#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+#include "../../addons/smart_home_mcp_bridge.h"
+#endif
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+#include "../../addons/smart_home_node_gateway.h"
+#endif
 
 #include <pthread.h>
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -25,6 +31,19 @@ typedef struct {
     lv_obj_t *panel[V9_SETTINGS_CATEGORIES];
     lv_obj_t *button[V9_SETTINGS_CATEGORIES];
     lv_obj_t *services_modal;
+    lv_obj_t *config_modal;
+#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+    lv_obj_t *mcp_server;
+    lv_obj_t *mcp_host;
+    lv_obj_t *mcp_port;
+    lv_obj_t *mcp_path;
+    lv_obj_t *mcp_auth;
+    lv_obj_t *mcp_status;
+#endif
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    lv_obj_t *node_port;
+    lv_obj_t *node_status;
+#endif
     lv_obj_t *model_dd;
     lv_obj_t *model_name;
     lv_obj_t *model_key;
@@ -45,6 +64,11 @@ typedef struct {
 } v9_settings_t;
 
 static v9_settings_t g_settings;
+
+#if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || defined(CONFIG_SMART_HOME_NODE_GATEWAY)
+static void mcp_config_open(smart_home_lvgl_t *ui);
+static void node_config_open(smart_home_lvgl_t *ui);
+#endif
 
 static void panel_show(int category)
 {
@@ -747,6 +771,43 @@ static void services_modal_open(smart_home_lvgl_t *ui)
         }
     }
 
+#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *button_label;
+
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 140, 34);
+        lv_obj_set_pos(button, 0, 238);
+        lv_obj_set_style_radius(button, 8, 0);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_add_event_cb(button, mcp_config_open, LV_EVENT_CLICKED, ui);
+        button_label = smart_home_lvgl_label_create(
+            button, "MCP 配置", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+        lv_obj_center(button_label);
+    }
+#endif
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *button_label;
+
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 140, 34);
+        lv_obj_set_pos(button, 156, 238);
+        lv_obj_set_style_radius(button, 8, 0);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_add_event_cb(button, node_config_open, LV_EVENT_CLICKED, ui);
+        button_label = smart_home_lvgl_label_create(
+            button, "Node 配置", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+        lv_obj_center(button_label);
+    }
+#endif
+
     {
         lv_obj_t *button = lv_button_create(panel);
         lv_obj_t *button_label;
@@ -772,6 +833,189 @@ static void services_modal_cb(lv_event_t *event)
         services_modal_open(ui);
     }
 }
+
+#if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || defined(CONFIG_SMART_HOME_NODE_GATEWAY)
+static void config_modal_close(void)
+{
+    if (g_settings.config_modal) {
+        lv_obj_delete(g_settings.config_modal);
+        g_settings.config_modal = NULL;
+    }
+}
+
+static void config_modal_mask_cb(lv_event_t *event)
+{
+    (void)event;
+    config_modal_close();
+}
+
+static lv_obj_t *config_modal_begin(const char *title)
+{
+    lv_obj_t *mask;
+    lv_obj_t *panel;
+    lv_obj_t *label;
+
+    config_modal_close();
+    mask = lv_obj_create(g_settings.screen);
+    lv_obj_remove_style_all(mask);
+    lv_obj_set_size(mask, smart_home_lvgl_disp_w(), smart_home_lvgl_disp_h());
+    lv_obj_set_style_bg_color(mask, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_30, 0);
+    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(mask, config_modal_mask_cb, LV_EVENT_CLICKED, NULL);
+    g_settings.config_modal = mask;
+
+    panel = lv_obj_create(mask);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, 680, 420);
+    lv_obj_center(panel);
+    smart_home_lvgl_card_style(panel);
+    lv_obj_set_style_radius(panel, 18, 0);
+    lv_obj_set_style_pad_all(panel, 24, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(panel, services_stop_cb, LV_EVENT_CLICKED, NULL);
+
+    label = smart_home_lvgl_label_create(panel, title,
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+    lv_obj_set_pos(label, 0, 0);
+
+    label = lv_button_create(panel);
+    lv_obj_remove_style_all(label);
+    lv_obj_set_size(label, 100, 34);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_style_radius(label, 8, 0);
+    lv_obj_set_style_bg_color(label, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+    lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(label, config_modal_mask_cb, LV_EVENT_CLICKED, NULL);
+    {
+        lv_obj_t *close_label = smart_home_lvgl_label_create(
+            label, "关闭", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+        lv_obj_center(close_label);
+    }
+    return panel;
+}
+#endif
+
+#ifdef CONFIG_SMART_HOME_MCP_BRIDGE
+static void mcp_apply_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    smart_home_mcp_runtime_config_t config;
+    int ret;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app ||
+        !ui->app->mcp_bridge || !g_settings.mcp_server) {
+        return;
+    }
+    memset(&config, 0, sizeof(config));
+    snprintf(config.server_id, sizeof(config.server_id), "%s",
+             lv_textarea_get_text(g_settings.mcp_server));
+    snprintf(config.host, sizeof(config.host), "%s",
+             lv_textarea_get_text(g_settings.mcp_host));
+    snprintf(config.path, sizeof(config.path), "%s",
+             lv_textarea_get_text(g_settings.mcp_path));
+    snprintf(config.authorization, sizeof(config.authorization), "%s",
+             lv_textarea_get_text(g_settings.mcp_auth));
+    config.port = (uint16_t)atoi(lv_textarea_get_text(g_settings.mcp_port));
+    ret = smart_home_mcp_bridge_reconfigure(ui->app->mcp_bridge, &config);
+    if (g_settings.mcp_status) {
+        lv_label_set_text(g_settings.mcp_status,
+                          ret == AGENT_OK ? "配置已应用，请重新发现工具" :
+                          ret == AGENT_ERROR_BUSY ? "发现进行中，请稍后重试" :
+                                                    "配置应用失败");
+    }
+}
+
+static void mcp_config_open(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *panel = config_modal_begin("MCP 服务配置");
+    lv_obj_t *button;
+    lv_obj_t *label;
+
+    g_settings.mcp_server = model_input(panel, "服务名称", 0, 60, 240,
+                                        "server id");
+    g_settings.mcp_host = model_input(panel, "主机", 0, 120, 340, "host");
+    g_settings.mcp_port = model_input(panel, "端口", 360, 120, 100, "443");
+    g_settings.mcp_path = model_input(panel, "路径", 0, 180, 500, "/mcp");
+    g_settings.mcp_auth = model_input(panel, "Authorization", 0, 240, 500,
+                                      "Bearer ...");
+    g_settings.mcp_status = smart_home_lvgl_label_create(
+        panel, "本次运行有效", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(g_settings.mcp_status, 0, 300);
+
+    button = lv_button_create(panel);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 160, 36);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_radius(button, 8, 0);
+    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, mcp_apply_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "应用配置",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+    lv_obj_center(label);
+}
+#endif
+
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+static void node_toggle_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    int port;
+    int ret;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app) {
+        return;
+    }
+    if (ui->app->node_gateway) {
+        smart_home_node_gateway_stop(&ui->app->node_gateway);
+        lv_label_set_text(g_settings.node_status, "已停止");
+        return;
+    }
+    port = atoi(lv_textarea_get_text(g_settings.node_port));
+    if (port <= 0 || port > 65535) {
+        lv_label_set_text(g_settings.node_status, "端口不合法");
+        return;
+    }
+    ret = smart_home_node_gateway_start_with_port(
+        &ui->app->node_gateway, ui->app->agent, &ui->app->agent_mutex,
+        (uint16_t)port);
+    lv_label_set_text(g_settings.node_status,
+                      ret == AGENT_OK ? "监听中" : "开启失败");
+}
+
+static void node_config_open(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *panel = config_modal_begin("局域网 Node 配置");
+    lv_obj_t *button;
+    lv_obj_t *label;
+    char buffer[16];
+
+    g_settings.node_port = model_input(panel, "监听端口", 0, 60, 160,
+                                       "18790");
+    g_settings.node_status = smart_home_lvgl_label_create(
+        panel, ui && ui->app && ui->app->node_gateway ? "监听中" : "未开启",
+        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_set_pos(g_settings.node_status, 0, 130);
+    snprintf(buffer, sizeof(buffer), "%d",
+             (int)CONFIG_SMART_HOME_NODE_GATEWAY_PORT);
+    lv_textarea_set_text(g_settings.node_port, buffer);
+
+    button = lv_button_create(panel);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 160, 36);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_radius(button, 8, 0);
+    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, node_toggle_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "开启 / 停止",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+    lv_obj_center(label);
+}
+#endif
 
 static void build_services_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
