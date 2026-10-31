@@ -4,6 +4,7 @@
 #include "images/smart_home_icons.h"
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "smart_home_v9_device_view.h"
+#include "smart_home_lvgl_device_dialog.h"
 #include "../../device/smart_home_device_service.h"
 #include "../../smart_home_memory.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -104,6 +105,7 @@ static void v9_camera_preview_stop(void);
 
 static void v9_close_modal(void)
 {
+    smart_home_lvgl_device_dialog_close();
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
     v9_camera_preview_stop();
 #endif
@@ -541,6 +543,20 @@ static void v9_card_click_cb(lv_event_t *event)
         return;
     }
 
+    if (g_v9.real[index] || g_v9.def_index[index] !=
+        kind_def_index(SMART_HOME_V9_KIND_CAMERA)) {
+        smart_home_v9_device_view_t view;
+        if (g_v9.real[index]) view = g_v9.device_view[index];
+        else {
+            smart_home_v9_device_view_t demos[V9_DEVICE_COUNT];
+            smart_home_v9_demo_views(demos, V9_DEVICE_COUNT);
+            view = demos[g_v9.def_index[index]];
+            view.on = g_v9.on[index] != 0;
+        }
+        v9_close_modal();
+        smart_home_lvgl_device_dialog_open(lv_event_get_user_data(event), &view);
+        return;
+    }
     panel = v9_modal_panel(g_v9.name_text[index]);
     snprintf(text, sizeof(text), "%s · %s", g_v9.room_text[index],
              g_v9.status[index] ? lv_label_get_text(g_v9.status[index]) :
@@ -555,7 +571,7 @@ static void v9_card_click_cb(lv_event_t *event)
         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_set_pos(label, 0, 96);
 
-    label = smart_home_lvgl_label_create(panel, "设备详情控制将在 M3 接入",
+    label = smart_home_lvgl_label_create(panel, "本机摄像头预览",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
     lv_obj_set_pos(label, 0, 152);
     if (g_v9.def_index[index] == kind_def_index(SMART_HOME_V9_KIND_CAMERA) &&

@@ -50,6 +50,7 @@ typedef struct {
     char iid[14];
     uint8_t is_action;                   /* 0=set_property 1=call_action */
     int32_t value;
+    uint32_t request_id;
 } miloco_control_request_t;
 
 struct smart_home_miloco {
@@ -77,6 +78,9 @@ struct smart_home_miloco {
     /* 以下字段由 lock 保护。 */
     miloco_control_request_t pending[MILOCO_CONTROL_QUEUE_DEPTH];
     size_t pending_count;
+    uint32_t next_request_id;
+    struct { uint32_t id; int result; } results[MILOCO_CONTROL_QUEUE_DEPTH];
+    unsigned result_next;
     smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
     size_t device_count;
     uint32_t revision;
@@ -188,17 +192,61 @@ bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
 /* 危险动作黑名单与类别映射已迁入 smart_home_miloco_specscan.c
  * （随轻量解析整体迁移，仅 spec 端点使用）。 */
 
+bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
+                                    const char *did,
+                                    smart_home_miloco_device_t *out)
+{
+    bool found = false;
+    if (!service || !did || !out) return false;
+    lock_state((smart_home_miloco_t *)service);
+    for (size_t i = 0; i < service->device_count; i++) {
+        if (!strcmp(service->devices[i].did, did)) {
+            *out = service->devices[i];
+            found = true;
+            break;
+        }
+    }
+    unlock_state((smart_home_miloco_t *)service);
+    return found;
+}
+
+bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
+                                      uint32_t id, int *result)
+{
+    bool found = false;
+    if (!service || !id || !result) return false;
+    lock_state((smart_home_miloco_t *)service);
+    for (unsigned i = 0; i < MILOCO_CONTROL_QUEUE_DEPTH; i++) {
+        if (service->results[i].id == id) {
+            *result = service->results[i].result;
+            found = true;
+            break;
+        }
+    }
+    unlock_state((smart_home_miloco_t *)service);
+    return found;
+}
+
 int smart_home_miloco_submit_control(smart_home_miloco_t *service,
+                                     const char *did, const char *iid,
+                                     const char *operation, int32_t value)
+{
+    return smart_home_miloco_submit_control_tracked(service, did, iid,
+                                                    operation, value, NULL);
+}
+
+int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
                                      const char *did,
                                      const char *iid,
                                      const char *operation,
-                                     int32_t value)
+                                     int32_t value, uint32_t *request_id)
 {
     int ret = AGENT_OK;
 
     if (!service || !did || !did[0] || !iid || !iid[0] ||
         strlen(did) >= sizeof(service->pending[0].did) ||
-        strlen(iid) >= sizeof(service->pending[0].iid) || !operation) {
+        strlen(iid) >= sizeof(service->pending[0].iid) || !operation ||
+        (strcmp(operation, "set") && strcmp(operation, "action"))) {
         return AGENT_ERROR_INVALID;
     }
     lock_state(service);
@@ -214,6 +262,9 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
         strcpy(slot->iid, iid);
         slot->is_action = strcmp(operation, "action") == 0;
         slot->value = value;
+        if (++service->next_request_id == 0) ++service->next_request_id;
+        slot->request_id = service->next_request_id;
+        if (request_id) *request_id = slot->request_id;
         service->pending_count++;
     }
     unlock_state(service);
@@ -948,7 +999,21 @@ static int execute_control(smart_home_miloco_t *service,
         }
         for (k = 0; k < dev->control_count; k++) {
             if (strcmp(dev->controls[k].iid, request->iid) == 0) {
-                iid_allowed = true;
+                const smart_home_miloco_control_t *ctrl = &dev->controls[k];
+                iid_allowed = dev->online &&
+                    request->is_action == (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION);
+                if (ctrl->type == SMART_HOME_MILOCO_CTRL_BOOL)
+                    iid_allowed = iid_allowed && (request->value == 0 || request->value == 1);
+                if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM) {
+                    bool found = false;
+                    for (unsigned n = 0; n < ctrl->option_count && n < SMART_HOME_MILOCO_MAX_OPTIONS; n++)
+                        if (ctrl->options[n].value == request->value) found = true;
+                    iid_allowed = iid_allowed && found;
+                }
+                if (ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE)
+                    iid_allowed = iid_allowed && ctrl->range.step > 0 &&
+                        request->value >= ctrl->range.minimum && request->value <= ctrl->range.maximum &&
+                        ((int64_t)request->value - ctrl->range.minimum) % ctrl->range.step == 0;
                 is_bool = dev->controls[k].type ==
                           SMART_HOME_MILOCO_CTRL_BOOL;
                 break;
@@ -989,6 +1054,11 @@ static int execute_control(smart_home_miloco_t *service,
     if (http_status != 200) {
         return -EIO;
     }
+    cJSON *reply = cJSON_Parse(body);
+    const cJSON *code = reply ? cJSON_GetObjectItemCaseSensitive(reply, "code") : NULL;
+    bool accepted = cJSON_IsNumber(code) && code->valuedouble == 0;
+    cJSON_Delete(reply);
+    if (!accepted) return -EIO;
     /* 控制成功后回读真实状态，失败也接受（下轮轮询会补）。 */
     (void)refresh_device_values(service, request->did, body, body_size);
     return AGENT_OK;
@@ -1089,8 +1159,14 @@ static void *miloco_worker(void *argument)
             break;
         }
         if (has_control) {
-            if (execute_control(service, &control, body,
-                                MILOCO_RESPONSE_BYTES) != AGENT_OK) {
+            int result = execute_control(service, &control, body,
+                                          MILOCO_RESPONSE_BYTES);
+            lock_state(service);
+            service->results[service->result_next].id = control.request_id;
+            service->results[service->result_next].result = result;
+            service->result_next = (service->result_next + 1) % MILOCO_CONTROL_QUEUE_DEPTH;
+            unlock_state(service);
+            if (result != AGENT_OK) {
                 syslog(LOG_WARNING,
                        "WARNING: [miloco] control did=%s iid=%s failed\n",
                        control.did, control.iid);

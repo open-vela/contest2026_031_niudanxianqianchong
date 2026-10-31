@@ -15,6 +15,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -445,6 +446,34 @@ static void copy_bounded(char *dst, size_t cap, const char *src)
  * Public Functions
  ****************************************************************************/
 
+/* Integer ranges are kept exactly; unsupported fractional ranges stay hidden. */
+static bool scan_integer_range(const char *p, smart_home_miloco_control_t *ctrl)
+{
+    int32_t values[3];
+    char *end;
+    if (!p || *p != '[') return false;
+    p++;
+    for (int i = 0; i < 3; i++) {
+        long value;
+        p = scan_ws(p);
+        errno = 0;
+        value = strtol(p, &end, 10);
+        if (errno == ERANGE || end == p || value < -2147483647L ||
+            value > 2147483647L) return false;
+        values[i] = (int32_t)value;
+        p = scan_ws(end);
+        if (*p != (i == 2 ? ']' : ',')) return false;
+        p++;
+    }
+    if (values[0] >= values[1] || values[2] <= 0 ||
+        (int64_t)values[1] - values[0] > 32767) return false;
+    ctrl->type = SMART_HOME_MILOCO_CTRL_RANGE;
+    ctrl->range.minimum = values[0];
+    ctrl->range.maximum = values[1];
+    ctrl->range.step = values[2];
+    return true;
+}
+
 int smart_home_miloco_specscan(const char *body,
                                char *did_out, size_t did_size,
                                smart_home_miloco_category_t *category_out,
@@ -758,6 +787,14 @@ int smart_home_miloco_specscan(const char *body,
 
                     ctrl->option_count = opts;
                     if (opts > 0)
+                      {
+                        count++;
+                      }
+                  }
+                else
+                  {
+                    member = scan_find_member(item + 1, "value_range", &found);
+                    if (member && found && scan_integer_range(scan_ws(member), ctrl))
                       {
                         count++;
                       }

@@ -42,6 +42,7 @@ typedef enum {
     SMART_HOME_MILOCO_CTRL_BOOL = 0,
     SMART_HOME_MILOCO_CTRL_ENUM,
     SMART_HOME_MILOCO_CTRL_ACTION,
+    SMART_HOME_MILOCO_CTRL_RANGE,
 } smart_home_miloco_ctrl_type_t;
 
 /* 单个可控项：由设备 spec 的可写属性/动作解析而来（黑名单过滤），
@@ -54,10 +55,17 @@ typedef struct {
     uint8_t type;                        /* smart_home_miloco_ctrl_type_t */
     int32_t value;                       /* BOOL:0/1 ENUM:当前值 ACTION:无效 */
     uint8_t option_count;
-    struct {
-        char name[12];
-        int32_t value;
-    } options[SMART_HOME_MILOCO_MAX_OPTIONS];
+    union {
+        struct {
+            int32_t minimum;
+            int32_t maximum;
+            int32_t step;
+        } range;
+        struct {
+            char name[12];
+            int32_t value;
+        } options[SMART_HOME_MILOCO_MAX_OPTIONS];
+    };
 } smart_home_miloco_control_t;
 
 typedef struct {
@@ -116,6 +124,9 @@ size_t smart_home_miloco_list(const smart_home_miloco_t *service,
                               smart_home_miloco_device_t *devices,
                               size_t capacity,
                               uint32_t *revision_out);
+bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
+                                    const char *did,
+                                    smart_home_miloco_device_t *out);
 
 /* 网关最近一次轮询是否成功；未启动返回 false。 */
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service);
@@ -153,6 +164,11 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
                                      const char *iid,
                                      const char *operation,
                                      int32_t value);
+int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
+    const char *did, const char *iid, const char *operation, int32_t value,
+    uint32_t *request_id);
+bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
+                                      uint32_t request_id, int *result);
 
 /* ── 天气数据（wttr.in 文本格式，worker 每 10 分钟拉取） ────── */
 typedef struct {

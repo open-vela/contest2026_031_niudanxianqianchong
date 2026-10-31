@@ -105,6 +105,9 @@ int smart_home_device_set_ac(smart_home_state_t *state,
                              int mode,
                              int fan_speed,
                              int temperature);
+int smart_home_device_set_control_by_id(smart_home_state_t *state, int id,
+                                        int on, int value, int mode,
+                                        int fan_speed);
 
 int smart_home_device_set_environment(smart_home_state_t *state,
                                       int temperature,

@@ -13,6 +13,7 @@ static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
 static void capture_v9_device_modals(smart_home_lvgl_t *ui);
 static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
+static void capture_v9_model_menu(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
 
@@ -306,6 +307,7 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_settings_select_category(0) == 0);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     capture_v9_settings_categories(ui);
+    capture_v9_model_menu(ui);
     smart_home_lvgl_build_chat_screen(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     smart_home_lvgl_append_msg_bubble(ui,
@@ -559,15 +561,24 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
     puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
 }
 
-static const smart_home_llm_backend_preset_t g_test_preset = {
-    "deepseek", "DeepSeek", "api.deepseek.com", "/chat", "443",
-    "deepseek-chat", 30000, 0
+/* 与生产一致的五个后端，否则下拉菜单只有一项，无法与设计 23-model-menu 比对。 */
+static const smart_home_llm_backend_preset_t g_test_presets[] = {
+    { "deepseek", "DeepSeek", "api.deepseek.com", "/chat", "443",
+      "deepseek-chat", 30000, 0 },
+    { "mimo", "MiMo", "api.xiaomimimo.com", "/chat", "443",
+      "mimo-v2.5", 30000, 0 },
+    { "qwen", "Qwen", "dashscope.aliyuncs.com", "/chat", "443",
+      "qwen-turbo", 30000, 0 },
+    { "openai", "OpenAI", "api.openai.com", "/chat", "443",
+      "gpt-4o-mini", 30000, 0 },
+    { "custom", "Custom", "", "", "", "", 30000, 0 },
 };
-size_t smart_home_llm_backend_count(void) { return 1; }
+#define TEST_PRESET_COUNT (sizeof(g_test_presets) / sizeof(g_test_presets[0]))
+size_t smart_home_llm_backend_count(void) { return TEST_PRESET_COUNT; }
 const smart_home_llm_backend_preset_t *smart_home_llm_backend_get(size_t i)
-{ return i == 0 ? &g_test_preset : NULL; }
+{ return i < TEST_PRESET_COUNT ? &g_test_presets[i] : NULL; }
 const smart_home_llm_backend_preset_t *smart_home_llm_backend_default(void)
-{ return &g_test_preset; }
+{ return &g_test_presets[0]; }
 int smart_home_llm_backend_index_by_id(const char *id)
 { (void)id; return 0; }
 int smart_home_llm_backend_index_for_config(
@@ -894,8 +905,17 @@ static void capture_v9_device_modals(smart_home_lvgl_t *ui)
             continue;
         lv_obj_send_event(card, LV_EVENT_CLICKED, NULL);
         if (lv_obj_get_child_count(ui->screen_home) > 0) {
-            lv_obj_t *mask = lv_obj_get_child(ui->screen_home, -1);
-
+            lv_obj_t *mask = NULL;
+            /* Dropdown lists are screen children too; identify the overlay
+             * by its size instead of assuming it is the last child. */
+            lv_obj_update_layout(ui->screen_home);
+            for (uint32_t n = 0; n < lv_obj_get_child_count(ui->screen_home); n++) {
+                lv_obj_t *child = lv_obj_get_child(ui->screen_home, n);
+                if (lv_obj_get_width(child) == 1024 &&
+                    lv_obj_get_height(child) == 600 &&
+                    lv_obj_get_style_bg_opa(child, 0) == LV_OPA_30) mask = child;
+            }
+            assert(mask);
             lv_obj_update_layout(ui->screen_home);
             capture_to(ui, keys[opened < 6 ? opened : 5]);
             lv_obj_send_event(mask, LV_EVENT_CLICKED, NULL);
@@ -922,6 +942,62 @@ static void capture_v9_settings_categories(smart_home_lvgl_t *ui)
         lv_obj_update_layout(ui->screen_settings_v9);
         capture_screen(ui->screen_settings_v9, keys[i]);
     }
+    (void)smart_home_lvgl_v9_settings_select_category(0);
+}
+static lv_obj_t *find_v9_dropdown(lv_obj_t *root)
+{
+    if (!root) return NULL;
+    if (lv_obj_check_type(root, &lv_dropdown_class)) return root;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+        lv_obj_t *found = find_v9_dropdown(lv_obj_get_child(root, i));
+        if (found) return found;
+    }
+    return NULL;
+}
+
+/* 模型服务页的下拉菜单展开态，用于与设计 23-model-menu 比对。 */
+static void capture_v9_model_menu(smart_home_lvgl_t *ui)
+{
+    const char *path = getenv("SMART_HOME_V9_MODEL_MENU_CAPTURE");
+    lv_obj_t *dropdown;
+
+    if (!path || !ui->screen_settings_v9) return;
+    if (smart_home_lvgl_v9_settings_select_category(2) != 2) return;
+    lv_obj_update_layout(ui->screen_settings_v9);
+    dropdown = find_v9_dropdown(ui->screen_settings_v9);
+    if (!dropdown) return;
+    {
+        lv_obj_t *list = lv_dropdown_get_list(dropdown);
+        lv_color_t sel;
+
+        printf("DBG dropdown=%p list=%p opts='%s'\n", (void *)dropdown,
+               (void *)list, lv_dropdown_get_options(dropdown));
+        if (list) {
+            sel = lv_obj_get_style_bg_color(list, LV_PART_SELECTED);
+            printf("DBG list sel_bg=#%02X%02X%02X w=%d h=%d count=%u\n",
+                   sel.red, sel.green, sel.blue,
+                   (int)lv_obj_get_width(list), (int)lv_obj_get_height(list),
+                   (unsigned)lv_obj_get_child_count(list));
+        }
+    }
+    lv_dropdown_open(dropdown);
+    {
+        lv_obj_t *list = lv_dropdown_get_list(dropdown);
+
+        printf("DBG opened list x=%d y=%d w=%d h=%d\n",
+               (int)lv_obj_get_x(list), (int)lv_obj_get_y(list),
+               (int)lv_obj_get_width(list), (int)lv_obj_get_height(list));
+    }
+    lv_obj_update_layout(ui->screen_settings_v9);
+    lv_refr_now(NULL);
+    capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MODEL_MENU_CAPTURE");
+    lv_dropdown_close(dropdown);
+    /* 下拉列表挂在 screen 下且关闭后仍存在；把它移回底部，避免后续
+     * “最后一个子对象是底栏”的断言把它当成底栏。 */
+    if (lv_dropdown_get_list(dropdown)) {
+        lv_obj_move_to_index(lv_dropdown_get_list(dropdown), 0);
+    }
+    lv_obj_update_layout(ui->screen_settings_v9);
     (void)smart_home_lvgl_v9_settings_select_category(0);
 }
 static void test_v9_cards(smart_home_lvgl_t *ui)

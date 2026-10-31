@@ -502,32 +502,42 @@ int smart_home_device_service_set_ac(smart_home_device_service_t *service,
     return commit_mutation(service, ret, "device_state_changed", data);
 }
 
+int smart_home_device_service_get_device(smart_home_device_service_t *service,
+                                          int id, smart_home_device_t *out)
+{
+    smart_home_device_t *device;
+    if (!service || !service->mutex_initialized || !out) return AGENT_ERROR_INVALID;
+    pthread_mutex_lock(&service->mutex);
+    device = smart_home_device_find_by_id(service->state, id);
+    if (device) *out = *device;
+    pthread_mutex_unlock(&service->mutex);
+    return device ? AGENT_OK : AGENT_ERROR_NOT_FOUND;
+}
+
 int smart_home_device_service_set_device_control(
     smart_home_device_service_t *service, int device_id, int on, int value,
     int mode, int fan_speed)
 {
-    smart_home_device_t *device;
-    char room[SMART_HOME_ROOM_NAME_SIZE];
-    smart_home_device_type_t type;
-
-    if (!service || !service->mutex_initialized) {
-        return AGENT_ERROR_INVALID;
-    }
+    char data[SMART_HOME_DEVICE_EVENT_DATA_SIZE];
+    int ret;
+    if (!service || !service->mutex_initialized) return AGENT_ERROR_INVALID;
     pthread_mutex_lock(&service->mutex);
-    device = smart_home_device_find_by_id(service->state, device_id);
-    if (!device) {
-        pthread_mutex_unlock(&service->mutex);
-        return AGENT_ERROR_NOT_FOUND;
-    }
-    type = device->type;
-    strncpy(room, device->room, sizeof(room) - 1u);
-    room[sizeof(room) - 1u] = '\0';
-    pthread_mutex_unlock(&service->mutex);
-    if (type == SMART_HOME_DEVICE_AC) {
-        return smart_home_device_service_set_ac(service, room, on, mode,
-                                                fan_speed, value);
-    }
-    return smart_home_device_service_set_light(service, room, on, value);
+    ret = smart_home_device_set_control_by_id(service->state, device_id,
+                                              on, value, mode, fan_speed);
+    smart_home_device_t *device = smart_home_device_find_by_id(service->state, device_id);
+    if (device && device->type == SMART_HOME_DEVICE_LIGHT) {
+        snprintf(data, sizeof(data),
+            "{\"deviceId\":\"%d\",\"state\":{\"on\":%s,\"brightness\":%d}}",
+            device_id, device->on ? "true" : "false", device->brightness);
+    } else if (device) {
+        snprintf(data, sizeof(data),
+            "{\"deviceId\":\"%d\",\"state\":{\"on\":%s,\"temperature\":%d,"
+            "\"mode\":\"%s\",\"fanSpeed\":\"%s\"}}", device_id,
+            device->on ? "true" : "false", device->temperature,
+            smart_home_ac_mode_name(device->ac_mode),
+            smart_home_ac_fan_speed_name(device->ac_fan_speed));
+    } else data[0] = '\0';
+    return commit_mutation(service, ret, "device_state_changed", data);
 }
 
 int smart_home_device_service_set_environment(smart_home_device_service_t *service,

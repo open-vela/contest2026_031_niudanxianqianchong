@@ -17,6 +17,7 @@ add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${REPO}/demos/smart_home/src/device/smart_home_device.c"
   "${UI}/smart_home_lvgl_nav.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_home_v9.c"
+  "${UI}/smart_home_lvgl_device_dialog.c"
   "${UI}/smart_home_lvgl_settings_v9.c"
   "${UI}/smart_home_lvgl_chat.c"
   "${UI}/smart_home_v9_device_view.c"
@@ -125,3 +126,15 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/reset-session-data.cmake"
 add_test(NAME session_file_prepare COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/reset-session-data.cmake")
 set_tests_properties(session_file_prepare PROPERTIES FIXTURES_SETUP session_file_data)
 set_tests_properties(session_file_check PROPERTIES FIXTURES_REQUIRED session_file_data)
+
+add_executable(device_dialog_check test_device_dialog.c
+  "${REPO}/demos/smart_home/src/device/smart_home_device.c"
+  "${REPO}/demos/smart_home/src/device/smart_home_device_service.c"
+  "${REPO}/demos/smart_home/src/miloco/smart_home_miloco_specscan.c"
+  "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
+  "${UI}/smart_home_lvgl_style.c" "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(device_dialog_check PROPERTIES ${property} "${value}")
+endforeach()
+add_test(NAME device_dialog_check COMMAND device_dialog_check)

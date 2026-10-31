@@ -49,6 +49,24 @@ static int clamp_temperature(int temperature)
     return temperature;
 }
 
+int smart_home_device_set_control_by_id(smart_home_state_t *state, int id,
+                                        int on, int value, int mode,
+                                        int fan_speed)
+{
+    smart_home_device_t *device = smart_home_device_find_by_id(state, id);
+
+    if (!device) return AGENT_ERROR_NOT_FOUND;
+    device->on = on != 0;
+    if (device->type == SMART_HOME_DEVICE_LIGHT) {
+        device->brightness = clamp_brightness(value);
+    } else {
+        device->temperature = clamp_temperature(value);
+        device->ac_mode = mode >= 0 && mode <= 4 ? mode : 0;
+        device->ac_fan_speed = fan_speed >= 0 && fan_speed <= 3 ? fan_speed : 3;
+    }
+    return AGENT_OK;
+}
+
 static int clamp_env_temperature(int temperature)
 {
     if (temperature < 0) {

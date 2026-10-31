@@ -2091,6 +2091,12 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
                 lv_obj_add_event_cb(opt, miloco_sheet_pick_cb,
                                     LV_EVENT_CLICKED, oreq);
             }
+        } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE) {
+            char value_text[48];
+            snprintf(value_text, sizeof(value_text), "%ld · 请在首页调节", (long)ctrl->value);
+            label = smart_home_lvgl_label_create(row, value_text,
+                        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 12);
+            lv_obj_align(label, LV_ALIGN_RIGHT_MID, 0, 0);
         } else {
             req->value = 0;
             btn = lv_btn_create(row);

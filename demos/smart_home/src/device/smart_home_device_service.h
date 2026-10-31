@@ -64,6 +64,8 @@ int smart_home_device_service_find_first(smart_home_device_service_t *service,
                                          const char *room,
                                          smart_home_device_type_t type,
                                          smart_home_device_t *out_device);
+int smart_home_device_service_get_device(smart_home_device_service_t *service,
+                                          int id, smart_home_device_t *out);
 int smart_home_device_service_build_snapshot_json(
     smart_home_device_service_t *service,
     char *buffer,
