@@ -84,4 +84,6 @@ source myenv/bin/activate
 
 构建产物和验证清单：openvela 根目录下 `out/cagent-v2-smart-home-6397f6b/`。
 
-待完成：烧录、真机与真实云端/米家网关验收；语音及 Node/MCP/App Bridge 等扩展适配。CMake 包目标尚未完成，当前固件构建使用 Make。
+待完成：烧录、真机与真实云端/米家网关验收；App Bridge 尚未适配。CMake 包目标尚未完成，当前固件构建使用 Make。
+
+更新（2026-10-31，379ed7c）：Node/MCP 两个扩展已完成 V2 适配并编译链接通过——`cagent_addons` 的执行回调改 `agent_tool_context_t` + `agent_text_sink_t`、注册字段改 `agent_string_view_t`/`group`、错误码与 flag 位对齐 V2；MCP 的 TLS 从 `ov_tls_*` 换成 `agent_port_openvela_tls_*` 的 webclient ops；`ov_mem_region_log` 由 `smart_home_memory_log_region` 承接。启用两者的 `smart_home_service_lab` 配置因此可以链接，详见 `2026-10-31-V9-M7-收尾.md`。真实 MCP/Node 链路仍需板上验证。
