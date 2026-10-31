@@ -483,18 +483,21 @@ int smart_home_camera_start(void)
       attr_initialized = true;
 #ifdef __NuttX__
       ret = pthread_attr_setstack(&attr, stack, SMART_HOME_CAMERA_STACK_SIZE);
+#ifdef CONFIG_SMP
       if (ret == 0)
         {
           cpu_set_t cpuset;
 
           /* V4L2 capture and the preview copy run on CPU0, next to the DSI
            * scanout, so frame buffers never cross cores during cache sync.
+           * Affinity is only meaningful (and only available) with SMP.
            */
 
           CPU_ZERO(&cpuset);
           CPU_SET(0, &cpuset);
           ret = pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
         }
+#endif
 #else
       (void)stack;
 #endif
