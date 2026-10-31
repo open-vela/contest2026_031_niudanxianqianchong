@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,8 +25,11 @@
 #include "../config/smart_home_secrets.h"
 #include "../smart_home_memory.h"
 
-#include <cagent/runtime.h>
-#include "runtime_openvela.h"
+#include <agent/error.h>
+#include <agent/transport.h>
+#include <agent_openvela_runtime.h>
+#include <agent_openvela_tls.h>
+#include <agent_openvela_transport.h>
 
 #include "mbedtls/base64.h"
 
@@ -535,6 +539,125 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
   return ret;
 }
 
+/* ── HTTP 通路（cAGENT V2 openvela port：runtime + mbedTLS + webclient）──
+ * 与 smart_home_agent_backend 的组合方式一致。合成只被播报 worker 线程
+ * 串行调用，静态上下文不需要加锁。 */
+
+#define TTS_HTTP_URL_MAX           288
+#define TTS_HTTP_HEADER_BUFFER     512
+#define TTS_HTTP_HEADER_CAPACITY   4
+#define TTS_HTTP_IO_BUFFER         1024
+#define TTS_HTTP_RESPONSE_HEADERS  8
+#define TTS_HTTP_RESP_HEADER_BUF   1024
+
+static struct
+{
+  bool ready;
+  agent_runtime_t runtime;
+  agent_port_openvela_tls_t tls;
+  agent_port_openvela_transport_t transport_state;
+  agent_transport_t transport;
+  char url[TTS_HTTP_URL_MAX];
+  char request_header_buffer[TTS_HTTP_HEADER_BUFFER];
+  const char *request_headers[TTS_HTTP_HEADER_CAPACITY];
+  char io_buffer[TTS_HTTP_IO_BUFFER];
+  agent_http_header_t response_headers[TTS_HTTP_RESPONSE_HEADERS];
+  char response_header_buffer[TTS_HTTP_RESP_HEADER_BUF];
+} g_tts_http;
+
+static int tts_http_init(void)
+{
+  agent_port_openvela_tls_config_t tls_config = {0};
+  agent_port_openvela_transport_config_t transport_config = {0};
+  int ret;
+
+  if (g_tts_http.ready)
+    {
+      return AGENT_OK;
+    }
+
+  ret = agent_port_openvela_runtime_init(&g_tts_http.runtime);
+  if (ret != AGENT_OK)
+    {
+      return ret;
+    }
+
+  tls_config.io_timeout_ms = TTS_TIMEOUT_MS;
+  ret = agent_port_openvela_tls_init(&g_tts_http.tls, &tls_config);
+  if (ret != AGENT_OK)
+    {
+      return ret;
+    }
+
+  transport_config.runtime = g_tts_http.runtime;
+  transport_config.tls_ops = g_tts_http.tls.ops;
+  transport_config.tls_context = &g_tts_http.tls;
+  transport_config.request_timeout_ms = TTS_TIMEOUT_MS;
+  transport_config.url_buffer = g_tts_http.url;
+  transport_config.url_buffer_size = sizeof(g_tts_http.url);
+  transport_config.request_header_buffer = g_tts_http.request_header_buffer;
+  transport_config.request_header_buffer_size =
+      sizeof(g_tts_http.request_header_buffer);
+  transport_config.request_headers = g_tts_http.request_headers;
+  transport_config.request_header_capacity = TTS_HTTP_HEADER_CAPACITY;
+  transport_config.io_buffer = g_tts_http.io_buffer;
+  transport_config.io_buffer_size = sizeof(g_tts_http.io_buffer);
+  transport_config.response_headers = g_tts_http.response_headers;
+  transport_config.response_header_capacity = TTS_HTTP_RESPONSE_HEADERS;
+  transport_config.response_header_buffer = g_tts_http.response_header_buffer;
+  transport_config.response_header_buffer_size =
+      sizeof(g_tts_http.response_header_buffer);
+
+  ret = agent_port_openvela_transport_init(&g_tts_http.transport,
+                                           &g_tts_http.transport_state,
+                                           &transport_config);
+  if (ret != AGENT_OK)
+    {
+      return ret;
+    }
+
+  g_tts_http.ready = true;
+  return AGENT_OK;
+}
+
+typedef struct
+{
+  uint8_t *buffer;
+  size_t capacity;
+  size_t used;
+  unsigned int status;
+} tts_http_sink_t;
+
+static agent_error_t tts_sink_headers(void *context, unsigned int status,
+                                      const agent_http_header_t *headers,
+                                      size_t count)
+{
+  tts_http_sink_t *sink = context;
+
+  (void)headers;
+  (void)count;
+  sink->status = status;
+  return AGENT_OK;
+}
+
+static agent_error_t tts_sink_body(void *context, const void *data,
+                                   size_t size)
+{
+  tts_http_sink_t *sink = context;
+
+  if (sink->used < sink->capacity)
+    {
+      size_t room = sink->capacity - sink->used;
+      size_t copy = size > room ? room : size;
+
+      memcpy(sink->buffer + sink->used, data, copy);
+      sink->used += copy;
+    }
+
+  /* 超出 TTS 音频上限的尾部丢弃；与旧 http_post 的截断行为一致。 */
+  return AGENT_OK;
+}
+
 int smart_home_tts_synth(const char *text,
                          uint8_t **out_pcm, size_t *out_bytes,
                          uint32_t *out_rate)
@@ -542,15 +665,20 @@ int smart_home_tts_synth(const char *text,
   smart_home_tts_config_t config;
   const smart_home_tts_preset_t *preset;
   int api_style;
-  agent_runtime_t runtime;
-  agent_http_request_t request;
-  agent_http_response_t response;
   char api_key[TTS_KEY_MAX];
-  char auth_header[TTS_KEY_MAX + 64];
+  char auth_value[TTS_KEY_MAX + 8];
+  char url[TTS_HTTP_URL_MAX];
+  agent_http_header_t headers[2];
+  agent_http_request_t request;
+  agent_http_sink_t http_sink;
+  tts_http_sink_t sink;
   char *body = NULL;
   uint8_t *audio = NULL;
   size_t data_offset;
   size_t data_len;
+  size_t response_len;
+  size_t url_len;
+  uint64_t deadline_ms;
   uint32_t rate;
   int ret;
 
@@ -597,38 +725,59 @@ int smart_home_tts_synth(const char *text,
       return AGENT_ERROR_NOMEM;
     }
 
-  snprintf(auth_header, sizeof(auth_header),
-           "Authorization: Bearer %s\r\n"
-           "Content-Type: application/json\r\n",
-           api_key);
-
-  memset(&runtime, 0, sizeof(runtime));
-  agent_runtime_openvela_fill(&runtime);
-  if (runtime.http_post == NULL)
+  ret = tts_http_init();
+  if (ret != AGENT_OK)
     {
-      /* OFFLINE_UI 等无 TLS 运行时的镜像：合成不可用而非崩溃。 */
-      fprintf(stderr, "tts: runtime has no http_post (no TLS profile)\n");
+      /* OFFLINE_UI 等无网络/TLS 运行时：合成不可用而非崩溃。 */
+      fprintf(stderr, "tts: http transport init failed: %d\n", ret);
       free(body);
       smart_home_bulk_free(audio);
-      return AGENT_ERROR_NOTSUP;
+      return AGENT_ERROR_NOT_SUPPORTED;
     }
 
+  url_len = (size_t)snprintf(url, sizeof(url), "https://%s:%s%s",
+                             config.host, config.port, config.path);
+  if (url_len >= sizeof(url))
+    {
+      fprintf(stderr, "tts: endpoint url too long\n");
+      free(body);
+      smart_home_bulk_free(audio);
+      return AGENT_ERROR_LIMIT;
+    }
+
+  snprintf(auth_value, sizeof(auth_value), "Bearer %s", api_key);
+  headers[0].name = agent_string_view("Authorization", 13u);
+  headers[0].value = agent_string_view(auth_value, strlen(auth_value));
+  headers[1].name = agent_string_view("Content-Type", 12u);
+  headers[1].value = agent_string_view("application/json", 16u);
+
+  deadline_ms = g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context) +
+                TTS_TIMEOUT_MS;
+
   memset(&request, 0, sizeof(request));
-  request.method = "POST";
-  request.host = config.host;
-  request.path = config.path;
-  request.port = config.port;
-  request.headers = auth_header;
+  request.method = agent_string_view("POST", 4u);
+  request.url = agent_string_view(url, url_len);
+  request.headers = headers;
+  request.header_count = 2u;
   request.body = body;
   request.body_size = strlen(body);
-  request.timeout_ms = TTS_TIMEOUT_MS;
+  request.max_response_bytes = CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES;
+  request.max_response_header_bytes = TTS_HTTP_RESP_HEADER_BUF;
+  request.deadline_ms = deadline_ms;
+  request.cancel = NULL;
 
-  memset(&response, 0, sizeof(response));
-  response.body = (char *)audio;
-  response.body_size = CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES;
+  http_sink.headers = tts_sink_headers;
+  http_sink.body = tts_sink_body;
+  http_sink.context = &sink;
+  sink.buffer = audio;
+  sink.capacity = CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES;
+  sink.used = 0;
+  sink.status = 0;
 
-  ret = runtime.http_post(&request, &response, runtime.user_data);
+  ret = g_tts_http.transport.ops->request(g_tts_http.transport.context,
+                                          &request, &http_sink);
   free(body);
+  response_len = sink.used;
 
   if (ret != AGENT_OK)
     {
@@ -636,13 +785,13 @@ int smart_home_tts_synth(const char *text,
       goto out;
     }
 
-  if (response.status_code < 200 || response.status_code >= 300)
+  if (sink.status < 200 || sink.status >= 300)
     {
       /* 错误响应是 JSON 文本；截断打印辅助排障。 */
-      fprintf(stderr, "tts: synth http status=%d body: %.200s\n",
-              response.status_code,
-              response.bytes_written > 0 ? (const char *)audio : "(empty)");
-      ret = AGENT_ERROR_MODEL;
+      fprintf(stderr, "tts: synth http status=%u body: %.200s\n",
+              sink.status,
+              response_len > 0 ? (const char *)audio : "(empty)");
+      ret = AGENT_ERROR_MODEL_FAILED;
       goto out;
     }
 
@@ -652,22 +801,22 @@ int smart_home_tts_synth(const char *text,
 
       ret = tts_decode_chat_response(
           audio, CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES,
-          response.bytes_written, &decoded_len);
+          response_len, &decoded_len);
       if (ret != 0)
         {
           ret = AGENT_ERROR_PARSE;
           goto out;
         }
 
-      response.bytes_written = decoded_len;
+      response_len = decoded_len;
     }
 
-  ret = tts_parse_wav(audio, response.bytes_written,
+  ret = tts_parse_wav(audio, response_len,
                       &data_offset, &data_len, &rate);
   if (ret != 0)
     {
       fprintf(stderr, "tts: response is not PCM16 mono wav "
-              "(len=%zu)\n", response.bytes_written);
+              "(len=%zu)\n", response_len);
       ret = AGENT_ERROR_PARSE;
       goto out;
     }

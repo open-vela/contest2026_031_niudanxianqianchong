@@ -28,7 +28,7 @@
 #include "../smart_home_memory.h"
 #include "../config/cjson_compat.h"
 #include "../config/smart_home_config_store.h"
-#include <cagent/types.h>
+#include <agent/error.h>
 #include "kws/kws_infer.h"
 #include "smart_home_kws_frontend.h"
 #include "smart_home_voice_capture.h"
