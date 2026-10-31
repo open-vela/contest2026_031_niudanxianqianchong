@@ -365,9 +365,11 @@ static void destroy_gateway(smart_home_node_gateway_t *gateway)
     free(gateway);
 }
 
-int smart_home_node_gateway_start(smart_home_node_gateway_t **gateway_out,
-                                  agent_t *agent,
-                                  pthread_mutex_t *agent_mutex)
+int smart_home_node_gateway_start_with_port(
+    smart_home_node_gateway_t **gateway_out,
+    agent_t *agent,
+    pthread_mutex_t *agent_mutex,
+    uint16_t listen_port)
 {
     caddons_ws_transport_config_t transport_config;
     caddons_node_gateway_config_t gateway_config;
@@ -375,7 +377,8 @@ int smart_home_node_gateway_start(smart_home_node_gateway_t **gateway_out,
     char shared_token[CAGENT_ADDONS_AUTH_TOKEN_MAX_LENGTH + 1u];
     int rc;
 
-    if (!gateway_out || *gateway_out || !agent || !agent_mutex) {
+    if (!gateway_out || *gateway_out || !agent || !agent_mutex ||
+        listen_port == 0u) {
         return AGENT_ERROR_INVALID;
     }
     memset(shared_token, 0, sizeof(shared_token));
@@ -424,7 +427,7 @@ int smart_home_node_gateway_start(smart_home_node_gateway_t **gateway_out,
     gateway_config.transport = gateway->transport;
     gateway_config.catalog = gateway->catalog;
     gateway_config.bind_host = CONFIG_SMART_HOME_NODE_GATEWAY_BIND_HOST;
-    gateway_config.listen_port = CONFIG_SMART_HOME_NODE_GATEWAY_PORT;
+    gateway_config.listen_port = listen_port;
     gateway_config.ws_path = CAGENT_ADDONS_NODE_DEFAULT_PATH;
     gateway_config.auth_token = shared_token;
     gateway_config.max_nodes = CAGENT_ADDONS_MAX_NODES;

@@ -143,6 +143,7 @@ struct smart_home_mcp_bridge {
     int discovery_error; /* CADDONS_*；READY 时为 0 */
     char session_id[CAGENT_ADDONS_MCP_SESSION_ID_SIZE + 1u];
     char content_type[96];
+    smart_home_mcp_settings_t settings;
 };
 
 static uint8_t
@@ -1298,6 +1299,7 @@ static void destroy_bridge(smart_home_mcp_bridge_t *bridge)
     if (!bridge) {
         return;
     }
+    secure_clear(&bridge->settings, sizeof(bridge->settings));
     /* Mark the worker stopping before waking it. caddons_mcp_bridge_stop()
      * may wait for an in-flight HTTP callback to finish its deadline. */
     if (bridge->state_mutex_ready) {
@@ -1388,6 +1390,7 @@ int smart_home_mcp_bridge_start(smart_home_mcp_bridge_t **bridge_out,
     bridge->state = SMART_HOME_MCP_STATE_IDLE;
     bridge->discovery_error = 0;
     pthread_mutex_unlock(&bridge->state_mutex);
+    bridge->settings = settings;
     *bridge_out = bridge;
     syslog(LOG_INFO, "smart_home: MCP bridge ready; discovery is manual: %s:%u%s\n",
            config.host, (unsigned int)config.port, config.path);
@@ -1398,6 +1401,78 @@ fail:
     secure_clear(&settings, sizeof(settings));
     destroy_bridge(bridge);
     return caddons_error_to_agent(rc);
+}
+
+int smart_home_mcp_bridge_reconfigure(
+    smart_home_mcp_bridge_t *bridge,
+    const smart_home_mcp_runtime_config_t *config)
+{
+    smart_home_mcp_settings_t settings;
+    caddons_mcp_bridge_config_t bridge_config;
+    bool ok;
+
+    if (!bridge || !config || !bridge->bridge || !bridge->catalog ||
+        !bridge->state_mutex_ready) {
+        return AGENT_ERROR_INVALID;
+    }
+    if (config->port == 0u || config->host[0] == '\0' ||
+        config->path[0] != '/' || config->server_id[0] == '\0' ||
+        contains_header_control(config->host) ||
+        contains_header_control(config->path) ||
+        contains_header_control(config->server_id) ||
+        contains_header_control(config->authorization)) {
+        return AGENT_ERROR_INVALID;
+    }
+
+    memset(&settings, 0, sizeof(settings));
+    copy_string(settings.host, sizeof(settings.host), config->host);
+    copy_string(settings.path, sizeof(settings.path), config->path);
+    copy_string(settings.server_id, sizeof(settings.server_id),
+                config->server_id);
+    copy_string(settings.authorization, sizeof(settings.authorization),
+                config->authorization);
+    settings.port = config->port;
+    settings.use_tls = config->use_tls;
+
+    pthread_mutex_lock(&bridge->state_mutex);
+    if (bridge->stopping ||
+        bridge->state == SMART_HOME_MCP_STATE_CONNECTING ||
+        bridge->discover_requested) {
+        pthread_mutex_unlock(&bridge->state_mutex);
+        secure_clear(&settings, sizeof(settings));
+        return AGENT_ERROR_BUSY;
+    }
+
+    caddons_mcp_bridge_destroy(bridge->bridge);
+    bridge->bridge = NULL;
+
+    memset(&bridge_config, 0, sizeof(bridge_config));
+    bridge_config.host = settings.host;
+    bridge_config.port = settings.port;
+    bridge_config.path = settings.path;
+    bridge_config.use_tls = settings.use_tls;
+    bridge_config.server_id = settings.server_id;
+    bridge_config.authorization = settings.authorization[0] ?
+                                  settings.authorization : NULL;
+    bridge_config.catalog = bridge->catalog;
+    bridge_config.http_request = mcp_http_request;
+    bridge_config.http_context = bridge;
+    bridge_config.catalog_changed_fn = catalog_changed;
+    bridge_config.catalog_changed_user_data = bridge;
+    bridge_config.request_timeout_ms =
+        CONFIG_SMART_HOME_MCP_BRIDGE_REQUEST_TIMEOUT_MS;
+    bridge->bridge = caddons_mcp_bridge_create(&bridge_config);
+    ok = bridge->bridge != NULL;
+    if (ok) {
+        bridge->settings = settings;
+        bridge->state = SMART_HOME_MCP_STATE_IDLE;
+        bridge->discovery_error = 0;
+    } else {
+        bridge->state = SMART_HOME_MCP_STATE_FAILED;
+    }
+    pthread_mutex_unlock(&bridge->state_mutex);
+    secure_clear(&settings, sizeof(settings));
+    return ok ? AGENT_OK : AGENT_ERROR_NOMEM;
 }
 
 int smart_home_mcp_bridge_request_discover(smart_home_mcp_bridge_t *bridge)
