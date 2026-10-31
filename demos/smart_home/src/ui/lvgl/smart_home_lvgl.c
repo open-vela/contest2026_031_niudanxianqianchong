@@ -76,9 +76,8 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_build_security_screen(ui);
     smart_home_lvgl_log_build_stage("security", "done");
 
-    smart_home_lvgl_log_build_stage("more", "begin");
-    smart_home_lvgl_build_more_screen(ui);
-    smart_home_lvgl_log_build_stage("more", "done");
+    /* 旧“更多”页在 V9 三栏导航下已无入口，不再急切构建；
+     * smart_home_lvgl_build_more_screen 仍保留给 Host 回归与后续懒构建。 */
 
     smart_home_lvgl_log_build_stage("network", "begin");
     smart_home_lvgl_build_network_screen(ui);
