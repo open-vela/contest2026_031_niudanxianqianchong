@@ -601,14 +601,14 @@ config SMART_HOME_V9_DEVICE_ANIMATION
       documented static fallback, not a claim that animation is ready.
 
 config SMART_HOME_CAMERA_PREVIEW
-    bool "Enable local SC2336 security-camera preview"
+    bool "Enable local SC2336 device preview"
     depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
     depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
     default n
     help
       Enable the Smart Home-owned /dev/video0 consumer. The camera service
       captures the SC2336 RGB565 stream in a worker and publishes a copied
-      512x300 preview to the LVGL security page at a maximum of 15 FPS.
+      512x300 preview to the LVGL device popup at a maximum of 15 FPS.
       It is intentionally independent of cAGENT and network services.
 
 config SMART_HOME_MILOCO_BRIDGE

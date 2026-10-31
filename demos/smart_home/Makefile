@@ -49,6 +49,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/ui/smart_home_ui.c
   ifneq ($(CONFIG_SMART_HOME_CAMERA_PREVIEW),)
     CSRCS   += src/camera/smart_home_camera_service.c
+    CSRCS   += src/camera/smart_home_camera_control.c
   endif
   ifneq ($(CONFIG_SMART_HOME_MILOCO_BRIDGE),)
     CSRCS   += src/miloco/smart_home_miloco_client.c
@@ -105,6 +106,9 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl_chat.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_home.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_home_v9.c
+    ifneq ($(CONFIG_SMART_HOME_CAMERA_PREVIEW),)
+      CSRCS += src/ui/lvgl/smart_home_lvgl_camera_dialog.c
+    endif
     CSRCS   += src/ui/lvgl/smart_home_lvgl_device_dialog.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_room_dialog.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_nav.c

@@ -156,3 +156,17 @@ target_compile_definitions(room_dialog_check PRIVATE
 target_link_options(room_dialog_check PRIVATE -Wl,--wrap=smart_home_config_state_save)
 add_test(NAME room_dialog_check COMMAND room_dialog_check)
 set_tests_properties(room_dialog_check PROPERTIES TIMEOUT 15)
+
+add_executable(camera_dialog_check test_camera_dialog.c
+  "${REPO}/demos/smart_home/src/camera/smart_home_camera_control.c"
+  "${REPO}/demos/smart_home/src/device/smart_home_device.c"
+  "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
+  "${UI}/smart_home_v9_device_view.c"
+  "${UI}/smart_home_lvgl_style.c" "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(camera_dialog_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(camera_dialog_check PRIVATE CONFIG_SMART_HOME_CAMERA_PREVIEW=1)
+add_test(NAME camera_dialog_check COMMAND camera_dialog_check)
+set_tests_properties(camera_dialog_check PROPERTIES TIMEOUT 15)

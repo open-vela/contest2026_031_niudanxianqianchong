@@ -32,6 +32,7 @@ if(CONFIG_SMART_HOME_DEMO)
   if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
     list(APPEND SMART_HOME_SRCS
       src/camera/smart_home_camera_service.c
+      src/camera/smart_home_camera_control.c
     )
   endif()
 
@@ -49,6 +50,9 @@ if(CONFIG_SMART_HOME_DEMO)
   endif()
 
   if(CONFIG_SMART_HOME_DEMO_UI_LVGL)
+    if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+      list(APPEND SMART_HOME_SRCS src/ui/lvgl/smart_home_lvgl_camera_dialog.c)
+    endif()
     list(APPEND SMART_HOME_SRCS
       src/ui/lvgl/smart_home_lvgl.c
       src/ui/lvgl/smart_home_lvgl_agent.c
@@ -123,7 +127,8 @@ if(CONFIG_SMART_HOME_DEMO)
   endif()
 
   if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
-    list(APPEND SMART_HOME_SRCS src/camera/smart_home_camera_service.c)
+    list(APPEND SMART_HOME_SRCS src/camera/smart_home_camera_service.c
+      src/camera/smart_home_camera_control.c)
   endif()
 
   if(CONFIG_SMART_HOME_MILOCO_BRIDGE)
@@ -156,6 +161,9 @@ if(CONFIG_SMART_HOME_DEMO)
   endif()
 
   if(CONFIG_SMART_HOME_DEMO_UI_LVGL)
+    if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+      list(APPEND SMART_HOME_SRCS src/ui/lvgl/smart_home_lvgl_camera_dialog.c)
+    endif()
     file(GLOB SMART_HOME_GENERATED_ICON_SRCS
       "${CMAKE_CURRENT_LIST_DIR}/src/ui/lvgl/icons/generated/*.c"
     )
