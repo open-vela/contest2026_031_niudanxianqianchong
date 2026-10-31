@@ -43,14 +43,21 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, smart_home_lvgl_pad_x(), 28);
 
     ui->screensaver_time_label = smart_home_lvgl_label_create(
-        screen, "--:--", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
-    lv_obj_align(ui->screensaver_time_label, LV_ALIGN_CENTER, 0, -26);
+        screen, "--:--", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 96);
+    lv_obj_align(ui->screensaver_time_label, LV_ALIGN_CENTER, 0, -50);
     ui->screensaver_date_label = smart_home_lvgl_label_create(screen,
-        "时间待同步", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
-    lv_obj_align(ui->screensaver_date_label, LV_ALIGN_CENTER, 0, 20);
+        "时间待同步", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 18);
+    lv_obj_align(ui->screensaver_date_label, LV_ALIGN_CENTER, 0, 30);
+    ui->screensaver_temp_label = smart_home_lvgl_label_create(screen,
+        "--°", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 48);
+    lv_obj_align(ui->screensaver_temp_label, LV_ALIGN_CENTER, 0, 90);
+    ui->screensaver_condition_label = smart_home_lvgl_label_create(screen,
+        "天气待获取", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 18);
+    lv_obj_align(ui->screensaver_condition_label, LV_ALIGN_CENTER, 0, 130);
+    /* Legacy combined label stays for compatibility but is not rendered. */
     ui->screensaver_weather_label = smart_home_lvgl_label_create(screen,
         "天气数据暂不可用", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
-    lv_obj_align(ui->screensaver_weather_label, LV_ALIGN_CENTER, 0, 54);
+    lv_obj_add_flag(ui->screensaver_weather_label, LV_OBJ_FLAG_HIDDEN);
 
     label = smart_home_lvgl_label_create(screen, "轻触进入首页",
                                          SMART_HOME_UI_COLOR_PRIMARY_DARK, 14);

@@ -20,7 +20,8 @@ static int tab_for_screen(const smart_home_lvgl_t *ui, const lv_obj_t *screen)
 {
     if (!ui || !screen) return SMART_HOME_TAB_HOME;
     if (screen == ui->screen_chat) return SMART_HOME_TAB_CHAT;
-    if (screen == ui->screen_settings || screen == ui->screen_more ||
+    if (screen == ui->screen_settings || screen == ui->screen_settings_v9 ||
+        screen == ui->screen_more ||
         screen == ui->screen_network
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
         || screen == ui->screen_miloco
@@ -45,7 +46,10 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
     switch (tab) {
     case SMART_HOME_TAB_HOME:     screen = ui->screen_home; break;
     case SMART_HOME_TAB_CHAT:     screen = ui->screen_chat; break;
-    case SMART_HOME_TAB_SETTINGS: screen = ui->screen_settings; break;
+    case SMART_HOME_TAB_SETTINGS:
+        screen = ui->screen_settings_v9 ? ui->screen_settings_v9 :
+                                          ui->screen_settings;
+        break;
     case SMART_HOME_TAB_DEVICES:  screen = ui->screen_panel; break;
     case SMART_HOME_TAB_SECURITY: screen = ui->screen_security; break;
     case SMART_HOME_TAB_MORE:     screen = ui->screen_more; break;

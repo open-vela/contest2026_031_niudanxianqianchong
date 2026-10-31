@@ -61,6 +61,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl_pages.c
       src/ui/lvgl/smart_home_lvgl_screensaver.c
       src/ui/lvgl/smart_home_lvgl_settings.c
+      src/ui/lvgl/smart_home_lvgl_settings_v9.c
       src/ui/lvgl/smart_home_lvgl_style.c
       src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
     )
@@ -167,6 +168,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl_pages.c
       src/ui/lvgl/smart_home_lvgl_screensaver.c
       src/ui/lvgl/smart_home_lvgl_settings.c
+      src/ui/lvgl/smart_home_lvgl_settings_v9.c
       src/ui/lvgl/smart_home_lvgl_style.c
       src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
       ${SMART_HOME_GENERATED_ICON_SRCS}

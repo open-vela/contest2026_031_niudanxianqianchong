@@ -106,6 +106,7 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_build_tools_screen(ui);
     smart_home_lvgl_build_mcp_screen(ui);
     smart_home_lvgl_build_node_screen(ui);
+    smart_home_lvgl_build_settings_screen_v9(ui);
 
 #ifdef CONFIG_SMART_HOME_KWS
     /* 语音会话联动：KWS 常驻监听（kws.json enabled 时）+
@@ -208,6 +209,9 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
     }
     if (ui->screen_settings) {
         lv_obj_del(ui->screen_settings);
+    }
+    if (ui->screen_settings_v9) {
+        lv_obj_del(ui->screen_settings_v9);
     }
     pthread_mutex_destroy(&ui->pending_mutex);
     smart_home_bulk_free(ui->network_worker_stack_alloc);

@@ -6,11 +6,11 @@
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
 { (void)area; (void)data; lv_display_flush_ready(display); }
-static void capture_to(smart_home_lvgl_t *ui, const char *env)
+static void capture_screen(lv_obj_t *screen, const char *env)
 {
     const char *path = getenv(env);
-    if (!path) return;
-    lv_screen_load(ui->screen_home);
+    if (!path || !screen) return;
+    lv_screen_load(screen);
     lv_refr_now(NULL);
     FILE *file = fopen(path, "wb");
     assert(file);
@@ -22,6 +22,11 @@ static void capture_to(smart_home_lvgl_t *ui, const char *env)
         fwrite(rgb, 1, 3, file);
     }
     fclose(file);
+}
+
+static void capture_to(smart_home_lvgl_t *ui, const char *env)
+{
+    capture_screen(ui->screen_home, env);
 }
 
 static void capture_home(smart_home_lvgl_t *ui)
@@ -239,6 +244,16 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
     assert(smart_home_lvgl_v9_select_room(0) == 6);
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
+
+    smart_home_lvgl_build_settings_screen_v9(ui);
+    assert(ui->screen_settings_v9 != NULL);
+    assert(smart_home_lvgl_v9_settings_category_count() == 6);
+    assert(smart_home_lvgl_v9_settings_select_category(2) == 2);
+    assert(smart_home_lvgl_v9_settings_select_category(99) == -1);
+    capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
+    lv_obj_delete(ui->screen_settings_v9);
+    ui->screen_settings_v9 = NULL;
+
     lv_timer_delete(ui->home_time_timer);
     ui->home_time_timer = NULL;
     lv_obj_delete(ui->screen_home);

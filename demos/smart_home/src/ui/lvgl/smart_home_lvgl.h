@@ -83,6 +83,7 @@ typedef struct {
     lv_obj_t *screen_network;
     lv_obj_t *screen_chat;
     lv_obj_t *screen_settings;
+    lv_obj_t *screen_settings_v9;
 
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
     /* Security-camera preview. The RGB565 image memory belongs to the UI;
@@ -264,6 +265,8 @@ typedef struct {
     lv_obj_t *screensaver_time_label;
     lv_obj_t *screensaver_date_label;
     lv_obj_t *screensaver_weather_label;
+    lv_obj_t *screensaver_temp_label;
+    lv_obj_t *screensaver_condition_label;
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     lv_timer_t *miloco_timer;
     uint32_t miloco_revision; /* Last snapshot rendered on the device page. */

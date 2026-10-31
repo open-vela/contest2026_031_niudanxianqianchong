@@ -110,6 +110,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl_pages.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_screensaver.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_settings.c
+      src/ui/lvgl/smart_home_lvgl_settings_v9.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_style.c
     CSRCS   += src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
     CSRCS   += $(wildcard src/ui/lvgl/icons/generated/*.c)

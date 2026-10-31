@@ -639,6 +639,11 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                                       "天气待获取");
                 if (ui->screensaver_weather_label)
                     lv_label_set_text(ui->screensaver_weather_label, "天气数据暂不可用");
+                if (ui->screensaver_temp_label)
+                    lv_label_set_text(ui->screensaver_temp_label, "--°");
+                if (ui->screensaver_condition_label)
+                    lv_label_set_text(ui->screensaver_condition_label,
+                                      "天气待获取");
             }
         }
         if (ui->home_status_label) {
