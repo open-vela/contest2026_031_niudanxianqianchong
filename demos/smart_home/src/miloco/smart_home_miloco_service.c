@@ -35,10 +35,12 @@
 #include <time.h>
 #include <unistd.h>
 
-/* 24 KiB：HTTP 路径（getaddrinfo + 非阻塞 connect + 收包解析）实测
- * 栈深，8 KiB 时溢出会踩坏相邻 PSRAM，症状延迟到后续堆操作（cJSON）
- * 才爆——分段日志定位的教训，见开发日志。 */
-#define MILOCO_WORKER_STACK_SIZE   24576u
+/* 48 KiB：HTTP 路径（getaddrinfo + 非阻塞 connect + 收包解析 + 17KB
+ * spec 的 cJSON 整树解析）的栈深余量。历史教训是 8 KiB 时溢出会踩坏
+ * 相邻 PSRAM，症状延迟到后续堆操作（cJSON）才爆；24 KiB 在摄像机
+ * spec 解析路径上仍出现过溢出，故提到 48 KiB。栈走 PSRAM bulk 堆，
+ * 增量 24 KiB 对 32 MB PSRAM 无压力。 */
+#define MILOCO_WORKER_STACK_SIZE   49152u
 #define MILOCO_CONTROL_QUEUE_DEPTH 8
 /* 摄像机等复杂设备的 spec 达 17KB+（实测 17426B），16KB 缓冲会
  * 截断导致解析失败；32KB 走 PSRAM bulk 堆无压力。 */
@@ -1257,6 +1259,29 @@ int smart_home_miloco_start(smart_home_miloco_t **service_out,
         ret = pthread_attr_setstack(&attr, service->worker_stack,
                                     service->worker_stack_bytes);
     }
+#ifdef CONFIG_SMP
+    if (ret == 0) {
+        cpu_set_t cpuset;
+
+        /* 绑 CPU1：LVGL 主循环、DSI 扫描输出与触摸采样都在 CPU0，而米家
+         * 轮询每 5 秒要走 DNS + TCP + TLS 收包，都是阻塞调用。放到 CPU0
+         * 会和 UI 抢同一个核，表现为点击要等（主循环 usleep 到期后还要
+         * 重新竞争 CPU，被网络线程占住就多等一个调度周期）。
+         * 摄像头 worker 绑 CPU0 是因为帧缓冲要与 DSI 同核做 cache sync，
+         * 米家这条链路没有跨核共享的 DMA 缓冲，绑到空闲的 CPU1 更合适。 */
+
+        CPU_ZERO(&cpuset);
+        CPU_SET(1, &cpuset);
+        ret = pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+        if (ret != 0) {
+            /* 绑核失败不阻塞服务：退回继承父线程亲和性（CPU0）。 */
+            syslog(LOG_WARNING,
+                   "[milo] start: affinity set failed ret=%d, using default\n",
+                   ret);
+            ret = 0;
+        }
+    }
+#endif
     syslog(LOG_INFO, "[milo] start: attr ret=%d, creating thread\n", ret);
     if (ret == 0) {
         ret = pthread_create(&service->worker, &attr, miloco_worker, service);
