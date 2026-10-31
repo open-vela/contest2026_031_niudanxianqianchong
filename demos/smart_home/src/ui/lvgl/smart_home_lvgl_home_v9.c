@@ -32,11 +32,12 @@
 #define V9_CARD_W       176
 #define V9_CARD_H       244
 #define V9_CARD_GAP     16
-/* 右上角天气图标：96px 为 32px 源图的 3 倍整数放大，边缘不会出现
- * 非整数缩放造成的宽窄不均。y 取 68 使图标与左侧 50px 时间在视觉上居中。
+/* 右上角天气图标：128px 为 32px 源图的 4 倍整数放大，边缘不会出现
+ * 非整数缩放造成的宽窄不均。y 取 56 使图标顶部与左侧日期行对齐，
+ * 底部落在房间栏之上，不与卡片区重叠。
  */
-#define V9_WEATHER_ICON_PX 96
-#define V9_WEATHER_ICON_Y  68
+#define V9_WEATHER_ICON_PX 128
+#define V9_WEATHER_ICON_Y  58
 #define V9_VIEW_X       24
 #define V9_VIEW_Y       260
 #define V9_VIEW_W       976
@@ -962,11 +963,13 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_center(icon);
 
-    /* 演示数据标签移到图标正下方居中对齐。 */
+    /* 演示数据标签：与图标同宽居中，紧随图标下方（不压到房间栏）。 */
     label = smart_home_lvgl_label_create(screen, "演示数据",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
-    lv_obj_set_pos(label, 1024 - 24 - 56, V9_WEATHER_ICON_Y +
-                                        V9_WEATHER_ICON_PX + 8);
+    lv_obj_set_pos(label, 1024 - 24 - V9_WEATHER_ICON_PX,
+                   V9_WEATHER_ICON_Y + V9_WEATHER_ICON_PX);
+    lv_obj_set_width(label, V9_WEATHER_ICON_PX);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     g_v9.source_label = label;
 
     g_v9.room_strip = lv_obj_create(screen);

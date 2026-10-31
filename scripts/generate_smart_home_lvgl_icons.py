@@ -32,7 +32,7 @@ SMALL_SIZE = 20
 LARGE_SIZE = 48
 # Home weather badge uses a dedicated 64 px asset so the glyph is rendered
 # natively instead of being upscaled from 32 px.
-WEATHER_SIZE = 96
+WEATHER_SIZE = 128
 
 # Brand artwork already includes its own background and transparent corners.
 COLOR_ICONS = {"openvela": 36}
