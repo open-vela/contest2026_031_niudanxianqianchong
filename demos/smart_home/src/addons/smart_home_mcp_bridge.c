@@ -33,7 +33,9 @@
 #include "cagent_addons/remote_tool.h"
 
 /* 复用 cAGENT 的 mbedTLS TLS 连接封装（ov_tls_connect/read/write/free） */
-#include "runtime_openvela.h"
+#include <agent.h>
+#include <agent_openvela_tls.h>
+#include <netutils/webclient.h>
 
 #ifndef CONFIG_SMART_HOME_MCP_BRIDGE_CONFIG_PATH
 #ifdef CONFIG_SMART_HOME_MCP_PROBE_CONFIG_PATH
@@ -526,11 +528,36 @@ static int set_nonblocking(int fd)
 static int connect_socket(const char *host, uint16_t port, uint64_t deadline_ms);
 
 typedef struct {
-    int fd;             /* 底层 socket（TLS 时为握手后的 fd） */
-    ov_tls_ctx_t *tls;  /* NULL = 明文 */
+    int fd;                                /* 明文 socket；TLS 时无 fd */
+    struct webclient_tls_connection *tls;  /* NULL = 明文 */
 } smh_conn_t;
 
-/* 把绝对 deadline 转为相对超时（毫秒，ov_tls_read/write 用） */
+/* cAGENT V2 不再导出 ov_tls_*，改用它的 webclient TLS ops 适配层
+ * （agent_port_openvela_tls_*）。ops 表是静态的，状态由 ctx 承载。
+ */
+static agent_port_openvela_tls_t g_mcp_tls;
+static bool g_mcp_tls_ready;
+
+static int smh_tls_ensure(void)
+{
+    agent_port_openvela_tls_config_t config;
+
+    if (g_mcp_tls_ready) {
+        return CADDONS_OK;
+    }
+    memset(&config, 0, sizeof(config));
+    /* 与 V1 行为一致：校验证书链但只记录结果（AGENT_OPENVELA_TLS_VERIFY_OPTIONAL）。 */
+    config.verify = AGENT_OPENVELA_TLS_VERIFY_OPTIONAL;
+    config.io_timeout_ms = 30000u;
+    config.write_chunk_bytes = 1024u;
+    if (agent_port_openvela_tls_init(&g_mcp_tls, &config) != AGENT_OK) {
+        return CADDONS_ERR_INTERNAL;
+    }
+    g_mcp_tls_ready = true;
+    return CADDONS_OK;
+}
+
+/* 把绝对 deadline 转为相对超时（毫秒），0 表示未设 deadline */
 static uint32_t smh_timeout_ms(uint64_t deadline_ms)
 {
     uint64_t now = monotonic_ms();
@@ -567,21 +594,24 @@ static int smh_conn_open(smh_conn_t *conn,
         return conn->fd >= 0 ? CADDONS_OK : CADDONS_ERR_NETWORK;
     }
 
-    conn->tls = ov_tls_create();
-    if (!conn->tls) {
-        return CADDONS_ERR_NOMEM;
+    rc = smh_tls_ensure();
+    if (rc != CADDONS_OK) {
+        return rc;
     }
     snprintf(port_text, sizeof(port_text), "%u", (unsigned int)request->port);
-    rc = ov_tls_connect(conn->tls, request->host, port_text,
-                        smh_timeout_ms(deadline_ms));
-    if (rc != AGENT_OK) {
-        ov_tls_ctx_free(conn->tls);
-        free(conn->tls);
-        conn->tls = NULL;
-        return rc == AGENT_ERROR_TIMEOUT ? CADDONS_ERR_TIMEOUT :
-                                           CADDONS_ERR_NETWORK;
+    {
+        uint32_t timeout = smh_timeout_ms(deadline_ms);
+        unsigned int timeout_sec = (unsigned int)((timeout + 999u) / 1000u);
+
+        rc = g_mcp_tls.ops->connect(&g_mcp_tls, request->host, port_text,
+                                    timeout_sec ? timeout_sec : 1u,
+                                    &conn->tls);
     }
-    conn->fd = ov_tls_get_fd(conn->tls);
+    if (rc != 0 || !conn->tls) {
+        conn->tls = NULL;
+        return rc == -ETIMEDOUT ? CADDONS_ERR_TIMEOUT : CADDONS_ERR_NETWORK;
+    }
+    conn->fd = -1;
     return CADDONS_OK;
 }
 
@@ -589,10 +619,10 @@ static int smh_conn_open(smh_conn_t *conn,
 static ssize_t smh_conn_read_once(smh_conn_t *conn, void *buffer, size_t length,
                                   uint64_t deadline_ms)
 {
-    if (conn->tls) {
-        uint32_t timeout = smh_timeout_ms(deadline_ms);
+    (void)deadline_ms;
 
-        return ov_tls_read(conn->tls, buffer, length, timeout);
+    if (conn->tls) {
+        return g_mcp_tls.ops->recv(&g_mcp_tls, conn->tls, buffer, length);
     }
     return recv(conn->fd, buffer, length, 0);
 }
@@ -601,10 +631,10 @@ static ssize_t smh_conn_read_once(smh_conn_t *conn, void *buffer, size_t length,
 static ssize_t smh_conn_write_once(smh_conn_t *conn, const void *buffer,
                                    size_t length, uint64_t deadline_ms)
 {
-    if (conn->tls) {
-        uint32_t timeout = smh_timeout_ms(deadline_ms);
+    (void)deadline_ms;
 
-        return ov_tls_write(conn->tls, buffer, length, timeout);
+    if (conn->tls) {
+        return g_mcp_tls.ops->send(&g_mcp_tls, conn->tls, buffer, length);
     }
     return send(conn->fd, buffer, length, MSG_NOSIGNAL);
 }
@@ -612,11 +642,11 @@ static ssize_t smh_conn_write_once(smh_conn_t *conn, const void *buffer,
 static void smh_conn_close(smh_conn_t *conn)
 {
     if (conn->tls) {
-        ov_tls_ctx_free(conn->tls);
-        free(conn->tls);
+        if (g_mcp_tls_ready && g_mcp_tls.ops) {
+            g_mcp_tls.ops->close(&g_mcp_tls, conn->tls);
+        }
         conn->tls = NULL;
-        /* ov_tls_ctx_free() calls mbedtls_net_free(), which owns and closes
-         * the TLS socket. Do not close the stale descriptor a second time. */
+        /* TLS ops 拥有并关闭底层 socket，不要再关一次描述符。 */
         conn->fd = -1;
     }
     if (conn->fd >= 0) {

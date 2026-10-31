@@ -23,6 +23,12 @@ void smart_home_bulk_free(void *pointer);
 void smart_home_bulk_diag(const char *point);
 void smart_home_memory_log_region(const char *label, const void *pointer);
 
+/* cAGENT V1 的 runtime 提供过 ov_mem_region_log；V2 起该接口随
+ * runtime_openvela.h 一并移除，这里映射到本工程自带的区域诊断，
+ * 保持各 addon 的调用点不变。 */
+#define ov_mem_region_log(label, pointer) \
+    smart_home_memory_log_region((label), (pointer))
+
 #ifdef __cplusplus
 }
 #endif

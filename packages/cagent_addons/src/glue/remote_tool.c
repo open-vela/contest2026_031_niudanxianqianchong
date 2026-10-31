@@ -34,6 +34,9 @@ struct caddons_remote_catalog {
     pthread_mutex_t mutex;
     bool active_execution;
     char result_json[CAGENT_ADDONS_MAX_RESULT_SIZE + 1];
+    /* agent_tool_context_t 的参数是非 NUL 结尾视图，后端执行函数需要 C 字符串；
+     * 执行已被 active_execution 串行化，因此复用一个缓冲即可。 */
+    char args_json[CAGENT_ADDONS_MAX_SCHEMA_SIZE + 1];
     remote_entry_t entries[CAGENT_ADDONS_MAX_REMOTE_TOOLS];
 };
 
@@ -142,11 +145,11 @@ static remote_entry_t *find_mutation(caddons_remote_catalog_t *catalog,
 
 static uint32_t tool_flags(caddons_tool_risk_t risk)
 {
-    uint32_t flags = AGENT_TOOL_FLAG_LLM_VISIBLE;
-    if (risk == CADDONS_TOOL_RISK_READ_ONLY) flags |= AGENT_TOOL_FLAG_READ_ONLY;
-    if (risk == CADDONS_TOOL_RISK_SIDE_EFFECT) flags |= AGENT_TOOL_FLAG_SIDE_EFFECT;
+    uint32_t flags = 0;
+    if (risk == CADDONS_TOOL_RISK_READ_ONLY) flags |= AGENT_TOOL_READ_ONLY;
+    if (risk == CADDONS_TOOL_RISK_SIDE_EFFECT) flags |= AGENT_TOOL_SIDE_EFFECT;
     if (risk == CADDONS_TOOL_RISK_DANGEROUS)
-        flags |= AGENT_TOOL_FLAG_SIDE_EFFECT | AGENT_TOOL_FLAG_REQUIRES_CONFIRM;
+        flags |= AGENT_TOOL_SIDE_EFFECT | AGENT_TOOL_REQUIRES_CONFIRM;
     return flags;
 }
 
@@ -198,9 +201,9 @@ static int format_success(caddons_remote_catalog_t *catalog,
     return CADDONS_OK;
 }
 
-static int remote_execute(const agent_tool_call_t *call,
-                          agent_tool_result_t *result,
-                          void *user_data)
+static agent_error_t remote_execute(void *user_data,
+                                          const agent_tool_context_t *context,
+                                          const agent_text_sink_t *output)
 {
     remote_entry_t *entry = (remote_entry_t *)user_data;
     caddons_remote_execute_fn execute;
@@ -210,55 +213,62 @@ static int remote_execute(const agent_tool_call_t *call,
     uint32_t timeout_ms;
     char *backend_result;
     size_t backend_result_size;
+    size_t args_size;
+    agent_error_t sink_rc;
     int rc;
     caddons_remote_catalog_t *catalog;
 
+    if (!entry || !output || !output->write) return AGENT_ERROR_INVALID;
     catalog = entry->owner;
+
+    args_size = context ? context->call.arguments_json.size : 0;
+    if (args_size >= sizeof(catalog->args_json)) return AGENT_ERROR_LIMIT;
+
     pthread_mutex_lock(&catalog->mutex);
     if (!entry->occupied || entry->state != CADDONS_REMOTE_REGISTERED
         || !entry->online || !entry->enabled) {
         format_error(catalog, entry, CADDONS_ERR_OFFLINE);
-        result->status = AGENT_OK;
-        result->content_json = catalog->result_json;
-        result->error_message = NULL;
-        pthread_mutex_unlock(&catalog->mutex);
-        return AGENT_OK;
     }
-    if (catalog->active_execution || entry->inflight != 0) {
+    else if (catalog->active_execution || entry->inflight != 0) {
         pthread_mutex_unlock(&catalog->mutex);
-        result->status = AGENT_ERROR_BUSY;
-        result->content_json = NULL;
-        result->error_message = "remote catalog is busy";
         return AGENT_ERROR_BUSY;
     }
-    catalog->active_execution = true;
-    entry->inflight++;
-    execute = entry->descriptor.execute;
-    backend_context = entry->descriptor.backend_context;
-    generation = entry->descriptor.connection_gen;
-    timeout_ms = entry->descriptor.timeout_ms;
-    backend_result = catalog->result_json + RESULT_PREFIX_RESERVE;
-    backend_result_size = sizeof(catalog->result_json) - RESULT_PREFIX_RESERVE;
-    backend_result[0] = '\0';
-    backend_result[backend_result_size - 1] = '\0';
-    pthread_mutex_unlock(&catalog->mutex);
+    else {
+        if (args_size > 0) memcpy(catalog->args_json, context->call.arguments_json.data, args_size);
+        else { catalog->args_json[0] = '{'; catalog->args_json[1] = '}'; args_size = 2; }
+        catalog->args_json[args_size] = '\0';
 
-    deadline = monotonic_ms() + timeout_ms;
-    rc = execute(backend_context, entry->descriptor.route_id, generation,
-                 call && call->arguments_json ? call->arguments_json : "{}",
-                 deadline, backend_result, backend_result_size);
+        catalog->active_execution = true;
+        entry->inflight++;
+        execute = entry->descriptor.execute;
+        backend_context = entry->descriptor.backend_context;
+        generation = entry->descriptor.connection_gen;
+        timeout_ms = entry->descriptor.timeout_ms;
+        backend_result = catalog->result_json + RESULT_PREFIX_RESERVE;
+        backend_result_size = sizeof(catalog->result_json) - RESULT_PREFIX_RESERVE;
+        backend_result[0] = '\0';
+        backend_result[backend_result_size - 1] = '\0';
+        pthread_mutex_unlock(&catalog->mutex);
 
-    pthread_mutex_lock(&catalog->mutex);
-    backend_result[backend_result_size - 1] = '\0';
-    if (rc == CADDONS_OK) rc = format_success(catalog, entry);
-    else format_error(catalog, entry, rc);
-    entry->inflight--;
-    catalog->active_execution = false;
-    result->status = AGENT_OK;
-    result->content_json = catalog->result_json;
-    result->error_message = NULL;
+        deadline = monotonic_ms() + timeout_ms;
+        if (context && context->deadline_ms != 0 && context->deadline_ms < deadline)
+            deadline = context->deadline_ms;
+        rc = execute(backend_context, entry->descriptor.route_id, generation,
+                     catalog->args_json, deadline, backend_result, backend_result_size);
+
+        pthread_mutex_lock(&catalog->mutex);
+        backend_result[backend_result_size - 1] = '\0';
+        if (rc == CADDONS_OK) rc = format_success(catalog, entry);
+        else format_error(catalog, entry, rc);
+        entry->inflight--;
+        catalog->active_execution = false;
+    }
+
+    sink_rc = output->write(output->context,
+                            agent_string_view(catalog->result_json,
+                                              strlen(catalog->result_json)));
     pthread_mutex_unlock(&catalog->mutex);
-    return AGENT_OK;
+    return sink_rc == AGENT_OK ? AGENT_OK : sink_rc;
 }
 
 caddons_remote_catalog_t *caddons_remote_catalog_create(void)
@@ -438,14 +448,20 @@ int caddons_remote_catalog_apply_mutation(caddons_remote_catalog_t *catalog,
             return CADDONS_ERR_INVALID;
         }
         memset(&tool, 0, sizeof(tool));
-        tool.name = entry->descriptor.public_name;
-        tool.group_id = (uint16_t)entry->descriptor.origin;
-        tool.description = entry->descriptor.description;
-        tool.input_schema_json = entry->descriptor.input_schema_json;
+        tool.name = agent_string_view(entry->descriptor.public_name,
+                                      strlen(entry->descriptor.public_name));
+        tool.group = agent_string_view(origin_name(entry->descriptor.origin),
+                                       strlen(origin_name(entry->descriptor.origin)));
+        tool.description = agent_string_view(entry->descriptor.description,
+                                             strlen(entry->descriptor.description));
+        tool.input_schema_json =
+            agent_string_view(entry->descriptor.input_schema_json,
+                              strlen(entry->descriptor.input_schema_json));
         tool.execute = remote_execute;
         tool.user_data = entry;
         tool.flags = tool_flags(entry->descriptor.risk);
-        tool.timeout_ms = entry->descriptor.timeout_ms;
+        /* V2 的 agent_tool_t 不再携带 timeout；deadline 由执行上下文与
+         * descriptor.timeout_ms 在 remote_execute 内合成。 */
         rc = agent_register_tool(agent, &tool);
         if (rc == AGENT_OK) entry->state = CADDONS_REMOTE_REGISTERED;
         pthread_mutex_unlock(&catalog->mutex);
@@ -457,8 +473,10 @@ int caddons_remote_catalog_apply_mutation(caddons_remote_catalog_t *catalog,
         pthread_mutex_unlock(&catalog->mutex);
         return CADDONS_ERR_INVALID;
     }
-    rc = agent_unregister_tool(agent, entry->descriptor.public_name);
-    if (rc == AGENT_OK || rc == AGENT_ERROR_NOTFOUND) {
+    rc = agent_unregister_tool(agent,
+                               agent_string_view(entry->descriptor.public_name,
+                                                 strlen(entry->descriptor.public_name)));
+    if (rc == AGENT_OK || rc == AGENT_ERROR_NOT_FOUND) {
         if (entry->replacement) {
             caddons_remote_descriptor_t replacement = *entry->replacement;
             free(entry->replacement);
@@ -477,8 +495,8 @@ int caddons_remote_catalog_apply_mutation(caddons_remote_catalog_t *catalog,
         entry->state = CADDONS_REMOTE_DISABLE_QUEUED;
     }
     pthread_mutex_unlock(&catalog->mutex);
-    return rc == AGENT_OK || rc == AGENT_ERROR_NOTFOUND ? CADDONS_OK
-                                                        : CADDONS_ERR_INTERNAL;
+    return rc == AGENT_OK || rc == AGENT_ERROR_NOT_FOUND ? CADDONS_OK
+                                                         : CADDONS_ERR_INTERNAL;
 }
 
 size_t caddons_remote_catalog_list(const caddons_remote_catalog_t *catalog,
@@ -520,7 +538,8 @@ int caddons_remote_catalog_set_enabled(caddons_remote_catalog_t *catalog,
         pthread_mutex_unlock(&catalog->mutex);
         return CADDONS_ERR_NOT_FOUND;
     }
-    rc = agent_tool_set_enabled(agent, public_name, enabled ? 1 : 0);
+    rc = agent_tool_set_enabled(agent, agent_string_view(public_name, strlen(public_name)),
+                                enabled);
     if (rc == AGENT_OK) entry->enabled = enabled;
     pthread_mutex_unlock(&catalog->mutex);
     return rc == AGENT_OK ? CADDONS_OK : CADDONS_ERR_INTERNAL;
@@ -533,12 +552,13 @@ int caddons_error_to_agent(int error)
     case CADDONS_ERR_INVALID: return AGENT_ERROR_INVALID;
     case CADDONS_ERR_PARSE: return AGENT_ERROR_PARSE;
     case CADDONS_ERR_LIMIT: return AGENT_ERROR_LIMIT;
+    /* V2 没有独立的网络错误码，链路失败归入 IO。 */
     case CADDONS_ERR_NETWORK:
-    case CADDONS_ERR_OFFLINE: return AGENT_ERROR_NETWORK;
+    case CADDONS_ERR_OFFLINE: return AGENT_ERROR_IO;
     case CADDONS_ERR_TIMEOUT: return AGENT_ERROR_TIMEOUT;
     case CADDONS_ERR_DENIED: return AGENT_ERROR_POLICY_DENIED;
     case CADDONS_ERR_BUSY: return AGENT_ERROR_BUSY;
-    case CADDONS_ERR_NOT_FOUND: return AGENT_ERROR_NOTFOUND;
+    case CADDONS_ERR_NOT_FOUND: return AGENT_ERROR_NOT_FOUND;
     case CADDONS_ERR_NOMEM: return AGENT_ERROR_NOMEM;
     default: return AGENT_ERROR;
     }

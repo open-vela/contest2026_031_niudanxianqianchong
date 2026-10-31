@@ -23,7 +23,7 @@
 #include "cagent_addons/node_gateway.h"
 #include "cagent_addons/remote_tool.h"
 #include "cagent_addons/ws_transport.h"
-#include <cagent/runtime_openvela.h>
+#include <agent.h>
 
 #define SMART_HOME_NODE_SECRETS_VERSION 1
 #define SMART_HOME_NODE_SECRETS_MAX_SIZE 2048u
@@ -363,6 +363,14 @@ static void destroy_gateway(smart_home_node_gateway_t *gateway)
     }
     secure_clear(gateway, sizeof(*gateway));
     free(gateway);
+}
+
+int smart_home_node_gateway_start(smart_home_node_gateway_t **gateway_out,
+                                  agent_t *agent,
+                                  pthread_mutex_t *agent_mutex)
+{
+    return smart_home_node_gateway_start_with_port(
+        gateway_out, agent, agent_mutex, CONFIG_SMART_HOME_NODE_GATEWAY_PORT);
 }
 
 int smart_home_node_gateway_start_with_port(
