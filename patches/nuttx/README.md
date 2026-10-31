@@ -61,3 +61,17 @@ P4 SMP 由本项目实现启核与 IPI；其他配置继续使用原有通用实
 git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0012-espressif-riscv-toolchain.patch
 git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0012-espressif-riscv-toolchain.patch
 ```
+
+13. `0013-usrsock-guard-net-only-inline.patch`：把 `usrsock_sem_timedwait()`
+    包进 `#ifdef CONFIG_NET`。该 inline 函数调用 `net_sem_timedwait2()`，
+    而后者在 `include/nuttx/net/net.h` 里位于 `#ifdef CONFIG_NET` 之内。
+    `drivers/drivers_initialize.c` 通过 `usrsock_rpmsg.h` 无条件引入本头文件，
+    在 `CONFIG_NET=n` 的配置（如 `nsh`）下 GCC 14 报
+    `implicit declaration of function net_sem_timedwait2` 错误（GCC 13 只是警告）。
+    其余三个 inline（`usrsock_lock` / `usrsock_unlock` / `usrsock_mutex_timedlock`）
+    只依赖 `nxrmutex_*` 与 `nxmutex_*`，保持无条件。
+
+```sh
+git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
+git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
+```
