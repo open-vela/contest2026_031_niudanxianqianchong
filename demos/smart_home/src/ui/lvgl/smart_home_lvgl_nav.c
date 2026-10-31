@@ -26,7 +26,6 @@ static int tab_for_screen(const smart_home_lvgl_t *ui, const lv_obj_t *screen)
         screen == ui->screen_network
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
         || screen == ui->screen_miloco
-        || screen == ui->screen_miloco_bind
 #endif
     ) {
         return SMART_HOME_TAB_SETTINGS;

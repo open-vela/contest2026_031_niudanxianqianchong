@@ -16,6 +16,7 @@ static int local_state_enabled;
 static void capture_v9_device_modals(smart_home_lvgl_t *ui);
 static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
 static void capture_v9_model_menu(smart_home_lvgl_t *ui);
+static void capture_v9_mi_qr(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
 
@@ -123,6 +124,54 @@ bool smart_home_miloco_get_weather(const smart_home_miloco_t *service,
 { (void)service; *out = weather; return weather.valid; }
 bool smart_home_miloco_bound(const smart_home_miloco_t *service)
 { (void)service; return true; }
+/* 米家连接配置弹窗的桩：测试只验证 UI 装配，不落盘。 */
+bool smart_home_miloco_config_valid(const smart_home_miloco_config_t *config)
+{ return config && config->host[0] && config->port != 0; }
+bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
+                                  smart_home_miloco_config_t *config)
+{
+    (void)service;
+    if (!config) return false;
+    memset(config, 0, sizeof(*config));
+    snprintf(config->host, sizeof(config->host), "192.168.1.20");
+    config->port = 1810;
+    return true;
+}
+int smart_home_miloco_request_save(smart_home_miloco_t *service,
+                                   const smart_home_miloco_config_t *config)
+{ (void)service; (void)config; return AGENT_OK; }
+int smart_home_miloco_reconfigure(smart_home_miloco_t *service,
+                                  const smart_home_miloco_config_t *config)
+{ (void)service; (void)config; return AGENT_OK; }
+/* 扫码弹窗依赖的两项：secrets 回落与 QR 编码。测试只验证装配，
+ * QR 用一个固定的小矩阵代替，避免链接第三方 qrcodegen。 */
+int smart_home_secrets_get_miloco(char *host, size_t host_size,
+                                  uint16_t *port, char *token,
+                                  size_t token_size)
+{
+    snprintf(host, host_size, "192.168.1.20");
+    if (port) *port = 1810;
+    if (token && token_size) token[0] = '\0';
+    return AGENT_OK;
+}
+int smart_home_miloco_qr_encode(const char *text, uint8_t *matrix,
+                                int *modules)
+{
+    int n = 21;
+    int i;
+
+    (void)text;
+    if (!matrix || !modules) return -1;
+    memset(matrix, 0, (size_t)n * (size_t)n);
+    for (i = 0; i < n; i++) {
+        matrix[i] = 1;                    /* 顶边 */
+        matrix[(size_t)(n - 1) * n + i] = 1;  /* 底边 */
+        matrix[(size_t)i * n] = 1;            /* 左边 */
+        matrix[(size_t)i * n + (n - 1)] = 1;  /* 右边 */
+    }
+    *modules = n;
+    return 0;
+}
 void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui) { (void)ui; }
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
 int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
@@ -310,6 +359,7 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_settings_select_category(0) == 0);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     capture_v9_settings_categories(ui);
+    capture_v9_mi_qr(ui);
     capture_v9_model_menu(ui);
     smart_home_lvgl_build_chat_screen(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
@@ -1015,6 +1065,23 @@ static void capture_v9_model_menu(smart_home_lvgl_t *ui)
     if (lv_dropdown_get_list(dropdown)) {
         lv_obj_move_to_index(lv_dropdown_get_list(dropdown), 0);
     }
+    lv_obj_update_layout(ui->screen_settings_v9);
+    (void)smart_home_lvgl_v9_settings_select_category(0);
+}
+/* 米家扫码弹窗截图（SMART_HOME_V9_MI_QR_CAPTURE），供与设计 34-mi-qr 比对。 */
+static void capture_v9_mi_qr(smart_home_lvgl_t *ui)
+{
+    const char *path = getenv("SMART_HOME_V9_MI_QR_CAPTURE");
+
+    if (!path || !ui || !ui->screen_settings_v9) return;
+    if (smart_home_lvgl_v9_settings_select_category(4) != 4) return;
+    lv_obj_update_layout(ui->screen_settings_v9);
+    lv_screen_load(ui->screen_settings_v9);
+    smart_home_lvgl_open_miloco_bind(ui);
+    lv_obj_update_layout(ui->screen_settings_v9);
+    lv_refr_now(NULL);
+    capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MI_QR_CAPTURE");
+    smart_home_lvgl_miloco_bind_close(ui);
     lv_obj_update_layout(ui->screen_settings_v9);
     (void)smart_home_lvgl_v9_settings_select_category(0);
 }

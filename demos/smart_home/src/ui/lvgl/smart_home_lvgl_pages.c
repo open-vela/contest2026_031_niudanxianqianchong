@@ -1008,12 +1008,10 @@ static void miloco_bind_entry_cb(lv_event_t *event)
 {
     smart_home_lvgl_t *ui = lv_event_get_user_data(event);
 
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui ||
-        !ui->screen_miloco_bind) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
         return;
     }
-    lv_scr_load_anim(ui->screen_miloco_bind, LV_SCR_LOAD_ANIM_MOVE_LEFT,
-                     180, 0, false);
+    smart_home_lvgl_open_miloco_bind(ui);
 }
 
 void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui)

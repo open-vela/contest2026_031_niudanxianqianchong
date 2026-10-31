@@ -280,8 +280,10 @@ typedef struct {
     lv_obj_t *miloco_sheet;
     lv_obj_t *miloco_sheet_feedback;
     char miloco_sheet_did[24];
-    lv_obj_t *screen_miloco_bind;
+    lv_obj_t *screen_miloco_bind;   /* 绑定弹窗的遮罩根对象，NULL = 未打开 */
     lv_obj_t *bind_status_label;
+    lv_obj_t *bind_head_label;
+    lv_obj_t *bind_check_button;
     lv_timer_t *bind_timer;
     lv_obj_t *screen_miloco;
     lv_obj_t *miloco_host_input;

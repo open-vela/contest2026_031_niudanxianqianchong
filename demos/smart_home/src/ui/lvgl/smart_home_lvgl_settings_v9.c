@@ -50,6 +50,12 @@ typedef struct {
     lv_obj_t *node_port;
     lv_obj_t *node_status;
 #endif
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    lv_obj_t *miloco_host;
+    lv_obj_t *miloco_port;
+    lv_obj_t *miloco_token;
+    lv_obj_t *miloco_modal_status;
+#endif
     lv_obj_t *model_dd;
     lv_obj_t *model_name;
     lv_obj_t *model_key;
@@ -875,6 +881,21 @@ static void services_stop_cb(lv_event_t *event)
     lv_event_stop_bubbling(event);
 }
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+static void miloco_config_open(smart_home_lvgl_t *ui);
+
+static void miloco_open_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
+        return;
+    }
+    services_modal_close();
+    miloco_config_open(ui);
+}
+#endif
+
 static void services_modal_open(smart_home_lvgl_t *ui)
 {
     lv_obj_t *mask;
@@ -937,7 +958,7 @@ static void services_modal_open(smart_home_lvgl_t *ui)
             ui && ui->screen_mcp ? ui->screen_mcp : NULL,
             ui && ui->screen_node ? ui->screen_node : NULL
         };
-        static const char *const captions[3] = { "打开米家", "打开 MCP", "打开 Node" };
+        static const char *const captions[3] = { "配置米家", "打开 MCP", "打开 Node" };
 
         for (int i = 0; i < 3; i++) {
             button = lv_button_create(panel);
@@ -948,8 +969,17 @@ static void services_modal_open(smart_home_lvgl_t *ui)
             lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
             lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
             smart_home_lvgl_press_feedback(button);
-            lv_obj_add_event_cb(button, route_cb, LV_EVENT_CLICKED,
-                                targets[i]);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+            if (i == 0) {
+                /* 米家改为弹出配置弹窗，不再跳旧整页。 */
+                lv_obj_add_event_cb(button, miloco_open_cb, LV_EVENT_CLICKED,
+                                    ui);
+            } else
+#endif
+            {
+                lv_obj_add_event_cb(button, route_cb, LV_EVENT_CLICKED,
+                                    targets[i]);
+            }
             button_label = smart_home_lvgl_label_create(
                 button, captions[i], SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
             lv_obj_center(button_label);
@@ -1019,7 +1049,9 @@ static void services_modal_cb(lv_event_t *event)
     }
 }
 
-#if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || defined(CONFIG_SMART_HOME_NODE_GATEWAY)
+#if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || \
+    defined(CONFIG_SMART_HOME_NODE_GATEWAY) || \
+    defined(CONFIG_SMART_HOME_MILOCO_BRIDGE)
 static void config_modal_close(void)
 {
     if (g_settings.config_modal) {
@@ -1081,6 +1113,122 @@ static lv_obj_t *config_modal_begin(const char *title)
 }
 #endif
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+/* 连接米家家庭服务器（v9 33-mi-config）。保存后由 worker 落盘并立即轮询，
+ * 本弹窗只负责采集地址/端口/令牌，扫码在下一步弹窗里完成。 */
+static void miloco_config_open(smart_home_lvgl_t *ui);
+static void miloco_save_cb_v9(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    smart_home_miloco_config_t config;
+    const char *port_text;
+    char *end;
+    long port;
+    int ret;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui ||
+        !ui->app || !ui->app->miloco) {
+        return;
+    }
+    memset(&config, 0, sizeof(config));
+    snprintf(config.host, sizeof(config.host), "%s",
+             lv_textarea_get_text(g_settings.miloco_host));
+    snprintf(config.token, sizeof(config.token), "%s",
+             lv_textarea_get_text(g_settings.miloco_token));
+    port_text = lv_textarea_get_text(g_settings.miloco_port);
+    port = strtol(port_text, &end, 10);
+    if (end == port_text || *end != '\0' || port < 1 || port > 65535) {
+        lv_label_set_text(g_settings.miloco_modal_status,
+                          "端口须为 1～65535 的整数");
+        return;
+    }
+    config.port = (uint16_t)port;
+    if (!smart_home_miloco_config_valid(&config)) {
+        lv_label_set_text(g_settings.miloco_modal_status, "请填写有效的服务器地址");
+        memset(&config, 0, sizeof(config));
+        return;
+    }
+    ret = smart_home_miloco_request_save(ui->app->miloco, &config);
+    memset(&config, 0, sizeof(config));
+    if (ret != AGENT_OK) {
+        lv_label_set_text(g_settings.miloco_modal_status, "保存失败，请重试");
+        return;
+    }
+    config_modal_close();
+    /* 连接配置已提交，直接进入扫码授权步骤。 */
+    smart_home_lvgl_open_miloco_bind(ui);
+}
+
+static void miloco_bind_step_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED && ui) {
+        config_modal_close();
+        smart_home_lvgl_open_miloco_bind(ui);
+    }
+}
+
+static void miloco_config_open(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *panel = config_modal_begin("连接米家网关");
+    lv_obj_t *button;
+    lv_obj_t *label;
+    smart_home_miloco_config_t current;
+    char port_text[8];
+
+    memset(&current, 0, sizeof(current));
+    current.port = SMART_HOME_MILOCO_DEFAULT_PORT;
+    if (ui && ui->app && ui->app->miloco) {
+        (void)smart_home_miloco_get_config(ui->app->miloco, &current);
+    }
+    snprintf(port_text, sizeof(port_text), "%u", (unsigned)current.port);
+
+    g_settings.miloco_host = model_input(panel, "家庭服务器地址", 0, 60, 480,
+                                         "192.168.1.20");
+    lv_textarea_set_text(g_settings.miloco_host, current.host);
+    g_settings.miloco_port = model_input(panel, "端口", 500, 60, 120, "1810");
+    lv_textarea_set_text(g_settings.miloco_port, port_text);
+    g_settings.miloco_token = model_input(
+        panel, "访问令牌（服务器未启用鉴权可留空）", 0, 140, 620, "token");
+    lv_textarea_set_password_mode(g_settings.miloco_token, true);
+    lv_textarea_set_text(g_settings.miloco_token, current.token);
+    memset(&current, 0, sizeof(current));
+
+    g_settings.miloco_modal_status = smart_home_lvgl_label_create(
+        panel, "配置会写入 secrets.json，重启后保留",
+        SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(g_settings.miloco_modal_status, 0, 216);
+
+    /* 次：仅扫码（地址已配置过时跳过填写）。 */
+    button = lv_button_create(panel);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 168, 40);
+    lv_obj_set_pos(button, 0, 300);
+    lv_obj_set_style_radius(button, 10, 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
+    smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, miloco_bind_step_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "直接扫码绑定",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+    lv_obj_center(label);
+
+    /* 主：保存并连接。 */
+    button = lv_button_create(panel);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 200, 40);
+    lv_obj_set_pos(button, 186, 300);
+    lv_obj_set_style_radius(button, 10, 0);
+    smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY_DARK);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, miloco_save_cb_v9, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "保存并扫码授权",
+                                         SMART_HOME_UI_COLOR_SURFACE, 14);
+    lv_obj_center(label);
+}
+#endif /* CONFIG_SMART_HOME_MILOCO_BRIDGE */
 #ifdef CONFIG_SMART_HOME_MCP_BRIDGE
 static void mcp_apply_cb(lv_event_t *event)
 {

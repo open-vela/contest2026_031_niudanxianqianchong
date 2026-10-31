@@ -481,10 +481,8 @@ static void home_action_cb(lv_event_t *event)
                                  180, 0, false);
                 break;
             }
-        } else if (!smart_home_miloco_bound(ui->app->miloco) &&
-                   ui->screen_miloco_bind) {
-            lv_scr_load_anim(ui->screen_miloco_bind,
-                             LV_SCR_LOAD_ANIM_MOVE_LEFT, 180, 0, false);
+        } else if (!smart_home_miloco_bound(ui->app->miloco)) {
+            smart_home_lvgl_open_miloco_bind(ui);
             break;
         }
         if (ui->panel_title) {

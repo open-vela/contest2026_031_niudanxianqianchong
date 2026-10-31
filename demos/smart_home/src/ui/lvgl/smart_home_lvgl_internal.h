@@ -124,7 +124,10 @@ void smart_home_lvgl_miloco_poll_set_enabled(smart_home_lvgl_t *ui,
 void smart_home_lvgl_miloco_sheet_refresh(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui);
-void smart_home_lvgl_build_miloco_bind_screen(smart_home_lvgl_t *ui);
+/* 扫码绑定改为弹窗，叠在当前页面之上；close 幂等。 */
+void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui);
+void smart_home_lvgl_miloco_bind_close(smart_home_lvgl_t *ui);
+int smart_home_lvgl_miloco_bind_is_open(const smart_home_lvgl_t *ui);
 
 /* 页面公共 helper（pages.c 定义，多页复用）。 */
 lv_obj_t *page_screen(smart_home_lvgl_t *ui);

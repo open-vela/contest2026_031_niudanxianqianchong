@@ -65,7 +65,7 @@ static const char *v9_perf_scene(smart_home_lvgl_t *ui)
     if (active == ui->screen_network) return "network";
     if (active == ui->screen_settings) return "settings-legacy";
     if (active == ui->screen_miloco) return "miloco";
-    if (active == ui->screen_miloco_bind) return "miloco-bind";
+    if (smart_home_lvgl_miloco_bind_is_open(ui)) return "miloco-bind";
     if (active == ui->screen_model) return "model";
     if (active == ui->screen_tools) return "tools";
     if (active == ui->screen_mcp) return "mcp";
@@ -118,9 +118,7 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_log_build_stage("miloco", "begin");
     smart_home_lvgl_build_miloco_screen(ui);
     smart_home_lvgl_log_build_stage("miloco", "done");
-    smart_home_lvgl_log_build_stage("miloco-bind", "begin");
-    smart_home_lvgl_build_miloco_bind_screen(ui);
-    smart_home_lvgl_log_build_stage("miloco-bind", "done");
+    /* 绑定页改为按需弹出，不再预建屏幕。 */
 #endif
 
     smart_home_lvgl_log_build_stage("chat", "begin");
