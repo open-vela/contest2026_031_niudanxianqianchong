@@ -21,6 +21,7 @@
 #endif
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
 #include "../camera/smart_home_camera_service.h"
+#include "../camera/smart_home_camera_control.h"
 #endif
 
 #include <stdio.h>
@@ -259,6 +260,9 @@ int main(int argc, char *argv[])
 #if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_KWS)
     /* 采集服务懒启动；退出时统一释放录音设备。 */
     voice_capture_deinit();
+#endif
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    (void)smart_home_camera_control_shutdown();
 #endif
     smart_home_agent_app_deinit(&app);
     return ret == AGENT_OK ? EXIT_SUCCESS : EXIT_FAILURE;

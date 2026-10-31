@@ -3,6 +3,7 @@
  */
 
 #include "smart_home_lvgl_internal.h"
+#include "smart_home_lvgl_camera_dialog.h"
 #include "../../smart_home_cpu_debug.h"
 #include "../../smart_home_memory.h"
 
@@ -104,9 +105,8 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_build_panel_screen(ui);
     smart_home_lvgl_log_build_stage("panel", "done");
 
-    smart_home_lvgl_log_build_stage("security", "begin");
-    smart_home_lvgl_build_security_screen(ui);
-    smart_home_lvgl_log_build_stage("security", "done");
+    /* V9 camera preview is an on-demand popup. Do not allocate the old
+     * security page and its second RGB565 preview buffer at startup. */
 
     /* 旧“更多”页在 V9 三栏导航下已无入口，不再急切构建；
      * smart_home_lvgl_build_more_screen 仍保留给 Host 回归与后续懒构建。 */
@@ -173,6 +173,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         return;
     }
 
+    smart_home_lvgl_camera_dialog_close();
     smart_home_lvgl_settings_v9_deinit(ui);
     if (ui->agent_worker_active) {
         pthread_join(ui->agent_worker, NULL);
@@ -194,7 +195,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         lv_timer_delete(ui->security_camera_timer);
         ui->security_camera_timer = NULL;
     }
-    smart_home_lvgl_security_camera_stop(ui);
+    if (ui->screen_security) smart_home_lvgl_security_camera_stop(ui);
     smart_home_bulk_free(ui->security_camera_buffer);
     ui->security_camera_buffer = NULL;
 #endif

@@ -1104,6 +1104,7 @@ static void test_v9_room_catalog(smart_home_lvgl_t *ui)
 {
     snapshot_count = 12;
     smart_home_device_init(&ui->app->device_state);
+    memset(ui->app->device_state.devices, 0, sizeof ui->app->device_state.devices);
     assert(!smart_home_room_add(&ui->app->device_state, "书房"));
     assert(!smart_home_device_assign_room(&ui->app->device_state, "milo:v9-light-0", "书房"));
     ui->app->device_service.state = &ui->app->device_state;

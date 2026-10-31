@@ -1,6 +1,7 @@
 /** SmartHome V9 three-item product navigation. */
 
 #include "smart_home_lvgl_internal.h"
+#include "smart_home_lvgl_camera_dialog.h"
 #include "images/smart_home_icons.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../../miloco/smart_home_miloco.h"
@@ -51,7 +52,18 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
                                           ui->screen_settings;
         break;
     case SMART_HOME_TAB_DEVICES:  screen = ui->screen_panel; break;
-    case SMART_HOME_TAB_SECURITY: screen = ui->screen_security; break;
+    case SMART_HOME_TAB_SECURITY:
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+        smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_HOME);
+        smart_home_v9_device_view_t camera;
+        smart_home_state_t state;
+        if (ui->app && !smart_home_device_service_copy_state(&ui->app->device_service, &state) &&
+            !smart_home_v9_board_camera_view(&state, &camera))
+            smart_home_lvgl_camera_dialog_open(ui, &camera);
+        return;
+#else
+        screen = ui->screen_security; break;
+#endif
     case SMART_HOME_TAB_MORE:     screen = ui->screen_more; break;
     default: break;
     }
@@ -67,6 +79,7 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
     smart_home_lvgl_miloco_poll_set_enabled(
         ui, tab == SMART_HOME_TAB_HOME || tab == SMART_HOME_TAB_DEVICES);
 #endif
+    if (tab != SMART_HOME_TAB_HOME) smart_home_lvgl_camera_dialog_close();
     previous_tab = ui->active_tab;
     ui->active_tab = tab;
     if (tab == SMART_HOME_TAB_HOME) {

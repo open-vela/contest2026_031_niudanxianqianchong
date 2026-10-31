@@ -26,6 +26,7 @@ typedef enum {
     SMART_HOME_V9_SOURCE_MILOCO,
     SMART_HOME_V9_SOURCE_NODE,
     SMART_HOME_V9_SOURCE_DEMO,
+    SMART_HOME_V9_SOURCE_BOARD,
 } smart_home_v9_source_t;
 
 typedef enum {
@@ -46,6 +47,14 @@ enum {
     SMART_HOME_V9_CAP_PREVIEW = 1u << 4,
     SMART_HOME_V9_CAP_PAUSE = 1u << 5,
     SMART_HOME_V9_CAP_DOCK = 1u << 6,
+};
+
+enum {
+    SMART_HOME_V9_CAMERA_OFF = 0,
+    SMART_HOME_V9_CAMERA_STARTING,
+    SMART_HOME_V9_CAMERA_PREVIEWING,
+    SMART_HOME_V9_CAMERA_STOPPING,
+    SMART_HOME_V9_CAMERA_ERROR,
 };
 
 typedef struct {
@@ -112,3 +121,6 @@ const char *smart_home_v9_control_state_name(smart_home_v9_control_state_t state
 #ifdef __cplusplus
 }
 #endif
+
+/* Fixed board camera metadata + actual capture status. */
+int smart_home_v9_board_camera_view(const smart_home_state_t *local, smart_home_v9_device_view_t *out);

@@ -461,7 +461,8 @@ void smart_home_lvgl_device_dialog_open(smart_home_lvgl_t *ui,
                 add_control(ctx, "风速", LOCAL_FAN, device.ac_fan_speed, &spec);
             }
         }
-        if (view->source == SMART_HOME_V9_SOURCE_DEMO && ctx->count == 0) {
+        if (view->source == SMART_HOME_V9_SOURCE_DEMO && ctx->count == 0 &&
+            view->kind != SMART_HOME_V9_KIND_CAMERA) {
             smart_home_miloco_control_t spec = {0};
             spec.option_count = 3;
             const char *const washer[] = {"标准洗", "快洗", "脱水"};

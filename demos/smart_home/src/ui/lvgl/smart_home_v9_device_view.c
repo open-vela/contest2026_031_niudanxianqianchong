@@ -88,6 +88,51 @@ static smart_home_v9_device_view_t *append_view(
     return &out[(*count)++];
 }
 
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+#include "../../camera/smart_home_camera_service.h"
+#include "../../camera/smart_home_camera_control.h"
+#endif
+int smart_home_v9_board_camera_view(const smart_home_state_t *local, smart_home_v9_device_view_t *out)
+{
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    if (!local || !out || local->room_count < 1) return -1;
+    memset(out, 0, sizeof(*out));
+    copy_text(out->key, sizeof out->key, SMART_HOME_BOARD_CAMERA_KEY);
+    copy_text(out->name, sizeof out->name, "本机摄像头");
+    const char *room = smart_home_device_room_override(local, SMART_HOME_BOARD_CAMERA_KEY);
+    if (!room) room = smart_home_room_index(local, "living_room") >= 0 ? "living_room" : local->rooms[0];
+    copy_text(out->room_id, sizeof out->room_id, room);
+    copy_text(out->room_label, sizeof out->room_label, room);
+    out->source = SMART_HOME_V9_SOURCE_BOARD;
+    out->kind = SMART_HOME_V9_KIND_CAMERA;
+    out->capabilities = SMART_HOME_V9_CAP_PREVIEW | SMART_HOME_V9_CAP_POWER;
+    struct smart_home_camera_status_s status;
+    smart_home_camera_control_status_t control;
+    smart_home_camera_control_status(&control);
+    if (smart_home_camera_get_status(&status)) return -1;
+    out->state_valid = true;
+    out->online = status.state != SMART_HOME_CAMERA_ERROR;
+    out->on = status.state == SMART_HOME_CAMERA_RUNNING || status.state == SMART_HOME_CAMERA_STARTING;
+    out->primary_value = status.preview_fps_x100 / 100;
+    out->unit = "FPS";
+    out->activity = SMART_HOME_V9_CAMERA_OFF;
+    if (control.busy) {
+        out->on = control.desired_on;
+        out->activity = control.desired_on ? SMART_HOME_V9_CAMERA_STARTING : SMART_HOME_V9_CAMERA_STOPPING;
+    } else if (control.result || status.state == SMART_HOME_CAMERA_ERROR) {
+        out->activity = SMART_HOME_V9_CAMERA_ERROR;
+    } else if (status.state == SMART_HOME_CAMERA_STARTING ||
+               (status.state == SMART_HOME_CAMERA_RUNNING && !status.preview_sequence)) {
+        out->activity = SMART_HOME_V9_CAMERA_STARTING;
+    } else if (status.state == SMART_HOME_CAMERA_RUNNING) {
+        out->activity = SMART_HOME_V9_CAMERA_PREVIEWING;
+    }
+    return 0;
+#else
+    (void)local; (void)out; return -1;
+#endif
+}
+
 size_t smart_home_v9_collect_views(const smart_home_state_t *local,
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
                                    const smart_home_miloco_t *miloco,
@@ -102,6 +147,9 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
     }
 
     if (local) {
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+        if (count < capacity && !smart_home_v9_board_camera_view(local, &out[count])) count++;
+#endif
         for (int i = 0; i < SMART_HOME_MAX_DEVICES; i++) {
             const smart_home_device_t *device = &local->devices[i];
             smart_home_v9_device_view_t *view;

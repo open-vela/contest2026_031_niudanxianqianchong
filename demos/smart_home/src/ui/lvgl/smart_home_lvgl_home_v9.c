@@ -5,6 +5,10 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "smart_home_v9_device_view.h"
 #include "smart_home_lvgl_device_dialog.h"
+#include "smart_home_lvgl_camera_dialog.h"
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+#include "../../camera/smart_home_camera_control.h"
+#endif
 #include "smart_home_lvgl_room_dialog.h"
 #include "../../device/smart_home_device_service.h"
 #include "../../smart_home_memory.h"
@@ -105,102 +109,17 @@ typedef struct {
 
 static v9_home_state_t g_v9;
 
-#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-static void v9_camera_preview_stop(void);
-#endif
 
 static void v9_close_modal(void)
 {
     smart_home_lvgl_device_dialog_close();
     smart_home_lvgl_room_dialog_close();
-#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-    v9_camera_preview_stop();
-#endif
+    smart_home_lvgl_camera_dialog_close();
     if (g_v9.modal) {
         lv_obj_delete(g_v9.modal);
         g_v9.modal = NULL;
     }
 }
-
-#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-static lv_timer_t *g_cam_timer;
-static void *g_cam_buffer;
-static lv_image_dsc_t g_cam_image;
-static lv_obj_t *g_cam_view;
-static int g_cam_started;
-static uint32_t g_cam_sequence;
-
-static void v9_camera_timer_cb(lv_timer_t *timer)
-{
-    uint32_t sequence = 0;
-
-    (void)timer;
-    if (!g_cam_buffer || !g_cam_view) {
-        return;
-    }
-    if (smart_home_camera_copy_latest(g_cam_buffer,
-                                      SMART_HOME_CAMERA_PREVIEW_BYTES,
-                                      &sequence) == AGENT_OK &&
-        sequence != g_cam_sequence) {
-        g_cam_sequence = sequence;
-        lv_obj_invalidate(g_cam_view);
-    }
-}
-
-static void v9_camera_preview_stop(void)
-{
-    if (g_cam_timer) {
-        lv_timer_delete(g_cam_timer);
-        g_cam_timer = NULL;
-    }
-    g_cam_view = NULL;
-    if (g_cam_buffer) {
-        smart_home_bulk_free(g_cam_buffer);
-        g_cam_buffer = NULL;
-    }
-    if (g_cam_started) {
-        (void)smart_home_camera_stop();
-        g_cam_started = 0;
-    }
-}
-
-static int v9_camera_preview_start(smart_home_lvgl_t *ui, lv_obj_t *panel)
-{
-    if (!ui || !panel || g_cam_timer) {
-        return 0;
-    }
-    g_cam_buffer = smart_home_bulk_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES);
-    if (!g_cam_buffer) {
-        lv_obj_t *label = smart_home_lvgl_label_create(
-            panel, "预览缓冲区分配失败", SMART_HOME_UI_COLOR_DANGER, 14);
-        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 60);
-        return -1;
-    }
-    memset(g_cam_buffer, 0, SMART_HOME_CAMERA_PREVIEW_BYTES);
-    memset(&g_cam_image, 0, sizeof(g_cam_image));
-    g_cam_image.header.magic = LV_IMAGE_HEADER_MAGIC;
-    g_cam_image.header.cf = LV_COLOR_FORMAT_RGB565;
-    g_cam_image.header.w = SMART_HOME_CAMERA_PREVIEW_WIDTH;
-    g_cam_image.header.h = SMART_HOME_CAMERA_PREVIEW_HEIGHT;
-    g_cam_image.header.stride = SMART_HOME_CAMERA_PREVIEW_WIDTH * 2u;
-    g_cam_image.data_size = SMART_HOME_CAMERA_PREVIEW_BYTES;
-    g_cam_image.data = g_cam_buffer;
-
-    g_cam_view = lv_image_create(panel);
-    lv_image_set_src(g_cam_view, &g_cam_image);
-    lv_obj_set_size(g_cam_view, SMART_HOME_CAMERA_PREVIEW_WIDTH,
-                    SMART_HOME_CAMERA_PREVIEW_HEIGHT);
-    lv_obj_align(g_cam_view, LV_ALIGN_TOP_MID, 0, 56);
-    lv_obj_set_style_radius(g_cam_view, 10, 0);
-    lv_obj_clear_flag(g_cam_view, LV_OBJ_FLAG_CLICKABLE);
-
-    if (smart_home_camera_start() == AGENT_OK) {
-        g_cam_started = 1;
-    }
-    g_cam_timer = lv_timer_create(v9_camera_timer_cb, 66, ui);
-    return 0;
-}
-#endif
 
 static void v9_mask_click_cb(lv_event_t *event)
 {
@@ -392,6 +311,15 @@ static int card_index_for_kind(smart_home_v9_kind_t kind)
 static const char *view_status(const smart_home_v9_device_view_t *view)
 {
     if (!view->state_valid) return "状态待获取";
+    if (view->source == SMART_HOME_V9_SOURCE_BOARD) {
+        switch (view->activity) {
+        case SMART_HOME_V9_CAMERA_STARTING: return "启动中";
+        case SMART_HOME_V9_CAMERA_PREVIEWING: return "预览中";
+        case SMART_HOME_V9_CAMERA_STOPPING: return "停止中";
+        case SMART_HOME_V9_CAMERA_ERROR: return "操作失败";
+        default: return "预览关闭";
+        }
+    }
     switch (view->kind) {
     case SMART_HOME_V9_KIND_WASHER:
         return view->on ? "洗涤中" : "待机";
@@ -438,7 +366,11 @@ static void v9_apply_view(int index,
         lv_label_set_text(g_v9.status[index], view_status(view));
     }
     if (g_v9.metric[index]) {
-        if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
+        if (view->source == SMART_HOME_V9_SOURCE_BOARD) {
+            if (view->activity == SMART_HOME_V9_CAMERA_PREVIEWING)
+                snprintf(text, sizeof text, "%d FPS", view->primary_value);
+            else snprintf(text, sizeof text, "本机");
+        } else if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
             snprintf(text, sizeof(text), "%s",
                      view->online ? "在线" : "离线");
         } else if (view->primary_value > 0) {
@@ -478,6 +410,18 @@ static void v9_switch_cb(lv_event_t *event)
     desired = lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0;
 
     if (g_v9.real[index]) {
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+        if (g_v9.source[index] == SMART_HOME_V9_SOURCE_BOARD) {
+            if (desired) {
+                v9_close_modal();
+                int opened = smart_home_lvgl_camera_dialog_open(ui, &g_v9.device_view[index]);
+                if (opened || smart_home_camera_request(true))
+                    v9_info_modal("操作未完成", "无法提交摄像头操作，请重试。");
+            } else (void)smart_home_camera_request(false);
+            smart_home_lvgl_v9_refresh_views(ui);
+            return;
+        }
+#endif
         if (g_v9.source[index] == SMART_HOME_V9_SOURCE_LOCAL &&
             ui && ui->app && ui->device_state) {
             smart_home_device_t *device;
@@ -533,90 +477,29 @@ static void v9_switch_cb(lv_event_t *event)
     v9_update_card(index);
 }
 
-static void v9_route_cb(lv_event_t *event);
 static int kind_def_index(smart_home_v9_kind_t kind);
-
 static void v9_card_click_cb(lv_event_t *event)
 {
     lv_obj_t *card = lv_event_get_current_target(event);
     int index = (int)(intptr_t)lv_obj_get_user_data(card);
-    lv_obj_t *panel;
-    lv_obj_t *label;
-    char text[160];
-
     if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
-        lv_event_get_target(event) != lv_event_get_current_target(event) ||
-        index < 0 || index >= g_v9.card_count) {
-        return;
+        lv_event_get_target(event) != card || index < 0 || index >= g_v9.card_count) return;
+    smart_home_v9_device_view_t view;
+    if (g_v9.real[index]) view = g_v9.device_view[index];
+    else {
+        smart_home_v9_device_view_t demos[V9_DEVICE_COUNT];
+        smart_home_v9_demo_views(demos, V9_DEVICE_COUNT);
+        view = demos[g_v9.def_index[index]];
+        view.on = g_v9.on[index] != 0;
     }
-
-    if (g_v9.real[index] || g_v9.def_index[index] !=
-        kind_def_index(SMART_HOME_V9_KIND_CAMERA)) {
-        smart_home_v9_device_view_t view;
-        if (g_v9.real[index]) view = g_v9.device_view[index];
-        else {
-            smart_home_v9_device_view_t demos[V9_DEVICE_COUNT];
-            smart_home_v9_demo_views(demos, V9_DEVICE_COUNT);
-            view = demos[g_v9.def_index[index]];
-            view.on = g_v9.on[index] != 0;
-        }
-        v9_close_modal();
-        smart_home_lvgl_device_dialog_open(lv_event_get_user_data(event), &view);
-        return;
-    }
-    panel = v9_modal_panel(g_v9.name_text[index]);
-    snprintf(text, sizeof(text), "%s · %s", g_v9.room_text[index],
-             g_v9.status[index] ? lv_label_get_text(g_v9.status[index]) :
-                                  (g_v9.on[index] ? "已开启" : "已关闭"));
-    label = smart_home_lvgl_label_create(panel, text,
-                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
-    lv_obj_set_pos(label, 0, 48);
-
-    label = smart_home_lvgl_label_create(
-        panel, g_v9.metric[index] ? lv_label_get_text(g_v9.metric[index]) :
-                                    "--",
-        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
-    lv_obj_set_pos(label, 0, 96);
-
-    label = smart_home_lvgl_label_create(panel, "本机摄像头预览",
-                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
-    lv_obj_set_pos(label, 0, 152);
-    if (g_v9.def_index[index] == kind_def_index(SMART_HOME_V9_KIND_CAMERA) &&
-        !g_v9.real[index]) {
-        smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    v9_close_modal();
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-        (void)v9_camera_preview_start(ui, panel);
+    if (view.source == SMART_HOME_V9_SOURCE_BOARD) {
+        smart_home_lvgl_camera_dialog_open(lv_event_get_user_data(event), &view);
+        return;
+    }
 #endif
-        lv_obj_t *button = lv_button_create(panel);
-        lv_obj_t *button_label;
-
-        if (ui && ui->screen_security) {
-            lv_obj_remove_style_all(button);
-            lv_obj_set_size(button, 180, 40);
-            lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-            lv_obj_set_style_radius(button, 10, 0);
-            lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON,
-                                      0);
-            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-            smart_home_lvgl_press_feedback(button);
-            lv_obj_add_event_cb(button, v9_route_cb, LV_EVENT_CLICKED,
-                                ui->screen_security);
-            button_label = smart_home_lvgl_label_create(
-                button, "打开摄像头预览", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
-            lv_obj_center(button_label);
-        }
-    }
-    v9_modal_close_button(panel);
-}
-
-static void v9_route_cb(lv_event_t *event)
-{
-    lv_obj_t *target = lv_event_get_user_data(event);
-
-    if (lv_event_get_code(event) == LV_EVENT_CLICKED && target) {
-        v9_close_modal();
-        lv_scr_load(target);
-    }
+    smart_home_lvgl_device_dialog_open(lv_event_get_user_data(event), &view);
 }
 
 static void v9_family_cb(lv_event_t *event)
@@ -917,18 +800,17 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
         return;
     }
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    if (ui->app && ui->app->miloco &&
-        smart_home_miloco_reachable(ui->app->miloco) &&
-        smart_home_miloco_bound(ui->app->miloco)) {
-        count = smart_home_v9_collect_views(NULL, ui->app->miloco, raw,
-                                            V9_MAX_CARDS);
-    }
+    const smart_home_miloco_t *gateway = ui->app && ui->app->miloco &&
+        smart_home_miloco_reachable(ui->app->miloco) && smart_home_miloco_bound(ui->app->miloco) ? ui->app->miloco : NULL;
+    count = smart_home_v9_collect_views(have_local ? &local : NULL, gateway, raw, V9_MAX_CARDS);
+#else
+    count = smart_home_v9_collect_views(have_local ? &local : NULL, raw, V9_MAX_CARDS);
 #endif
-    if (count == 0 && ui->app && ui->device_state &&
-        ui->app->device_service.mutex_initialized) {
-        count = smart_home_v9_collect_views(have_local ? &local : NULL, NULL, raw,
-                                            V9_MAX_CARDS);
-    }
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    struct smart_home_camera_status_s camera_status;
+    if (!smart_home_camera_get_status(&camera_status))
+        smart_home_lvgl_set_camera_indicator(ui, camera_status.state == SMART_HOME_CAMERA_RUNNING && camera_status.preview_sequence > 0);
+#endif
     for (size_t i = 0; i < count; i++) {
         if (kind_def_index(raw[i].kind) < 0) {
             continue;
@@ -946,8 +828,13 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
         }
         views[valid++] = raw[i];
     }
+    int has_gateway = 0, has_local = 0;
+    for (size_t i = 0; i < valid; i++) {
+        if (views[i].source == SMART_HOME_V9_SOURCE_MILOCO) has_gateway = 1;
+        else has_local = 1;
+    }
     if (g_v9.source_label) lv_label_set_text(g_v9.source_label,
-        valid ? (views[0].source == SMART_HOME_V9_SOURCE_MILOCO ? "米家设备" : "本地设备") :
+        valid ? (has_gateway ? (has_local ? "本机与米家设备" : "米家设备") : "本地设备") :
         (have_local ? "暂无设备" : "演示数据"));
     if (valid == 0) {
         if (have_local) {

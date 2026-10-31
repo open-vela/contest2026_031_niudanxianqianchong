@@ -456,7 +456,8 @@ int smart_home_device_assign_room(smart_home_state_t *state, const char *key,
         snprintf(device->room, sizeof device->room, "%s", room);
         return AGENT_OK;
     }
-    if (strncmp(key, "milo:", 5) || !key[5] || strlen(key) >= SMART_HOME_ROOM_KEY_SIZE)
+    if (strcmp(key, SMART_HOME_BOARD_CAMERA_KEY) &&
+        (strncmp(key, "milo:", 5) || !key[5] || strlen(key) >= SMART_HOME_ROOM_KEY_SIZE))
         return AGENT_ERROR_INVALID;
     for (size_t n = 5; key[n]; n++) {
         unsigned char ch = (unsigned char)key[n];
@@ -587,6 +588,9 @@ void smart_home_device_init(smart_home_state_t *state)
                           "Bedroom AC",
                           SMART_HOME_DEVICE_AC,
                           NULL);
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    (void)smart_home_device_assign_room(state, SMART_HOME_BOARD_CAMERA_KEY, "living_room");
+#endif
 }
 
 int smart_home_device_set_light(smart_home_state_t *state,
@@ -923,7 +927,8 @@ int smart_home_device_state_from_json(smart_home_state_t *state,
             const cJSON *key = cJSON_GetObjectItemCaseSensitive(item, "key");
             const cJSON *room = cJSON_GetObjectItemCaseSensitive(item, "room");
             if (!cJSON_IsString(key) || !cJSON_IsString(room) ||
-                strncmp(key->valuestring, "milo:", 5) ||
+                (strncmp(key->valuestring, "milo:", 5) &&
+                 strcmp(key->valuestring, SMART_HOME_BOARD_CAMERA_KEY)) ||
                 smart_home_device_room_override(&tmp, key->valuestring) ||
                 smart_home_device_assign_room(&tmp, key->valuestring, room->valuestring) != AGENT_OK)
                 return AGENT_ERROR_PARSE;
@@ -1096,6 +1101,13 @@ int smart_home_device_state_from_json(smart_home_state_t *state,
         }
     }
 
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    if (!smart_home_device_room_override(&tmp, SMART_HOME_BOARD_CAMERA_KEY)) {
+        const char *room = smart_home_room_index(&tmp, "living_room") >= 0 ? "living_room" : tmp.rooms[0];
+        if (smart_home_device_assign_room(&tmp, SMART_HOME_BOARD_CAMERA_KEY, room) != AGENT_OK)
+            return AGENT_ERROR_LIMIT;
+    }
+#endif
     /* 全部合法，提交 */
     *state = tmp;
     return AGENT_OK;
