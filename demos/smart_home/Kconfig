@@ -583,6 +583,14 @@ endchoice
 
 if SMART_HOME_DEMO_UI_LVGL
 
+config SMART_HOME_V9_PERF_LOG
+    bool "Log V9 LVGL frame timing"
+    default n
+    help
+      Log accumulated lv_timer_handler duration, average and maximum every
+      five seconds.  Intended for target-board P01-P12 measurements; leave
+      disabled in production because serial output itself costs CPU time.
+
 config SMART_HOME_V9_DEVICE_ANIMATION
     bool "Enable V9 device pixel-frame animation"
     default n

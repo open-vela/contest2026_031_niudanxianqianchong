@@ -349,12 +349,40 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
     smart_home_lvgl_uv_loop(&ui_loop, &result, ui);
 #else
     smart_home_cpu_debug_log("lvgl-loop-start");
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+    uint32_t perf_frames = 0;
+    uint32_t perf_sum_ms = 0;
+    uint32_t perf_max_ms = 0;
+    uint32_t perf_window = lv_tick_get();
+#endif
     for (;;) {
         uint32_t idle;
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+        uint32_t started = lv_tick_get();
+#endif
 
         smart_home_lvgl_process_pending(ui);
         idle = lv_timer_handler();
         smart_home_lvgl_process_pending(ui);
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+        {
+            uint32_t elapsed = lv_tick_get() - started;
+
+            perf_frames++;
+            perf_sum_ms += elapsed;
+            if (elapsed > perf_max_ms) perf_max_ms = elapsed;
+            if (lv_tick_elaps(perf_window) >= 5000u) {
+                printf("[v9-perf] frames=%u avg_ms=%u max_ms=%u\n",
+                       (unsigned)perf_frames,
+                       (unsigned)(perf_sum_ms / (perf_frames ? perf_frames : 1)),
+                       (unsigned)perf_max_ms);
+                perf_frames = 0;
+                perf_sum_ms = 0;
+                perf_max_ms = 0;
+                perf_window = lv_tick_get();
+            }
+        }
+#endif
         if (idle == 0 || idle > SMART_HOME_LVGL_QUEUE_POLL_MS) {
             idle = SMART_HOME_LVGL_QUEUE_POLL_MS;
         }
