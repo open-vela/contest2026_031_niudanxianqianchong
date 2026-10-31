@@ -145,3 +145,92 @@ scripts/build_p4x.sh nsh -j8
 ```
 
 预期第一行输出 `CC: .../riscv32-esp-elf-gcc (14.2.0)`。
+
+## 9. S4 实测结果（2026-10-31 补充）
+
+### 9.1 结论：整机编译通过
+
+`nsh` 配置用乐鑫 GCC 14.2.0 全量编译**成功**，`nuttx.bin` 正常生成：
+
+| 检查项 | 结果 |
+| --- | --- |
+| `.comment` | `GCC: (crosstool-NG esp-14.2.0_20260121) 14.2.0`（仅此一种） |
+| ABI | `0x1, RVC, soft-float ABI` |
+| PIE 指令计数 | `0`（平台层无 xespv，符合 §3.2 设计） |
+| `nuttx.bin` | 273,404 B（xPack 基线 273,592 B，**-188 B / -0.07%**） |
+| `irom_seg` | 150,522 B（xPack 150,710 B，-188 B） |
+| `sram_seg` | 36,376 B（与 xPack 完全一致） |
+
+尺寸差异只有 188 字节，说明 GCC 13→14 在本配置上代码生成几乎等价。
+
+### 9.2 K1 风险的实际表现
+
+方案 §4 预判 GCC 14 会把三类警告升级为错误。实测确认**确有 1 处**，但不是数量级问题：
+
+```text
+include/nuttx/net/usrsock.h:323:10: error: implicit declaration of function
+  'net_sem_timedwait2'; did you mean 'nxsem_timedwait'?
+  [-Wimplicit-function-declaration]
+```
+
+根因：`net_sem_timedwait2` 的声明在 `include/nuttx/net/net.h` 的 `#ifdef CONFIG_NET`
+（第 31 行）之内，而 `usrsock.h` 无条件调用它。`nsh` 配置没有 `CONFIG_NET`，于是声明
+不可见。这是 **NuttX 既有的头文件依赖缺陷**，GCC 13 只是警告，GCC 14 变成错误。
+
+修复方向（二选一，建议前者）：
+
+1. 给 `usrsock.h` 的 `usrsock_sem_timedwait()` 加 `#ifdef CONFIG_NET` 守卫，或把
+   `net.h` 的 `net_sem_timedwait2` 声明移出 `CONFIG_NET`；
+2. 仅对该文件放宽 `-Wno-error=implicit-function-declaration`（不推荐，会掩盖同类问题）。
+
+本轮为拿到完整错误画像，临时用 `EXTRAFLAGS` 把三类警告降回警告后全量编译，
+**没有修改任何源码**。除上述 1 处，其余 2600+ 编译单元在 GCC 14 下零警告、零错误。
+
+### 9.3 归档验证的真实阻塞：控制台
+
+`nsh` 配置只有 `CONFIG_UART0_SERIAL_CONSOLE=y`（UART0 物理引脚），而开发板接的是
+USB Serial/JTAG（`/dev/ttyACM0`）。已真机验收的 `smart_home` 配的是
+`CONFIG_ESPRESSIF_USBSERIAL=y`。
+
+因此 `nsh` 烧录后只能看到 ROM 引导日志，进入 NuttX 后无任何输出——这是配置问题，
+**与工具链无关**。对照实验：xPack 编出的同配置镜像行为完全一致（同样加载 7 段后静默）。
+
+结论：**本阶段的板端验收应使用 `smart_home` 或 `smp_smart_home`，不要用 `nsh`。**
+
+### 9.4 尚未验证
+
+- `smart_home` / `smp_smart_home` 的全量编译（未执行）
+- 板端 NSH 交互与 `ostest`（被 §9.3 的控制台配置阻塞）
+- 方案 §6.1 的其余配置矩阵
+
+## 10. 构建环境的两个坑（实测）
+
+### 10.1 worktree 里 `CONFIG_ARCH_CHIP_CUSTOM_DIR` 指向主工作区
+
+`nsh` 的 defconfig 写死：
+
+```text
+CONFIG_ARCH_CHIP_CUSTOM_DIR="../contest2026_031_niudanxianqianchong/chips/esp32p4"
+```
+
+在 worktree 中构建时，`configure.sh` 生成的 `arch/risc-v/src/chip` 软链仍指回
+**主工作区**的 `chips/esp32p4`，于是 worktree 里对 `chips/esp32p4/Kconfig` 的修改
+（例如新增的 `ESP32P4_ESPRESSIF_TOOLCHAIN`）不会生效。这是方案 §8.1 已警告的
+构建污染的实例。
+
+绕过方式：本轮验证用 `CROSSDEV=riscv32-esp-elf-` 强制工具链，不依赖 Kconfig 开关。
+正式实施需要在 worktree 内同步 `CONFIG_ARCH_CHIP_CUSTOM_DIR` /
+`CONFIG_ARCH_BOARD_CUSTOM_DIR`，或在主工作区构建。
+
+### 10.2 `make distclean` 会清空 `esp-hal-3rdparty` 的子模块
+
+`make distclean` 触发 `chip/esp-hal-3rdparty` 重新 clone，当前网络无法访问
+`github.com`（超时），且 `components/mbedtls/mbedtls` 等子模块在本地裸库中缺少目标
+提交，**构建会直接失败**。
+
+恢复办法（本轮已执行）：`esp-hal-3rdparty-cache/` 是完整快照，可复制回
+`chips/esp32p4/esp-hal-3rdparty`；mbedtls 工作树可从原副本的
+`.git/modules/components/mbedtls/mbedtls` 裸库 checkout 恢复。
+
+**建议**：在离线或网络受限环境里，避免对含 `esp-hal-3rdparty` 的树执行
+`make distclean`；改用 `make clean` 或只删除目标对象。

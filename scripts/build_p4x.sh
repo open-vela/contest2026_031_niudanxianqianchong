@@ -13,12 +13,37 @@
 # Usage: scripts/build_p4x.sh [config-name] [build.sh args...]
 #   config-name  directory under board/esp32p4/esp32p4-function-ev-board/configs
 #                (default: smp_smart_home)
+#
+# The script works from the main workspace and from a git worktree: the
+# openvela root is located by walking up until a directory containing both
+# nuttx/ and prebuilts/ is found, because a worktree's parent directory is
+# worktrees/ rather than the repository root.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-ROOT_DIR=$(CDPATH= cd -- "$PROJECT_DIR/.." && pwd)
+
+find_openvela_root()
+{
+  local dir=$1
+
+  while [[ "$dir" != "/" ]]; do
+    if [[ -d "$dir/nuttx" && -d "$dir/prebuilts" && -f "$dir/build.sh" ]]; then
+      echo "$dir"
+      return 0
+    fi
+    dir=$(dirname "$dir")
+  done
+
+  return 1
+}
+
+if ! ROOT_DIR=$(find_openvela_root "$PROJECT_DIR"); then
+  echo "error: cannot locate the openvela root above $PROJECT_DIR" >&2
+  echo "       expected a directory containing nuttx/, prebuilts/ and build.sh" >&2
+  exit 1
+fi
 
 CONFIG_NAME=${1:-smp_smart_home}
 shift || true
@@ -38,7 +63,7 @@ if grep -q "^CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y" "$CONFIG_DIR/defconfig"; then
   if [[ ! -x "$ESP_TOOLCHAIN_BIN/riscv32-esp-elf-gcc" ]]; then
     echo "error: CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y but no toolchain at" >&2
     echo "       $ESP_TOOLCHAIN_BIN" >&2
-    echo "       see the toolchain switch plan under docs/开发计划/基础与规划/" >&2
+    echo "       see docs/开发日志/编译/ESP32-P4X-乐鑫工具链S0-S3接入记录.md" >&2
     exit 1
   fi
   export PATH="$ESP_TOOLCHAIN_BIN:$PATH"
@@ -48,7 +73,19 @@ else
   echo "CC: $(command -v riscv-none-elf-gcc || echo "<none>")"
 fi
 
-BOARD_CONFIG="$(basename "$PROJECT_DIR")/board/esp32p4/$BOARD_NAME/configs/$CONFIG_NAME"
+# The image packaging step (nuttx/tools/espressif/check_esptool.py) checks the
+# esptool *Python package*, not the esptool launcher on PATH.  Without the
+# venv the link succeeds but nuttx.bin is never produced, so activate it here
+# like build_cmake_p4x.sh does.
+if [[ -f "$ROOT_DIR/myenv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/myenv/bin/activate"
+fi
+
+# build.sh resolves the board configuration relative to ROOT_DIR, so pass the
+# path relative to it rather than to the project directory (they differ when
+# this script runs from a worktree).
+BOARD_CONFIG=$(realpath --relative-to="$ROOT_DIR" "$CONFIG_DIR")
 
 cd "$ROOT_DIR"
 exec ./build.sh "$BOARD_CONFIG" "$@"
