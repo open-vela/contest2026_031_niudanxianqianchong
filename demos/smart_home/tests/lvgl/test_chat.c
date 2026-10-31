@@ -158,6 +158,38 @@ static void clear(smart_home_lvgl_t *ui)
     assert(lv_obj_get_child_count(ui->chat_list) == 0);
 }
 
+static void test_bubble_layout(smart_home_lvgl_t *ui)
+{
+    smart_home_lvgl_append_msg_bubble(ui, "好的，已完成。", 0);
+    lv_obj_update_layout(ui->screen_chat);
+    lv_obj_t *row = lv_obj_get_child(ui->chat_list, -1);
+    lv_obj_t *bubble = lv_obj_get_child(row, 1);
+    int short_height = lv_obj_get_height(bubble);
+    assert(short_height >= 44 && short_height <= 80);
+    const char *long_reply =
+        "客厅空调已经调整为制冷模式，目标温度设为二十四度。"
+        "卧室灯光保持暖色，厨房设备继续使用原来的运行设置。"
+        "如果还需要调整其他房间，可以告诉我设备名称和目标状态。"
+        "这是一条用于检查自动换行和气泡高度的较长回复。";
+    smart_home_lvgl_append_msg_bubble(ui, long_reply, 0);
+    lv_obj_update_layout(ui->screen_chat);
+    row = lv_obj_get_child(ui->chat_list, -1);
+    bubble = lv_obj_get_child(row, 1);
+    lv_obj_t *label = lv_obj_get_child(bubble, 0);
+    lv_area_t text_bounds, content_bounds;
+    lv_obj_get_coords(label, &text_bounds);
+    lv_obj_get_content_coords(bubble, &content_bounds);
+    assert(lv_obj_get_height(bubble) > short_height);
+    assert(text_bounds.y1 >= content_bounds.y1 &&
+           text_bounds.y2 <= content_bounds.y2);
+    smart_home_lvgl_append_msg_bubble(ui, "一行\n二行\n三行", 0);
+    lv_obj_update_layout(ui->screen_chat);
+    bubble = lv_obj_get_child(lv_obj_get_child(ui->chat_list, -1), 1);
+    assert(lv_obj_get_height(bubble) > short_height);
+    clear(ui);
+    puts("PASS: compact one-line AI bubble; wrapped and multiline replies expand without clipping");
+}
+
 int main(void)
 {
     lv_init();
@@ -173,6 +205,7 @@ int main(void)
     assert(!pthread_mutex_init(&ui.pending_mutex, NULL));
     smart_home_lvgl_build_chat_screen(&ui);
     lv_screen_load(ui.screen_chat);
+    test_bubble_layout(&ui);
     send(&ui, "你好");
     assert(!ui.chat_trace_row && count_text(ui.chat_list, "这是回复") == 1);
     assert(lv_obj_get_child_count(ui.chat_list) == 2);

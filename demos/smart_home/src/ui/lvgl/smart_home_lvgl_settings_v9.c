@@ -115,7 +115,8 @@ static void panel_show(int category)
 
 static void category_cb(lv_event_t *event)
 {
-    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    lv_obj_t *button = lv_event_get_current_target(event);
+    int index = (int)(intptr_t)lv_obj_get_user_data(button);
 
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
         panel_show(index);

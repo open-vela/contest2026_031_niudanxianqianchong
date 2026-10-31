@@ -11,6 +11,7 @@ static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
+static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -266,6 +267,7 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_settings_v9 != NULL);
     assert(smart_home_lvgl_v9_settings_category_count() == 6);
+    test_v9_settings_clicks(ui);
     assert(smart_home_lvgl_v9_settings_select_category(1) == 1);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_NETWORK_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(2) == 2);
@@ -902,6 +904,50 @@ static lv_obj_t *find_v9_input(lv_obj_t *root, const char *placeholder)
         if (found) return found;
     }
     return NULL;
+}
+
+static lv_obj_t *find_v9_label(lv_obj_t *root, const char *text)
+{
+    if (lv_obj_check_type(root, &lv_label_class) &&
+        strcmp(lv_label_get_text(root), text) == 0) return root;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+        lv_obj_t *found = find_v9_label(lv_obj_get_child(root, i), text);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *caption = find_v9_label(ui->screen_settings_v9, "显示与声音");
+    lv_obj_t *key = find_v9_input(ui->screen_settings_v9,
+                                 "留空沿用系统凭据，本次运行有效");
+    assert(caption && key);
+    lv_obj_t *left = lv_obj_get_parent(lv_obj_get_parent(caption));
+    lv_obj_t *right = lv_obj_get_parent(lv_obj_get_parent(key));
+    assert(lv_obj_get_child_count(left) == 6);
+    assert(lv_obj_get_child_count(right) == 6);
+    lv_screen_load(ui->screen_settings_v9);
+    lv_obj_update_layout(ui->screen_settings_v9);
+    lv_indev_t *input = lv_indev_create();
+    lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(input, read_pointer);
+    for (int area = 0; area < 3; area++) {
+        for (int i = 0; i < 6; i++) {
+            lv_obj_t *button = lv_obj_get_child(left, i);
+            lv_obj_t *target = area < 2 ? lv_obj_get_child(button, area) : button;
+            touch(input, target, LV_INDEV_STATE_PRESSED);
+            touch(input, target, LV_INDEV_STATE_RELEASED);
+            for (int j = 0; j < 6; j++) {
+                assert(lv_obj_has_flag(lv_obj_get_child(right, j),
+                                       LV_OBJ_FLAG_HIDDEN) == (j != i));
+                assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, j), 0) ==
+                       (j == i ? LV_OPA_COVER : LV_OPA_TRANSP));
+            }
+        }
+    }
+    lv_indev_delete(input);
+    puts("PASS: six settings categories switch via real icon/text/button touches");
 }
 
 static void test_v9_shell(smart_home_lvgl_t *ui)

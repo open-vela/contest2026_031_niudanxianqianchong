@@ -295,7 +295,7 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
     lv_obj_remove_style_all(bubble);
     lv_obj_set_width(bubble, width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
-    lv_obj_set_style_min_height(bubble, is_user ? 60 : 136, 0);
+    lv_obj_set_style_min_height(bubble, 60, 0);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(bubble, 20, 0);
     lv_obj_set_style_radius(bubble, is_user ? 16 : 18, 0);
