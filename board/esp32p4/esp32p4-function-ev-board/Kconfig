@@ -62,9 +62,11 @@ config ESP32P4_FUNCTION_EV_BOARD_GT911
 	help
 		Register the P4X LCD adapter's Goodix GT911 capacitive touch
 		controller as /dev/input0.  The reference board routes the shared
-		I2C bus to GPIO8 (SCL) and GPIO7 (SDA), but does not route the
-		controller reset or interrupt signals to the ESP32-P4.  The first
-		board integration therefore uses a 20 ms polling worker.
+		I2C bus to GPIO8 (SCL) and GPIO7 (SDA).  The GT911 INT and RESET
+		signals are not routed to the ESP32-P4 on the HMI subboard; they
+		terminate on the LCD adapter's J6 header as INT_TP (pin 7) and
+		RESET_TP (pin 8).  The default integration therefore uses a 20 ms
+		polling worker.
 
 if ESP32P4_FUNCTION_EV_BOARD_GT911
 
@@ -79,6 +81,58 @@ config ESP32P4_FUNCTION_EV_BOARD_GT911_MAX_POINTS
 		whereas GT911 produces variable-size frames.  The Smart Home UI uses
 		single-touch interactions only.  Raising this value requires a
 		variable-length LVGL touchscreen adapter.
+
+config ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+	bool "Use GT911 interrupt instead of polling"
+	select ESPRESSIF_GPIO_IRQ
+	default n
+	---help---
+		Read the GT911 from a GPIO interrupt instead of a 20 ms polling
+		worker.  This requires hardware wiring that the board does not
+		provide by default: run Dupont wires from the LCD adapter J6
+		header INT_TP (pin 7) and RESET_TP (pin 8) to the GPIOs selected
+		below, on the ESP32-P4 J1 header.  Interrupt mode also resets the
+		controller through RESET_TP so the I2C address is latched
+		deterministically to 0x5d.
+
+		Leaving this disabled keeps the validated polling behaviour and
+		needs no extra wiring.
+
+config ESP32P4_FUNCTION_EV_BOARD_GT911_INT_GPIO
+	int "GT911 INT GPIO"
+	depends on ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+	range 0 54
+	default 32
+	---help---
+		ESP32-P4 GPIO wired to INT_TP on the LCD adapter J6 header.
+		GPIO32 is a plain J1 header pin with no on-board peripheral.
+
+config ESP32P4_FUNCTION_EV_BOARD_GT911_RESET_GPIO
+	int "GT911 RESET GPIO"
+	depends on ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+	range 0 54
+	default 33
+	---help---
+		ESP32-P4 GPIO wired to RESET_TP on the LCD adapter J6 header.
+		GPIO33 is a plain J1 header pin with no on-board peripheral.  It
+		must not be one of the LCD adapter's RST_LCD (GPIO27) or PWM
+		(GPIO26) pins.
+
+config ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ_EDGE
+	bool "Trigger on the INT falling edge instead of low level"
+	depends on ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+	default n
+	---help---
+		By default the GT911 interrupt is level-low: the driver masks the
+		interrupt in its ISR and unmasks it after acknowledging the frame,
+		and the ESP GPIO block clears the pending bit while masked.  A
+		falling-edge trigger can therefore lose an event that arrives in
+		that window, because the edge may already be gone by the time the
+		interrupt is re-armed.  Level-low re-asserts from the pin state and
+		is the safer default.
+
+		Enable this only if the measured INT pulse is too short for level
+		detection, and verify with gt911_probe that no DOWN/UP pair is lost.
 
 endif # ESP32P4_FUNCTION_EV_BOARD_GT911
 

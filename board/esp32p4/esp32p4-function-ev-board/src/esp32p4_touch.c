@@ -21,28 +21,164 @@
 
 #include <arch/board/board.h>
 
+#include "espressif/esp_gpio.h"
 #include "espressif/esp_i2c.h"
 
 #include "gt911.h"
 
 /****************************************************************************
- * Private Data
+ * Pre-processor Definitions
  ****************************************************************************/
 
 #define BOARD_GT911_POWER_ON_DELAY_US  (100 * 1000)
 
-/* The P4X reference LCD adapter does not expose GT911 reset or interrupt to
- * the SoC.  Supplying no board callbacks intentionally selects the GT911
- * driver's LPWORK polling path.
+/* GT911 address selection is latched from the INT pin level at the rising
+ * edge of RESET.  Driving INT low selects 0x5d, the primary address the
+ * driver probes first.
+ */
+
+#define BOARD_GT911_RESET_ASSERT_US    (10 * 1000)
+#define BOARD_GT911_RESET_RELEASE_US   (60 * 1000)
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* Interrupt mode is only reachable when both Dupont wires from the LCD
+ * adapter's J6 header are present; see the wiring note in board.h.
+ */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+
+static int gt911_board_reset(FAR const struct gt911_board_s *board)
+{
+  int ret;
+
+  UNUSED(board);
+
+  /* Hold INT low while reset is released so the controller latches 0x5d. */
+
+  ret = esp_configgpio(BOARD_GT911_INT_GPIO, OUTPUT);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: GT911 INT gpio%d output setup failed: %d\n",
+             BOARD_GT911_INT_GPIO, ret);
+      return ret;
+    }
+
+  esp_gpiowrite(BOARD_GT911_INT_GPIO, false);
+
+  ret = esp_configgpio(BOARD_GT911_RESET_GPIO, OUTPUT);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: GT911 reset gpio%d output setup failed: %d\n",
+             BOARD_GT911_RESET_GPIO, ret);
+      return ret;
+    }
+
+  esp_gpiowrite(BOARD_GT911_RESET_GPIO, false);
+  nxsig_usleep(BOARD_GT911_RESET_ASSERT_US);
+  esp_gpiowrite(BOARD_GT911_RESET_GPIO, true);
+  nxsig_usleep(BOARD_GT911_RESET_RELEASE_US);
+
+  /* The address is latched on the reset rising edge.  Release INT
+   * immediately afterwards: leaving it driven low would fight the GT911,
+   * which owns INT as an output once it leaves reset.
+   */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ_EDGE
+  ret = esp_configgpio(BOARD_GT911_INT_GPIO, INPUT | PULLUP | FALLING);
+#else
+  ret = esp_configgpio(BOARD_GT911_INT_GPIO, INPUT | PULLUP | ONLOW);
+#endif
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: GT911 INT gpio%d release failed: %d\n",
+             BOARD_GT911_INT_GPIO, ret);
+      return ret;
+    }
+
+  return OK;
+}
+
+static int gt911_board_irq_attach(FAR const struct gt911_board_s *board,
+                                  xcpt_t isr, FAR void *arg)
+{
+  int ret;
+
+  UNUSED(board);
+
+  /* GT911 holds INT low while a frame is ready.  The driver masks the
+   * interrupt in its ISR and unmasks it after writing the 0x814e status
+   * clear.  gpio_intr_disable() also clears the pending status bit, so a
+   * falling edge that arrives inside that window would be lost.  Level-low
+   * triggering re-asserts from the pin level instead, which makes the
+   * unmask safe even when the controller still holds INT low.
+   */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ_EDGE
+  ret = esp_configgpio(BOARD_GT911_INT_GPIO, INPUT | PULLUP | FALLING);
+#else
+  ret = esp_configgpio(BOARD_GT911_INT_GPIO, INPUT | PULLUP | ONLOW);
+#endif
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: GT911 INT gpio%d input setup failed: %d\n",
+             BOARD_GT911_INT_GPIO, ret);
+      return ret;
+    }
+
+  ret = esp_gpio_irq(BOARD_GT911_INT_GPIO, isr, arg);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: GT911 INT gpio%d irq attach failed: %d\n",
+             BOARD_GT911_INT_GPIO, ret);
+    }
+
+  return ret;
+}
+
+static void gt911_board_irq_enable(FAR const struct gt911_board_s *board,
+                                   bool enable)
+{
+  UNUSED(board);
+
+  if (enable)
+    {
+      esp_gpioirqenable(BOARD_GT911_INT_GPIO);
+    }
+  else
+    {
+      esp_gpioirqdisable(BOARD_GT911_INT_GPIO);
+    }
+}
+
+static const struct gt911_board_s g_gt911_board =
+{
+  .reset      = gt911_board_reset,
+  .irq_attach = gt911_board_irq_attach,
+  .irq_enable = gt911_board_irq_enable,
+};
+
+#endif /* CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ */
+
+/* Without board callbacks the driver falls back to its LPWORK polling path,
+ * which is the only option on a stock board where INT_TP/RESET_TP are not
+ * wired to the SoC.
  */
 
 static const struct gt911_config_s g_gt911_configs[] =
 {
   {
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+    .board              = &g_gt911_board,
+    .poll_interval_ms   = 0,
+#else
     .board              = NULL,
+    .poll_interval_ms   = BOARD_GT911_POLL_INTERVAL_MS,
+#endif
     .frequency          = BOARD_GT911_I2C_FREQUENCY,
     .address            = BOARD_GT911_I2C_ADDRESS,
-    .poll_interval_ms   = BOARD_GT911_POLL_INTERVAL_MS,
     .x_resolution       = BOARD_GT911_X_RESOLUTION,
     .y_resolution       = BOARD_GT911_Y_RESOLUTION,
     .max_points         = BOARD_GT911_MAX_POINTS,
@@ -52,10 +188,15 @@ static const struct gt911_config_s g_gt911_configs[] =
     .invert_y           = true,
   },
   {
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+    .board              = &g_gt911_board,
+    .poll_interval_ms   = 0,
+#else
     .board              = NULL,
+    .poll_interval_ms   = BOARD_GT911_POLL_INTERVAL_MS,
+#endif
     .frequency          = BOARD_GT911_I2C_FREQUENCY,
     .address            = BOARD_GT911_I2C_BACKUP_ADDRESS,
-    .poll_interval_ms   = BOARD_GT911_POLL_INTERVAL_MS,
     .x_resolution       = BOARD_GT911_X_RESOLUTION,
     .y_resolution       = BOARD_GT911_Y_RESOLUTION,
     .max_points         = BOARD_GT911_MAX_POINTS,
@@ -89,11 +230,13 @@ int board_gt911_initialize(void)
       return -ENODEV;
     }
 
-  /* The LCD adapter does not expose the GT911 reset line.  Allow its local
-   * supply and controller boot sequence to settle before the first I2C
-   * product-ID transaction.
+  /* On a stock board the GT911 reset line is not routed to the SoC, so the
+   * controller's local supply and boot sequence must settle before the first
+   * I2C product-ID transaction.  In interrupt mode the driver calls
+   * board reset() itself, which already covers this delay.
    */
 
+#ifndef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
   syslog(LOG_INFO, "GT911 power-on wait: %u ms before product-ID probe\n",
          (unsigned int)(BOARD_GT911_POWER_ON_DELAY_US / 1000));
   ret = nxsig_usleep(BOARD_GT911_POWER_ON_DELAY_US);
@@ -103,6 +246,7 @@ int board_gt911_initialize(void)
       esp_i2cbus_uninitialize(i2c);
       return ret;
     }
+#endif
 
   for (i = 0;
        i < sizeof(g_gt911_configs) / sizeof(g_gt911_configs[0]);
@@ -115,11 +259,19 @@ int board_gt911_initialize(void)
       ret = gt911_register("/dev/input0", i2c, config);
       if (ret >= 0)
         {
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+          syslog(LOG_INFO,
+                 "GT911 registered at /dev/input0: I2C%d address=0x%02x "
+                 "irq=gpio%d reset=gpio%d\n",
+                 BOARD_GT911_I2C_BUS, config->address,
+                 BOARD_GT911_INT_GPIO, BOARD_GT911_RESET_GPIO);
+#else
           syslog(LOG_INFO,
                  "GT911 registered at /dev/input0: I2C%d address=0x%02x "
                  "poll=%ums\n",
                  BOARD_GT911_I2C_BUS, config->address,
                  BOARD_GT911_POLL_INTERVAL_MS);
+#endif
           return OK;
         }
 
