@@ -58,9 +58,30 @@ rm -rf "$BINARY_DIR"
 mkdir -p "$BINARY_DIR/arch/risc-v/src"
 ln -sfn "$BOARD_COMMON_DIR" "$BINARY_DIR/arch/risc-v/src/board"
 
-export PATH="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin:$PATH"
+# Toolchain selection.  CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN decides which
+# compiler the NuttX toolchain files pick; put the matching bin directory
+# first on PATH so every invocation in this script sees the same one.
+ESP_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin"
+XPACK_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin"
+
+if [[ -x "$ESP_TOOLCHAIN_BIN/riscv32-esp-elf-gcc" ]] &&
+   grep -q '^CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y' \
+        "$CONFIG_DIR/defconfig" 2>/dev/null; then
+  export PATH="$ESP_TOOLCHAIN_BIN:$PATH"
+else
+  export PATH="$XPACK_TOOLCHAIN_BIN:$PATH"
+fi
+
 # shellcheck disable=SC1091
 source "$ROOT_DIR/myenv/bin/activate"
+
+# Report the compiler that will actually be used; a mismatch here means the
+# PATH setup above and the NuttX toolchain selection disagree.
+if command -v riscv32-esp-elf-gcc >/dev/null 2>&1; then
+  echo "CC: $(command -v riscv32-esp-elf-gcc) ($(riscv32-esp-elf-gcc -dumpversion))"
+else
+  echo "CC: $(command -v riscv-none-elf-gcc || echo '<none>')"
+fi
 
 BOARD_CONFIG="../$(basename "$PROJECT_DIR")/board/esp32p4/$BOARD_NAME/configs/$CONFIG_NAME"
 
