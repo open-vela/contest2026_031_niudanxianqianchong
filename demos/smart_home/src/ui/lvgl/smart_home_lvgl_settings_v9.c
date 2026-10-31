@@ -1379,7 +1379,12 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
 
     g_settings.keyboard = lv_keyboard_create(screen);
     smart_home_lvgl_style_keyboard(g_settings.keyboard);
-    lv_obj_set_size(g_settings.keyboard, 704, 180);
+    /* 宽度与聊天页等其他页面统一（smart_home_lvgl_content_w()），高度保持
+     * 180 不变；底部 -72 偏移是该页既有布局（键盘浮在设置面板下方），
+     * 本次只对齐宽度，不动位置。 */
+    lv_obj_set_size(g_settings.keyboard,
+                    smart_home_lvgl_content_w(),
+                    smart_home_lvgl_keyboard_h());
     lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
     lv_obj_add_event_cb(g_settings.keyboard, model_keyboard_cb, LV_EVENT_ALL,
                         NULL);
