@@ -1,0 +1,29 @@
+diff --git a/arch/risc-v/src/cmake/Toolchain.cmake b/arch/risc-v/src/cmake/Toolchain.cmake
+index 6acfdbcf17a..ab9807a89aa 100644
+--- a/arch/risc-v/src/cmake/Toolchain.cmake
++++ b/arch/risc-v/src/cmake/Toolchain.cmake
+@@ -34,6 +34,9 @@ endif()
+ 
+ if(CONFIG_ARCH_TOOLCHAIN_CLANG)
+   set(TOOLCHAIN_PREFIX riscv64-unknown-elf)
++elseif(CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN)
++  # Espressif riscv32-esp-elf, for P4 configurations that need xespv.
++  set(TOOLCHAIN_PREFIX riscv32-esp-elf)
+ else()
+   find_program(RV_COMPILER riscv-none-elf-gcc)
+   if(RV_COMPILER)
+diff --git a/arch/risc-v/src/common/Toolchain.defs b/arch/risc-v/src/common/Toolchain.defs
+index e660a19f817..ce48a5978a8 100644
+--- a/arch/risc-v/src/common/Toolchain.defs
++++ b/arch/risc-v/src/common/Toolchain.defs
+@@ -158,6 +158,10 @@ ifeq ($(CONFIG_RISCV_TOOLCHAIN),GNU_RVG)
+ 
+   ifeq ($(CONFIG_ARCH_TOOLCHAIN_CLANG),y)
+     CROSSDEV ?= riscv64-unknown-elf-
++  else ifeq ($(CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN),y)
++    # Espressif riscv32-esp-elf, for P4 configurations that need the
++    # vendor PIE (xespv) extension.  ?= keeps a command line override.
++    CROSSDEV ?= riscv32-esp-elf-
+   else
+     ifeq ($(shell riscv-none-elf-gcc --version > /dev/null 2>&1; echo $$?), 0)
+       CROSSDEV ?= riscv-none-elf-
