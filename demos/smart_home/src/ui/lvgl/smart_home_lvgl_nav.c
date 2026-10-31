@@ -1,4 +1,4 @@
-/** SmartHome five-item product navigation. */
+/** SmartHome V9 three-item product navigation. */
 
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
@@ -8,30 +8,29 @@
 
 #include <stdint.h>
 
-static const char *const g_nav_titles[SMART_HOME_TAB_COUNT] = {
-    "首页", "设备", "聊天", "安防", "更多"
+static const char *const g_nav_titles[SMART_HOME_NAV_COUNT] = {
+    "首页", "聊天", "设置"
 };
 
-static const char *const g_nav_icons[SMART_HOME_TAB_COUNT] = {
-    ICON_NAV_HOME, ICON_NAV_DEVICES, ICON_NAV_CHAT, ICON_NAV_SECURITY,
-    ICON_NAV_MORE
+static const char *const g_nav_icons[SMART_HOME_NAV_COUNT] = {
+    ICON_NAV_HOME, ICON_NAV_CHAT, ICON_NAV_SETTINGS
 };
 
 static int tab_for_screen(const smart_home_lvgl_t *ui, const lv_obj_t *screen)
 {
     if (!ui || !screen) return SMART_HOME_TAB_HOME;
-    if (screen == ui->screen_panel) return SMART_HOME_TAB_DEVICES;
     if (screen == ui->screen_chat) return SMART_HOME_TAB_CHAT;
-    if (screen == ui->screen_security) return SMART_HOME_TAB_SECURITY;
-    if (screen == ui->screen_more || screen == ui->screen_settings ||
+    if (screen == ui->screen_settings || screen == ui->screen_more ||
         screen == ui->screen_network
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
         || screen == ui->screen_miloco
         || screen == ui->screen_miloco_bind
 #endif
     ) {
-        return SMART_HOME_TAB_MORE;
+        return SMART_HOME_TAB_SETTINGS;
     }
+    /* Home, legacy device and legacy security screens all belong to the
+     * first product tab during the migration. */
     return SMART_HOME_TAB_HOME;
 }
 
@@ -45,38 +44,33 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
     }
     switch (tab) {
     case SMART_HOME_TAB_HOME:     screen = ui->screen_home; break;
-    case SMART_HOME_TAB_DEVICES:  screen = ui->screen_panel; break;
     case SMART_HOME_TAB_CHAT:     screen = ui->screen_chat; break;
+    case SMART_HOME_TAB_SETTINGS: screen = ui->screen_settings; break;
+    case SMART_HOME_TAB_DEVICES:  screen = ui->screen_panel; break;
     case SMART_HOME_TAB_SECURITY: screen = ui->screen_security; break;
     case SMART_HOME_TAB_MORE:     screen = ui->screen_more; break;
     default: break;
     }
     if (!screen) return;
 
-    /* The P4 camera service is explicitly opt-in on the Security page. Do
-     * not retain CSI, ISP and PSRAM frame buffers while the user works in
-     * chat/settings or another product page. */
+    /* Legacy camera page: stop acquisition before leaving it. */
     if (ui->active_tab == SMART_HOME_TAB_SECURITY &&
         tab != SMART_HOME_TAB_SECURITY) {
         smart_home_lvgl_security_camera_stop(ui);
     }
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    /* 米家轮询在设备页/首页可见时运行，其余页面停止。 */
+    /* Device polling follows the pages that show device cards. */
     smart_home_lvgl_miloco_poll_set_enabled(
-        ui, tab == SMART_HOME_TAB_DEVICES || tab == SMART_HOME_TAB_HOME);
+        ui, tab == SMART_HOME_TAB_HOME || tab == SMART_HOME_TAB_DEVICES);
 #endif
     previous_tab = ui->active_tab;
     ui->active_tab = tab;
     if (tab == SMART_HOME_TAB_HOME) {
-        /* 首页统计（网络/米家设备数）在切回时取最新值。 */
         smart_home_lvgl_refresh_home(ui);
     }
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     if (tab == SMART_HOME_TAB_DEVICES && previous_tab != tab &&
         ui->app && ui->app->miloco) {
-        /* 设备页的米家轮询定时器在其他页面停摆；在聊天页让 agent
-         * 控制设备后切回时，revision 差额要等 1s 定时器首轮才追平。
-         * 进入设备页立即同步一次，卡片/开关即时反映最新状态。 */
         uint32_t revision = 0;
 
         (void)smart_home_miloco_list(ui->app->miloco, NULL, 0, &revision);
@@ -86,68 +80,89 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
     }
 #endif
 
-    /* Chat is entered from three independent product paths.  Load it
-     * directly rather than queuing another screen animation: on the P4
-     * target this makes the transition deterministic when a previous
-     * animation is still winding down after a touch event. */
-    if (tab == SMART_HOME_TAB_CHAT) {
-        lv_scr_load(screen);
-        return;
-    }
-
-    /* Waking from the screensaver is a state change, not a lateral
-     * navigation: fade in instead of sliding from a navigation side. */
-    if (lv_scr_act() == ui->screen_screensaver) {
-        lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 220, 0, false);
-        return;
-    }
-
     if (lv_scr_act() == screen) {
         return;
     }
 
-    /* Match the slide direction to the tab order: moving to a higher tab
-     * reads as forward (new screen enters from the right), a lower tab as
-     * going back (enters from the left). */
-    lv_scr_load_anim(screen,
-                     tab > previous_tab ? LV_SCR_LOAD_ANIM_MOVE_LEFT :
-                                          LV_SCR_LOAD_ANIM_MOVE_RIGHT,
-                     180, 0, false);
+    /* V9 removes full-screen slide transitions: switching tabs is an instant
+     * state change, keeping the 33 ms software renderer budget for content. */
+    if (lv_scr_act() == ui->screen_screensaver) {
+        lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 220, 0, false);
+    } else {
+        lv_scr_load(screen);
+    }
 }
 
 static void nav_btn_click(lv_event_t *event)
 {
     smart_home_lvgl_t *ui = lv_event_get_user_data(event);
-    int tab = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(event));
-    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        if (ui && tab == SMART_HOME_TAB_DEVICES && ui->panel_title) {
-            lv_label_set_text(ui->panel_title, "我的设备");
-        }
-        smart_home_lvgl_load_tab(ui, tab);
+    int tab = (int)(intptr_t)lv_obj_get_user_data(
+        lv_event_get_current_target(event));
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
+        return;
     }
+    if (tab == SMART_HOME_TAB_DEVICES && ui->panel_title) {
+        lv_label_set_text(ui->panel_title, "我的设备");
+    }
+    smart_home_lvgl_load_tab(ui, tab);
 }
 
-/* 图标容器也可接收点击，将按压视觉同步到整个导航触区。 */
+/* The icon/text container is the actual hit target on some LVGL input paths. */
 static void nav_content_press_cb(lv_event_t *event)
 {
     lv_obj_t *button = lv_event_get_user_data(event);
     lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_PRESSED) lv_obj_add_state(button, LV_STATE_PRESSED);
-    else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
+
+    if (code == LV_EVENT_PRESSED) {
+        lv_obj_add_state(button, LV_STATE_PRESSED);
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
         lv_obj_remove_state(button, LV_STATE_PRESSED);
+    }
+}
+
+static lv_obj_t *nav_item_content(lv_obj_t *button, const char *icon_name,
+                                  const char *title, lv_color_t color)
+{
+    lv_obj_t *content = lv_obj_create(button);
+    lv_obj_t *icon;
+    lv_obj_t *label;
+
+    lv_obj_remove_style_all(content);
+    lv_obj_set_size(content, SMART_HOME_NAV_ITEM_W, SMART_HOME_NAV_ITEM_H);
+    lv_obj_set_pos(content, 0, 0);
+    lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(content, 0, 0);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(content, LV_OBJ_FLAG_CLICKABLE);
+
+    icon = smart_home_lvgl_icon_create(content, icon_name, 32, 32);
+    if (icon) {
+        lv_obj_set_pos(icon, 58, 10);
+        lv_obj_set_style_image_recolor(icon, color, 0);
+        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    label = smart_home_lvgl_label_create(content, title, color, 17);
+    lv_obj_set_pos(label, 102, 14);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+
+    return content;
 }
 
 lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
                                         smart_home_lvgl_t *ui)
 {
-    lv_obj_t *bar = lv_obj_create(screen);
+    lv_obj_t *bar;
     lv_obj_t *content;
-    int gap = smart_home_lvgl_compact() ? 4 : 12;
-    int button_w = smart_home_lvgl_compact() ? 70 : 96;
-    int content_w = button_w * SMART_HOME_TAB_COUNT +
-                    gap * (SMART_HOME_TAB_COUNT - 1);
     int active = tab_for_screen(ui, screen);
 
+    if (!screen) {
+        return NULL;
+    }
+
+    bar = lv_obj_create(screen);
     lv_obj_remove_style_all(bar);
     lv_obj_set_size(bar, smart_home_lvgl_disp_w(), SMART_HOME_NAV_H);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -155,55 +170,56 @@ lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
     lv_obj_set_style_border_width(bar, 1, 0);
     lv_obj_set_style_border_color(bar, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
 
     content = lv_obj_create(bar);
     lv_obj_remove_style_all(content);
-    lv_obj_set_size(content, content_w, SMART_HOME_NAV_H - 4);
-    lv_obj_center(content);
+    lv_obj_set_size(content, smart_home_lvgl_disp_w(), SMART_HOME_NAV_H);
+    lv_obj_set_pos(content, 0, 0);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(content, 0, 0);
-    lv_obj_set_style_pad_column(content, gap, 0);
-    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    /* The bar owns the full footer; the compact inner row keeps the five
-     * touch targets visually calm instead of stretching each one edge-to-edge. */
+    lv_obj_set_style_pad_all(content, 0, 0);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_pad_all(bar, 0, 0);
-    lv_obj_set_style_pad_all(content, 0, 0);
-    /* Buttons are attached to the centred content row below. */
-    bar = content;
 
-    for (int i = 0; i < SMART_HOME_TAB_COUNT; i++) {
-        lv_obj_t *button = lv_btn_create(bar);
+    for (int i = 0; i < SMART_HOME_NAV_COUNT; i++) {
+        lv_obj_t *button = lv_btn_create(content);
         lv_obj_t *button_content;
-        lv_color_t color = i == active ? SMART_HOME_UI_COLOR_PRIMARY_DARK :
-                                         SMART_HOME_UI_COLOR_TEXT_MUTED;
+        lv_color_t color = i == active ? SMART_HOME_UI_COLOR_TEXT_PRIMARY :
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY;
+
         lv_obj_remove_style_all(button);
-        lv_obj_set_size(button, button_w, SMART_HOME_NAV_H - 8);
-        lv_obj_set_style_radius(button, 16, 0);
+        lv_obj_set_size(button, SMART_HOME_NAV_ITEM_W, SMART_HOME_NAV_ITEM_H);
+        lv_obj_set_pos(button,
+                       SMART_HOME_NAV_X0 + i * SMART_HOME_NAV_STEP,
+                       SMART_HOME_NAV_ITEM_Y);
+        lv_obj_set_style_radius(button, 14, 0);
+        lv_obj_set_ext_click_area(button, 2);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
-        smart_home_lvgl_press_feedback(button);
-        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, LV_STATE_PRESSED);
-        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
         lv_obj_add_event_cb(button, nav_btn_click, LV_EVENT_CLICKED, ui);
-        if (i == active) smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
-        else lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
-        button_content = smart_home_lvgl_icon_with_text(button, g_nav_icons[i],
-                                                  20, 20, g_nav_titles[i],
-                                                  color, 11);
-        /* The icon/text container is the actual hit target on some LVGL
-         * input paths. Give it the same handler as its button so tapping
-         * the Chat glyph or label always changes screen. */
-        lv_obj_add_flag(button_content, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_PRESSED, button);
-        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_RELEASED, button);
-        lv_obj_add_event_cb(button_content, nav_content_press_cb, LV_EVENT_PRESS_LOST, button);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON,
+                                  LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
+        if (i == active) {
+            smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
+        } else {
+            lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+        }
+
+        button_content = nav_item_content(button, g_nav_icons[i],
+                                          g_nav_titles[i], color);
         lv_obj_set_user_data(button_content, (void *)(intptr_t)i);
-        lv_obj_add_event_cb(button_content, nav_btn_click, LV_EVENT_CLICKED, ui);
-        lv_obj_center(button_content);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb,
+                            LV_EVENT_PRESSED, button);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb,
+                            LV_EVENT_RELEASED, button);
+        lv_obj_add_event_cb(button_content, nav_content_press_cb,
+                            LV_EVENT_PRESS_LOST, button);
+        lv_obj_add_event_cb(button_content, nav_btn_click,
+                            LV_EVENT_CLICKED, ui);
     }
-    return bar;
+
+    /* The test and callers expect the outer bar to own the content row. */
+    return content;
 }

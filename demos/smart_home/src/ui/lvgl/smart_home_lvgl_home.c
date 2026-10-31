@@ -179,10 +179,10 @@ static lv_color_t topbar_network_color(const smart_home_lvgl_t *ui)
     }
     status = &ui->app->system_status.network_status;
     if (status->online) {
-        return SMART_HOME_UI_COLOR_PRIMARY;
+        return SMART_HOME_UI_COLOR_TEXT_SECONDARY;
     }
     if (status->ip_status == SMART_HOME_NETWORK_OK) {
-        return lv_color_hex(0xC99442);
+        return SMART_HOME_UI_COLOR_WARNING;
     }
     return SMART_HOME_UI_COLOR_TEXT_MUTED;
 }
@@ -231,17 +231,10 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title)
 {
-    /* 摄像头/麦克风默认 off（本地预览和音频未主动开启）。 */
-    static const char *const status_icons[] = {
-        "asset:microphone-off",
-        "asset:camera-off",
-        ICON_STATUS_DND,
-        ICON_STATUS_WIFI,
-    };
+    static const int status_x[4] = { 742, 790, 838, 886 };
     lv_obj_t *bar;
     lv_obj_t *brand;
-    lv_obj_t *brand_mark;
-    lv_obj_t *status_row;
+    lv_obj_t *clock;
     lv_obj_t *icon;
     int width = smart_home_lvgl_disp_w();
     int i;
@@ -249,8 +242,8 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     if (!screen) {
         return;
     }
-    /* Product pages keep one stable brand bar; page identity belongs in the
-     * content heading so the shell never jumps while navigating. */
+    /* Product pages keep one stable 56 px brand bar; page identity belongs
+     * in the content heading so the shell never jumps while navigating. */
     (void)title;
 
     bar = lv_obj_create(screen);
@@ -261,68 +254,56 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(bar, 1, 0);
     lv_obj_set_style_border_color(bar, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
 
-    brand_mark = lv_obj_create(bar);
-    lv_obj_remove_style_all(brand_mark);
-    lv_obj_set_size(brand_mark, 36, 36);
-    lv_obj_align(brand_mark, LV_ALIGN_LEFT_MID, smart_home_lvgl_pad_x(), 0);
-    icon = smart_home_lvgl_icon_create(brand_mark, ICON_BRAND, 36, 36);
+    icon = smart_home_lvgl_icon_create(bar, ICON_BRAND, 36, 36);
     if (icon) {
-        lv_obj_center(icon);
+        lv_obj_set_pos(icon, 24, 10);
+        /* The V9 brand mark keeps its own colors. */
+        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_TRANSP, 0);
     }
 
     brand = smart_home_lvgl_label_create(bar,
                                          "OpenVela HOME",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         20);
-    lv_obj_align_to(brand, brand_mark, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                         18);
+    lv_obj_set_pos(brand, 72, 18);
 
-    {
-        lv_obj_t *clock = smart_home_lvgl_label_create(bar, "--:--",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
-
-        lv_obj_align(clock, LV_ALIGN_RIGHT_MID, -smart_home_lvgl_pad_x(), 0);
-        if (ui && ui->topbar_clock_count <
-                       (int)(sizeof(ui->topbar_clock_labels) /
-                             sizeof(ui->topbar_clock_labels[0]))) {
-            ui->topbar_clock_labels[ui->topbar_clock_count++] = clock;
-        }
+    clock = smart_home_lvgl_label_create(bar, "--:--",
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                         18);
+    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -24, 16);
+    if (ui && ui->topbar_clock_count <
+                   (int)(sizeof(ui->topbar_clock_labels) /
+                         sizeof(ui->topbar_clock_labels[0]))) {
+        ui->topbar_clock_labels[ui->topbar_clock_count++] = clock;
     }
 
-    /* Keep status icons in a fixed row anchored to the measured time label.
-     * This avoids overlap when the rendered font gives the time a wider
-     * bounding box (for example after the full MiSans font is loaded). */
-    status_row = lv_obj_create(bar);
-    lv_obj_remove_style_all(status_row);
-    lv_obj_set_size(status_row,
-                    (int)(sizeof(status_icons) / sizeof(status_icons[0])) * 26,
-                    20);
-    lv_obj_align_to(status_row,
-                    ui->topbar_clock_labels[ui->topbar_clock_count > 0 ?
-                                            ui->topbar_clock_count - 1 : 0],
-                    LV_ALIGN_OUT_LEFT_MID, -18, 0);
-    lv_obj_clear_flag(status_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(status_row, LV_OBJ_FLAG_CLICKABLE);
+    for (i = 0; i < 4; i++) {
+        const char *name;
+        lv_color_t color;
 
-    for (i = 0; i < (int)(sizeof(status_icons) / sizeof(status_icons[0])); i++) {
-        const char *icon_name = i == 3 ? topbar_network_icon(ui) :
-                             i == 1 ? (ui && ui->topbar_camera_on ?
-                                           ICON_STATUS_CAMERA :
-                                           "asset:camera-off") :
-                                         status_icons[i];
+        if (i == 0) {
+            name = "asset:microphone-off";
+        } else if (i == 1) {
+            name = (ui && ui->topbar_camera_on) ?
+                   ICON_STATUS_CAMERA : "asset:camera-off";
+        } else if (i == 2) {
+            name = "asset:volume";
+        } else {
+            name = topbar_network_icon(ui);
+        }
 
-        icon = smart_home_lvgl_icon_create(status_row, icon_name, 20, 20);
+        icon = smart_home_lvgl_icon_create(bar, name, 20, 20);
         if (!icon) {
             continue;
         }
-
-        lv_color_t color = i == 3 ? topbar_network_color(ui) :
-                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY;
-
+        color = i == 3 ? topbar_network_color(ui) :
+                         SMART_HOME_UI_COLOR_TEXT_SECONDARY;
+        lv_obj_set_pos(icon, status_x[i], 18);
         lv_obj_set_style_text_color(icon, color, 0);
         lv_obj_set_style_image_recolor(icon, color, 0);
         lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-        lv_obj_set_pos(icon, i * 26, 0);
         if (i == 3 && ui && ui->topbar_wifi_icon_count <
                            (int)(sizeof(ui->topbar_wifi_icons) /
                                  sizeof(ui->topbar_wifi_icons[0]))) {

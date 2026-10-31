@@ -36,7 +36,7 @@ COLOR_ICONS = {"openvela": 36}
 SMALL_ICONS = {
     "air-conditioning", "bulb", "camera", "camera-off", "cloud-rain", "devices", "dots",
     "home", "microphone", "microphone-off", "moon", "propeller", "robot", "shield",
-    "sparkle-2", "sun", "temperature", "wifi", "wifi-off",
+    "sparkle-2", "sun", "temperature", "volume", "wifi", "wifi-off",
 }
 
 # These are the only glyphs used as visual anchors on the 1024x600 home page.

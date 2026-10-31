@@ -101,6 +101,7 @@ extern const lv_image_dsc_t smart_home_icon_user_32;
 extern const lv_image_dsc_t smart_home_icon_video_off_32;
 extern const lv_image_dsc_t smart_home_icon_video_32;
 extern const lv_image_dsc_t smart_home_icon_volume_2_32;
+extern const lv_image_dsc_t smart_home_icon_volume_20;
 extern const lv_image_dsc_t smart_home_icon_volume_32;
 extern const lv_image_dsc_t smart_home_icon_wash_machine_32;
 extern const lv_image_dsc_t smart_home_icon_wifi_off_20;

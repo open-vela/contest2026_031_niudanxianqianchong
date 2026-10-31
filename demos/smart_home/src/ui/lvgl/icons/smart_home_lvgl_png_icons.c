@@ -80,7 +80,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:video-off", NULL, &smart_home_icon_video_off_32, NULL},
     {"asset:video", NULL, &smart_home_icon_video_32, NULL},
     {"asset:volume-2", NULL, &smart_home_icon_volume_2_32, NULL},
-    {"asset:volume", NULL, &smart_home_icon_volume_32, NULL},
+    {"asset:volume", &smart_home_icon_volume_20, &smart_home_icon_volume_32, NULL},
     {"asset:wash-machine", NULL, &smart_home_icon_wash_machine_32, NULL},
     {"asset:wifi-off", &smart_home_icon_wifi_off_20, &smart_home_icon_wifi_off_32, NULL},
     {"asset:wifi", &smart_home_icon_wifi_20, &smart_home_icon_wifi_32, NULL},

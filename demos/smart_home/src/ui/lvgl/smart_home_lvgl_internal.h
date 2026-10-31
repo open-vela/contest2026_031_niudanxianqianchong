@@ -15,9 +15,17 @@ extern "C" {
 
 #define SMART_HOME_SCR_W 1024
 #define SMART_HOME_SCR_H 600
-#define SMART_HOME_TOPBAR_H 64
+#define SMART_HOME_TOPBAR_H 56
 #define SMART_HOME_NAV_H 64
 #define SMART_HOME_NAV_BOTTOM_PAD 4
+
+/* V9 bottom navigation geometry (1024x600). */
+#define SMART_HOME_NAV_COUNT 3
+#define SMART_HOME_NAV_ITEM_W 216
+#define SMART_HOME_NAV_ITEM_H 52
+#define SMART_HOME_NAV_ITEM_Y 6
+#define SMART_HOME_NAV_X0 156
+#define SMART_HOME_NAV_STEP 248
 #define SMART_HOME_PAD_X 8
 #define SMART_HOME_PAD_Y 6
 
@@ -80,17 +88,17 @@ static inline int smart_home_lvgl_pad_x(void)
 
 enum {
     SMART_HOME_TAB_HOME = 0,
-    SMART_HOME_TAB_DEVICES,
     SMART_HOME_TAB_CHAT,
+    SMART_HOME_TAB_SETTINGS,
+    /* Legacy screens retained during the V9 migration.  They are not
+     * reachable from the three-item bottom bar. */
+    SMART_HOME_TAB_DEVICES,
     SMART_HOME_TAB_SECURITY,
     SMART_HOME_TAB_MORE,
     SMART_HOME_TAB_COUNT,
 };
 
-/* Legacy names keep the existing device and settings modules buildable
- * while their product entry points are migrated to the five-page shell. */
-#define SMART_HOME_TAB_PANEL    SMART_HOME_TAB_DEVICES
-#define SMART_HOME_TAB_SETTINGS SMART_HOME_TAB_MORE
+#define SMART_HOME_TAB_PANEL SMART_HOME_TAB_DEVICES
 
 lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
                                         smart_home_lvgl_t *ui);
