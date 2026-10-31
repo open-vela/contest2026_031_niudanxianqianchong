@@ -418,6 +418,8 @@ static void v9_switch_cb(lv_event_t *event)
     v9_update_card(index);
 }
 
+static void v9_route_cb(lv_event_t *event);
+
 static void v9_card_click_cb(lv_event_t *event)
 {
     int index = (int)(intptr_t)lv_event_get_user_data(event);
@@ -448,7 +450,38 @@ static void v9_card_click_cb(lv_event_t *event)
     label = smart_home_lvgl_label_create(panel, "设备详情控制将在 M3 接入",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
     lv_obj_set_pos(label, 0, 152);
+    if (index == 4) {
+        smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *button_label;
+
+        if (ui && ui->screen_security) {
+            lv_obj_remove_style_all(button);
+            lv_obj_set_size(button, 180, 40);
+            lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+            lv_obj_set_style_radius(button, 10, 0);
+            lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON,
+                                      0);
+            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+            smart_home_lvgl_press_feedback(button);
+            lv_obj_add_event_cb(button, v9_route_cb, LV_EVENT_CLICKED,
+                                ui->screen_security);
+            button_label = smart_home_lvgl_label_create(
+                button, "打开摄像头预览", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+            lv_obj_center(button_label);
+        }
+    }
     v9_modal_close_button(panel);
+}
+
+static void v9_route_cb(lv_event_t *event)
+{
+    lv_obj_t *target = lv_event_get_user_data(event);
+
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED && target) {
+        v9_close_modal();
+        lv_scr_load(target);
+    }
 }
 
 static void v9_family_cb(lv_event_t *event)

@@ -19,6 +19,8 @@ typedef struct {
     lv_obj_t *screen;
     lv_obj_t *panel[V9_SETTINGS_CATEGORIES];
     lv_obj_t *button[V9_SETTINGS_CATEGORIES];
+    lv_obj_t *services_modal;
+    char service_status[3][32];
     int category;
 } v9_settings_t;
 
@@ -185,6 +187,132 @@ static void build_tools_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     panel_button(panel, "打开工具与权限", ui ? ui->screen_tools : NULL);
 }
 
+static void services_modal_close(void)
+{
+    if (g_settings.services_modal) {
+        lv_obj_delete(g_settings.services_modal);
+        g_settings.services_modal = NULL;
+    }
+}
+
+static void services_mask_cb(lv_event_t *event)
+{
+    (void)event;
+    services_modal_close();
+}
+
+static void services_stop_cb(lv_event_t *event)
+{
+    lv_event_stop_bubbling(event);
+}
+
+static void services_modal_open(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *mask;
+    lv_obj_t *panel;
+    lv_obj_t *label;
+    static const char *const names[3] = {
+        "米家网关", "MCP 服务", "局域网 Node"
+    };
+
+    if (!g_settings.screen) {
+        return;
+    }
+    services_modal_close();
+    mask = lv_obj_create(g_settings.screen);
+    lv_obj_remove_style_all(mask);
+    lv_obj_set_size(mask, smart_home_lvgl_disp_w(), smart_home_lvgl_disp_h());
+    lv_obj_set_style_bg_color(mask, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_30, 0);
+    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(mask, services_mask_cb, LV_EVENT_CLICKED, NULL);
+    g_settings.services_modal = mask;
+
+    panel = lv_obj_create(mask);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, 680, 360);
+    lv_obj_center(panel);
+    smart_home_lvgl_card_style(panel);
+    lv_obj_set_style_radius(panel, 18, 0);
+    lv_obj_set_style_pad_all(panel, 24, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(panel, services_stop_cb, LV_EVENT_CLICKED, NULL);
+
+    label = smart_home_lvgl_label_create(panel, "设备与服务",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+    lv_obj_set_pos(label, 0, 0);
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *value;
+        int y = 56 + i * 46;
+
+        label = smart_home_lvgl_label_create(panel, names[i],
+                                             SMART_HOME_UI_COLOR_TEXT_PRIMARY,
+                                             16);
+        lv_obj_set_pos(label, 0, y);
+        value = smart_home_lvgl_label_create(panel,
+                                             g_settings.service_status[i],
+                                             SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                             14);
+        lv_obj_align(value, LV_ALIGN_TOP_RIGHT, 0, y);
+    }
+
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *button_label;
+        lv_obj_t *targets[3] = {
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+            ui && ui->screen_miloco ? ui->screen_miloco : NULL,
+#else
+            NULL,
+#endif
+            ui && ui->screen_mcp ? ui->screen_mcp : NULL,
+            ui && ui->screen_node ? ui->screen_node : NULL
+        };
+        static const char *const captions[3] = { "打开米家", "打开 MCP", "打开 Node" };
+
+        for (int i = 0; i < 3; i++) {
+            button = lv_button_create(panel);
+            lv_obj_remove_style_all(button);
+            lv_obj_set_size(button, 120, 36);
+            lv_obj_set_pos(button, i * 132, 290);
+            lv_obj_set_style_radius(button, 8, 0);
+            lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+            smart_home_lvgl_press_feedback(button);
+            lv_obj_add_event_cb(button, route_cb, LV_EVENT_CLICKED,
+                                targets[i]);
+            button_label = smart_home_lvgl_label_create(
+                button, captions[i], SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+            lv_obj_center(button_label);
+        }
+    }
+
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *button_label;
+
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 100, 36);
+        lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+        lv_obj_set_style_radius(button, 8, 0);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(button, services_mask_cb, LV_EVENT_CLICKED, NULL);
+        button_label = smart_home_lvgl_label_create(
+            button, "关闭", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
+        lv_obj_center(button_label);
+    }
+}
+
+static void services_modal_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+        services_modal_open(ui);
+    }
+}
+
 static void build_services_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
     const char *miloco = "未启用";
@@ -215,11 +343,33 @@ static void build_services_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
            "监听中" : "未开启";
 #endif
 
+    snprintf(g_settings.service_status[0], sizeof(g_settings.service_status[0]),
+             "%s", miloco);
+    snprintf(g_settings.service_status[1], sizeof(g_settings.service_status[1]),
+             "%s", mcp);
+    snprintf(g_settings.service_status[2], sizeof(g_settings.service_status[2]),
+             "%s", node);
     panel_title(panel, "设备与服务");
     panel_row(panel, 56, "米家网关", miloco);
     panel_row(panel, 106, "MCP 服务", mcp);
     panel_row(panel, 156, "局域网 Node", node);
-    panel_button(panel, "打开设备与服务", ui ? ui->screen_more : NULL);
+
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *label;
+
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 180, 40);
+        lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+        lv_obj_set_style_radius(button, 10, 0);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_add_event_cb(button, services_modal_cb, LV_EVENT_CLICKED, ui);
+        label = smart_home_lvgl_label_create(button, "查看连接状态",
+                                             SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+        lv_obj_center(label);
+    }
 }
 
 static void build_health_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
