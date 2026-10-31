@@ -34,15 +34,24 @@ extern "C" {
 typedef struct {
     lv_font_t *font_11;
     lv_font_t *font_12;
+    lv_font_t *font_13;
     lv_font_t *font_14;
     lv_font_t *font_15;
     lv_font_t *font_16;
     lv_font_t *font_17;
     lv_font_t *font_18;
+    lv_font_t *font_19;
     lv_font_t *font_20;
+    lv_font_t *font_22;
     lv_font_t *font_24;
+    lv_font_t *font_26;
+    lv_font_t *font_28;
     lv_font_t *font_32;
+    lv_font_t *font_38;
+    lv_font_t *font_48;
     lv_font_t *font_50;
+    lv_font_t *font_56;
+    lv_font_t *font_96;
 } smart_home_lvgl_style_t;
 
 int smart_home_lvgl_style_init(void);

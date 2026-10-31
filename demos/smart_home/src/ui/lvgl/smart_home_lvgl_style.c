@@ -158,19 +158,22 @@ int smart_home_lvgl_style_init(void)
 
     /* V9 uses exact point sizes: 11/12 captions, 15/17 body, 18 header,
      * 20 parameter, 24 page title, 50 hero time/temperature. */
-    g_style.font_11 = load_font(11);
-    g_style.font_12 = load_font(12);
-    g_style.font_14 = load_font(14);
-    g_style.font_15 = load_font(15);
-    g_style.font_16 = load_font(16);
-    g_style.font_17 = load_font(17);
-    g_style.font_18 = load_font(18);
-    g_style.font_20 = load_font(20);
-    g_style.font_24 = load_font(24);
-    g_style.font_32 = load_font(32);
-    g_style.font_50 = load_font(50);
+    static const int sizes[] = { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                 22, 24, 26, 28, 32, 38, 48, 50, 56, 96 };
+    lv_font_t **slots[] = {
+        &g_style.font_11, &g_style.font_12, &g_style.font_13,
+        &g_style.font_14, &g_style.font_15, &g_style.font_16,
+        &g_style.font_17, &g_style.font_18, &g_style.font_19,
+        &g_style.font_20, &g_style.font_22, &g_style.font_24,
+        &g_style.font_26, &g_style.font_28, &g_style.font_32,
+        &g_style.font_38, &g_style.font_48, &g_style.font_50,
+        &g_style.font_56, &g_style.font_96
+    };
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        *slots[i] = load_font(sizes[i]);
+    }
     printf("[smart_home_lvgl] font instances source=%s size=%zu "
-           "sizes=11/12/14/15/16/17/18/20/24/32/50\n",
+           "sizes=11/12/13/14/15/16/17/18/19/20/22/24/26/28/32/38/48/50/56/96\n",
            g_font_data ? "PSRAM-data" : "builtin-fallback",
            g_font_data_size);
     return 0;
@@ -191,17 +194,18 @@ static void destroy_style_font(lv_font_t **font)
 
 void smart_home_lvgl_style_deinit(void)
 {
-    destroy_style_font(&g_style.font_11);
-    destroy_style_font(&g_style.font_12);
-    destroy_style_font(&g_style.font_14);
-    destroy_style_font(&g_style.font_15);
-    destroy_style_font(&g_style.font_16);
-    destroy_style_font(&g_style.font_17);
-    destroy_style_font(&g_style.font_18);
-    destroy_style_font(&g_style.font_20);
-    destroy_style_font(&g_style.font_24);
-    destroy_style_font(&g_style.font_32);
-    destroy_style_font(&g_style.font_50);
+    lv_font_t **slots[] = {
+        &g_style.font_11, &g_style.font_12, &g_style.font_13,
+        &g_style.font_14, &g_style.font_15, &g_style.font_16,
+        &g_style.font_17, &g_style.font_18, &g_style.font_19,
+        &g_style.font_20, &g_style.font_22, &g_style.font_24,
+        &g_style.font_26, &g_style.font_28, &g_style.font_32,
+        &g_style.font_38, &g_style.font_48, &g_style.font_50,
+        &g_style.font_56, &g_style.font_96
+    };
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        destroy_style_font(slots[i]);
+    }
 
     if (g_font_data) {
         smart_home_bulk_free(g_font_data);
@@ -214,15 +218,24 @@ const lv_font_t *smart_home_lvgl_font(int size)
 {
     if (size <= 11 && g_style.font_11) return g_style.font_11;
     if (size <= 12 && g_style.font_12) return g_style.font_12;
+    if (size <= 13 && g_style.font_13) return g_style.font_13;
     if (size <= 14 && g_style.font_14) return g_style.font_14;
     if (size <= 15 && g_style.font_15) return g_style.font_15;
     if (size <= 16 && g_style.font_16) return g_style.font_16;
     if (size <= 17 && g_style.font_17) return g_style.font_17;
     if (size <= 18 && g_style.font_18) return g_style.font_18;
+    if (size <= 19 && g_style.font_19) return g_style.font_19;
     if (size <= 20 && g_style.font_20) return g_style.font_20;
+    if (size <= 22 && g_style.font_22) return g_style.font_22;
     if (size <= 24 && g_style.font_24) return g_style.font_24;
+    if (size <= 26 && g_style.font_26) return g_style.font_26;
+    if (size <= 28 && g_style.font_28) return g_style.font_28;
     if (size <= 32 && g_style.font_32) return g_style.font_32;
-    if (g_style.font_50) return g_style.font_50;
+    if (size <= 38 && g_style.font_38) return g_style.font_38;
+    if (size <= 48 && g_style.font_48) return g_style.font_48;
+    if (size <= 50 && g_style.font_50) return g_style.font_50;
+    if (size <= 56 && g_style.font_56) return g_style.font_56;
+    if (g_style.font_96) return g_style.font_96;
 
     /* Fallback to built-in Montserrat when the external font is unavailable. */
     if (size <= 12) return &lv_font_montserrat_14;
