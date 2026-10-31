@@ -61,10 +61,21 @@ ln -sfn "$BOARD_COMMON_DIR" "$BINARY_DIR/arch/risc-v/src/board"
 # Toolchain selection.  CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN decides which
 # compiler the NuttX toolchain files pick; put the matching bin directory
 # first on PATH so every invocation in this script sees the same one.
-ESP_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin"
 XPACK_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin"
 
-if [[ -x "$ESP_TOOLCHAIN_BIN/riscv32-esp-elf-gcc" ]] &&
+# Prefer the contest repository's own prebuilts/ (scripts/setup_toolchain.sh
+# destination), then fall back to the shared openvela copy.
+ESP_TOOLCHAIN_BIN=""
+for candidate in \
+    "$PROJECT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin" \
+    "$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin"; do
+  if [[ -x "$candidate/riscv32-esp-elf-gcc" ]]; then
+    ESP_TOOLCHAIN_BIN=$candidate
+    break
+  fi
+done
+
+if [[ -n "$ESP_TOOLCHAIN_BIN" ]] &&
    grep -q '^CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y' \
         "$CONFIG_DIR/defconfig" 2>/dev/null; then
   export PATH="$ESP_TOOLCHAIN_BIN:$PATH"

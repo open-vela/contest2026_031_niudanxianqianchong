@@ -56,14 +56,28 @@ if [[ ! -f "$CONFIG_DIR/defconfig" ]]; then
   exit 1
 fi
 
-ESP_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin"
 XPACK_TOOLCHAIN_BIN="$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv-none-elf/bin"
 
+# The Espressif toolchain is staged either in the contest repository's own
+# prebuilts/ (scripts/setup_toolchain.sh destination) or in the shared
+# openvela prebuilts/.  Prefer the repository copy so a branch checkout is
+# self-contained.
+ESP_TOOLCHAIN_BIN=""
+for candidate in \
+    "$PROJECT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin" \
+    "$ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin"; do
+  if [[ -x "$candidate/riscv32-esp-elf-gcc" ]]; then
+    ESP_TOOLCHAIN_BIN=$candidate
+    break
+  fi
+done
+
 if grep -q "^CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y" "$CONFIG_DIR/defconfig"; then
-  if [[ ! -x "$ESP_TOOLCHAIN_BIN/riscv32-esp-elf-gcc" ]]; then
-    echo "error: CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y but no toolchain at" >&2
-    echo "       $ESP_TOOLCHAIN_BIN" >&2
-    echo "       see docs/开发日志/编译/ESP32-P4X-乐鑫工具链S0-S3接入记录.md" >&2
+  if [[ -z "$ESP_TOOLCHAIN_BIN" ]]; then
+    echo "error: CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y but no toolchain found in" >&2
+    echo "       $PROJECT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin" >&2
+    echo "       $ROOT_DIR/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin" >&2
+    echo "       run scripts/setup_toolchain.sh first" >&2
     exit 1
   fi
   export PATH="$ESP_TOOLCHAIN_BIN:$PATH"

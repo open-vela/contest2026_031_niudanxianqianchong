@@ -234,3 +234,78 @@ CONFIG_ARCH_CHIP_CUSTOM_DIR="../contest2026_031_niudanxianqianchong/chips/esp32p
 
 **建议**：在离线或网络受限环境里，避免对含 `esp-hal-3rdparty` 的树执行
 `make distclean`；改用 `make clean` 或只删除目标对象。
+
+## 11. 工具链分发：入仓但忽略提交（2026-10-31 补充）
+
+### 11.1 决定
+
+工具链实体放到**比赛仓**的 `prebuilts/gcc/linux-x86_64/riscv32-esp-elf/`，
+通过 `.gitignore` 排除，不进入版本历史；只提交 `prebuilts/README.md`
+（说明期望布局）与 `scripts/setup_toolchain.sh`（可复现的安装流程）。
+
+理由：比赛仓是自包含的交付物，工具链放在仓内路径下便于定位；但 428 MB
+的二进制不可差分，一旦入库无法回收，因此排除。
+
+### 11.2 裁剪结果
+
+源安装 2.15 GB → 裁剪后 **428 MB**（与预置的 `xtensa-esp32s3-elf` 417 MB 相当）。
+
+| 删除项 | 体积 | 依据 |
+| --- | --- | --- |
+| `picolibc/` | 760 MB | NuttX 用 `-nostdlib` + 自带 libc |
+| 4 套无关 multilib（`rv32i` / `rv32imc` / `rv32imafc` / `rv32imafc_zb*`） | 733 MB | 平台固定 `-march=rv32imac_zicsr_zifencei -mabi=ilp32` |
+| `no-rtti` 变体 | 83 MB | 不使用 `-fno-rtti` 构建 |
+| LTO 组件（`lto1` / `lto-dump` / `lto-wrapper`） | 102 MB | 构建不使用 LTO |
+
+保留 `rv32imac_zicsr_zifencei/ilp32` 一套，加 `cc1` / `cc1plus` / `collect2` / binutils。
+
+**风险**：将来若引入 LTO 构建或改用其他 `-march`，必须重装完整工具链。
+
+### 11.3 构建脚本的查找顺序
+
+`scripts/build_p4x.sh` 与 `scripts/build_cmake_p4x.sh` 都按以下顺序找工具链：
+
+```text
+1. <比赛仓>/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin   ← 优先
+2. <openvela>/prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin ← 回退
+```
+
+两处都没有且配置开启了开关时，脚本报错退出，不静默回退到 xPack。
+
+### 11.4 端到端验证（真机）
+
+```text
+config : smp_smart_home + CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y
+command: scripts/build_p4x.sh smp_smart_home -j8
+CC     : <比赛仓>/prebuilts/.../riscv32-esp-elf-gcc (14.2.0)
+.config: CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y   ← 开关确实生效
+.comment: GCC: (crosstool-NG esp-14.2.0_20260121) 14.2.0  ← 仅此一种
+PIE    : 0 条（平台层干净）
+nuttx.bin: 1,742,500 B
+```
+
+烧录后串口日志：
+
+```text
+*** Booting NuttX ***
+[CPU0] ESP32-P4 SMP: CPU1 ready
+[CPU0] INFO: P4X MIPI-DSI framebuffer registered: /dev/fb0 1024x600 RGB565
+[CPU0] GT911 product id: 39 31 31 00 (911)
+[CPU0] P4X LittleFS mounted: source=/dev/espflash mount=/data
+NuttShell (NSH)
+```
+
+裁剪后的工具链构建的镜像功能完整。
+
+### 11.5 关于 §10.1 的补充
+
+本轮验证再次确认了 `CONFIG_ARCH_CHIP_CUSTOM_DIR` 指向主工作区造成的问题，
+并且发现一个新的前置条件：**`arch/dummy/Kconfig` 是芯片 Kconfig 的副本，
+由 make 规则按时间戳刷新**。改动芯片 Kconfig 后，`configure.sh` 阶段仍会用
+旧副本，导致新符号被静默丢弃。
+
+绕过方式：改动 Kconfig 后先手动 `cp -f <chip>/Kconfig arch/dummy/Kconfig`，
+或先跑一次 `make` 让它刷新，再重新 `configure.sh`。
+
+本轮为此在**主工作区**同步了 `chips/esp32p4/Kconfig`（工作区文件，未提交），
+因为 `CUSTOM_DIR` 指向那里。合并到主分支后该问题自然消失。
