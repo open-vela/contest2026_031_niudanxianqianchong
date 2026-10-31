@@ -16,8 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SMART_HOME_CHAT_INPUT_H 34
-#define SMART_HOME_CHAT_HEADER_H (SMART_HOME_TOPBAR_H + 12)
+#define SMART_HOME_CHAT_INPUT_H 48
+#define SMART_HOME_CHAT_HEADER_H (SMART_HOME_TOPBAR_H + 54)
 #define SMART_HOME_CHAT_STATUS_H 22
 
 static int chat_list_height(int keyboard_visible)
@@ -54,7 +54,7 @@ static void layout_chat_controls(smart_home_lvgl_t *ui, int keyboard_visible)
         lv_obj_align(ui->chat_list,
                      LV_ALIGN_TOP_MID,
                      0,
-                     SMART_HOME_TOPBAR_H + 12);
+                     SMART_HOME_CHAT_HEADER_H);
     }
 
     if (ui->chat_keyboard) {
@@ -270,14 +270,15 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
     }
 
     row = create_chat_row(ui, is_user);
-    width = smart_home_lvgl_content_w() * 74 / 100;
+    lv_obj_set_style_pad_column(row, 8, 0);
+    width = smart_home_lvgl_content_w() * 58 / 100;
     bubble = lv_obj_create(row);
     lv_obj_remove_style_all(bubble);
     lv_obj_set_width(bubble, width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_pad_all(bubble, 10, 0);
-    lv_obj_set_style_radius(bubble, 8, 0);
+    lv_obj_set_style_pad_all(bubble, 12, 0);
+    lv_obj_set_style_radius(bubble, 12, 0);
     smart_home_lvgl_set_bg(bubble,
                            is_user ? SMART_HOME_UI_COLOR_USER_BUBBLE :
                                      SMART_HOME_UI_COLOR_SURFACE);
@@ -286,9 +287,23 @@ void smart_home_lvgl_append_msg_bubble(smart_home_lvgl_t *ui,
                                          text,
                                          is_user ? SMART_HOME_UI_COLOR_PRIMARY :
                                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         12);
+                                         14);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(label, width - 20);
+    lv_obj_set_width(label, width - 24);
+    if (is_user) {
+        lv_obj_t *avatar = lv_obj_create(row);
+        lv_obj_t *glyph;
+
+        lv_obj_remove_style_all(avatar);
+        lv_obj_set_size(avatar, 44, 44);
+        lv_obj_set_style_radius(avatar, 22, 0);
+        smart_home_lvgl_set_bg(avatar, SMART_HOME_UI_COLOR_SURFACE_ON);
+        lv_obj_clear_flag(avatar, LV_OBJ_FLAG_CLICKABLE);
+        glyph = smart_home_lvgl_icon_create(avatar, "asset:user", 32, 32);
+        if (glyph) {
+            lv_obj_center(glyph);
+        }
+    }
     scroll_chat_to_bottom(ui);
 }
 
@@ -803,7 +818,10 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     smart_home_lvgl_set_bg(screen, SMART_HOME_UI_COLOR_BG);
     ui->screen_chat = screen;
 
-    smart_home_lvgl_build_top_bar(screen, ui, "智能管家");
+    smart_home_lvgl_build_top_bar(screen, ui, "聊天");
+    label = smart_home_lvgl_label_create(screen, "聊天",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
+    lv_obj_set_pos(label, 24, 76);
 
     /* Chat message list — scrollable, fills most of the screen */
     ui->chat_list = lv_obj_create(screen);
@@ -814,7 +832,7 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     lv_obj_align(ui->chat_list,
                  LV_ALIGN_TOP_MID,
                  0,
-                 SMART_HOME_TOPBAR_H + 12);
+                 SMART_HOME_CHAT_HEADER_H);
     lv_obj_set_flex_flow(ui->chat_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(ui->chat_list, 4, 0);
     lv_obj_set_style_pad_row(ui->chat_list, 8, 0);
