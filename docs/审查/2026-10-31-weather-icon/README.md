@@ -1,66 +1,54 @@
-# 首页天气图标放大并移到右上角
+# 首页天气图标放大到 96px，移除家庭模式
 
-分支 `feat/v9-weather-icon`，基线 `eea702d`。
+分支 `feat/v9-weather-icon`，基线 `eea702d`。三轮演进的最终形态。
 
 | 文件 | 内容 |
 | --- | --- |
-| `compare.png` | **主图**：改前 / 改后 上下对比（首页上半部） |
-| `home-weather-64.png` | 改后整页 |
-| `home-before.png` | 改前整页 |
+| `compare.png` | **主图**：三版纵向对比（改前 / 64px / 96px） |
+| `home-weather-96.png` | 本版整页 |
+| `top-96.png` | 本版顶部 |
+| `home-weather-64.png` | 上一版（64px + 小家庭模式） |
+| `home-before.png` | 原始（32px + 大按钮） |
 
-## 改动
+## 本版改动
 
-| 项 | 改前 | 改后 |
+| 项 | 上一版 | 本版 |
 | --- | --- | --- |
-| 天气图标尺寸 | 32×32 | **64×64** |
-| 天气图标位置 | (348,124)，温度右侧 | (936,72)，右上角 |
-| 家庭模式按钮 | 158×40 实心卡片 @ (838,96) | 112×28 雾蓝胶囊 @ (888,146) |
-| 家庭模式位置 | 右上角 | 天气图标下方 |
-| 演示数据标签 | (838,142) | (952,182) |
+| 天气图标 | 64×64 @ (936,72) | **96×96 @ (904,68)** |
+| 家庭模式 | 112×28 胶囊，保留 | **已移除** |
+| 演示数据标签 | (952,182) | (944,172)，图标正下方 |
+| 页面对象数 | 232 | 230（少了按钮与标签） |
 
-## 三个技术要点（都是实际踩到的）
+## 为什么用 96px
 
-### 1. 图标资源没有 64px 版本
+天气图标的原生最大位图是 v9 的 32px，96 正好是 **3 倍整数放大**，用 NEAREST 缩放时每个源像素对应 3×3 方块，不会出现非整数倍导致的线条宽窄不均。64px 是 2 倍，同样可行；96 只是更醒目。
 
-`smart_home_lvgl_png_icon_get("asset:sun", 64)` 原本回退到 32px，再被拉伸成 64，发虚。在生成脚本里加了 `WEATHER_ICONS` 与 `WEATHER_SIZE = 64` 档位，并在 lookup 表增加第四个槽位 `weather`：
+如果以后要更清晰，正确的路径是补一张 `res/icons/v9/96/sun.png` 原生位图，而不是继续放大。
 
-```c
-if (requested_size > 32 && requested_size <= 48 && entry->large) {
-    return entry->large;
-}
-if (requested_size > 48 && entry->weather) {
-    return entry->weather;
-}
-```
+## 家庭模式去哪了
 
-### 2. 64px 生成成了灰度图
+按钮从首页移除，但场景功能本身没删：
 
-`write_icon` 原逻辑只在 `res/icons/v9/<size>/` 存在时才用彩色（ARGB8888），v9 目录没有 `64/` 子目录，所以 64px 落进 A8 分支，渲染成单色。修正为：只要该图标有任意原生 V9 像素，所有尺寸都保持彩色。
+- `smart_home_lvgl_open_scene_popup()` 仍保留（`home.c:77`），旧首页的 `HOME_ACTION_SCENES` 入口还能打开它；
+- 相关的 `g_scene_modes`（回家/观影/睡眠/离家）和场景弹窗代码都还在；
+- 只删掉了 `v9_family_cb` 这个已无引用的回调。
 
-### 3. 图标只画出中间一小块
-
-`lv_image` 默认 `inner_align = _LV_IMAGE_ALIGN_AUTO_TRANSFORM`，缩放时会按原图尺寸居中绘制并裁掉超出部分。显式设置：
-
-```c
-lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
-```
-
-这一条最难定位：坐标、尺寸、源图数据全部正确（64×64、16384 字节、1184 个不透明像素），但屏幕上只出现中心 16×16 一块。
+也就是说：**V9 首页不再有场景入口，但场景能力仍在代码里**。后续要恢复，只需在新位置重新挂一个 `lv_obj_add_event_cb(..., open_scene_popup, ...)`。
 
 ## 验证
 
-- 像素级：图标区域从 392 个非背景像素提升到铺满 64×64 徽标。
-- Host CTest：13/13 通过（排除 `camera_dialog_check`，见下）。
-- 断言新增：徽标宽 64、源图 header.w 64、图标坐标与徽标完全重合、`inner_align == STRETCH`。回退任一项都会失败。
+- Host CTest 13/13（`camera_dialog_check` 因主分支缺符号无法构建，见下）。
+- 断言检查：徽标 96px、源图 header.w = 96、图标坐标与徽标完全重合、`inner_align == STRETCH`。
+- 对象树 232 → 230，与「移除一个按钮 + 一个标签」吻合。
 
 ## 已知阻塞（非本次改动）
 
-主分支 `eea702d` **本身编译不过**：`smart_home_lvgl_camera_dialog.c` 与 `test_camera_dialog.c` 引用了 `SMART_HOME_BOARD_CAMERA_KEY`、`SMART_HOME_V9_SOURCE_BOARD`、`smart_home_v9_board_camera_view`，这三个符号在仓库里没有任何定义。因此 `camera_dialog_check` 无法构建，其余 13 项正常。
+主分支 `eea702d` 本身编译不过：`smart_home_lvgl_camera_dialog.c` 与 `test_camera_dialog.c` 引用了 `SMART_HOME_BOARD_CAMERA_KEY`、`SMART_HOME_V9_SOURCE_BOARD`、`smart_home_v9_board_camera_view`，这三个符号在整个仓库里没有任何定义。
 
 ## 复现
 
 ```sh
-cmake -S demos/smart_home/tests/lvgl -B /tmp/wx -DOPENVELA_ROOT=/home/arongw/openvela
-cmake --build /tmp/wx --target panel_check -j8
-SMART_HOME_V9_CAPTURE=/tmp/home.ppm /tmp/wx/panel_check
+cmake -S demos/smart_home/tests/lvgl -B /tmp/wy -DOPENVELA_ROOT=/home/arongw/openvela
+cmake --build /tmp/wy --target panel_check -j8
+SMART_HOME_V9_CAPTURE=/tmp/home.ppm /tmp/wy/panel_check
 ```

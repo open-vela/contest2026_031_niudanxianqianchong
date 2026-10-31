@@ -32,7 +32,7 @@ SMALL_SIZE = 20
 LARGE_SIZE = 48
 # Home weather badge uses a dedicated 64 px asset so the glyph is rendered
 # natively instead of being upscaled from 32 px.
-WEATHER_SIZE = 64
+WEATHER_SIZE = 96
 
 # Brand artwork already includes its own background and transparent corners.
 COLOR_ICONS = {"openvela": 36}
@@ -122,12 +122,16 @@ def write_icon(source: Path, size: int) -> None:
     symbol = symbol_name(stem, size)
     pixel_source = V9_SOURCE_DIR / str(size) / source.name
     is_pixel = pixel_source.exists()
-    # Icons that ship native V9 pixels must stay full colour at every size;
-    # otherwise a 64 px weather glyph would fall back to an A8 mask and lose
-    # its palette (the sun would render as a monochrome outline).
+    # Only the weather glyphs get an oversized bitmap beyond the approved V9
+    # sizes. They must stay full colour at that size, otherwise the upscaled
+    # 96 px sun would fall back to an A8 mask and render as a monochrome
+    # outline. Other icons keep their original per-size colour decision so
+    # the 48 px assets stay A8.
+    weather_upscale = stem in WEATHER_ICONS and size == WEATHER_SIZE
     has_v9_pixels = any((V9_SOURCE_DIR / str(s) / source.name).exists()
                         for s in (SMALL_SIZE, BASE_SIZE, LARGE_SIZE))
-    is_color = stem in COLOR_ICONS or is_pixel or has_v9_pixels
+    is_color = (stem in COLOR_ICONS or is_pixel or
+                (weather_upscale and has_v9_pixels))
     if is_pixel:
         # Keep the approved canvas, palette and exact alpha bytes.
         with Image.open(pixel_source) as pixels:

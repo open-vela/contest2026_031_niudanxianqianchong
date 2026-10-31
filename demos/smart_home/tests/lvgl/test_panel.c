@@ -1309,11 +1309,11 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
 
         lv_obj_get_coords(ui->home_weather_badge, &badge_coords);
         lv_obj_get_coords(glyph, &glyph_coords);
-        /* 天气徽标 64px：图标必须同为 64px 且铺满（STRETCH），
+        /* 天气徽标 96px：图标必须同为 96px 且铺满（STRETCH），
          * 否则 AUTO_TRANSFORM 会按原图居中裁切，只画出中间一小块。
          */
-        assert(lv_obj_get_width(ui->home_weather_badge) == 64);
-        assert(src && src->header.w == 64);
+        assert(lv_obj_get_width(ui->home_weather_badge) == 96);
+        assert(src && src->header.w == 96);
         assert(badge_coords.x1 == glyph_coords.x1 &&
                badge_coords.y1 == glyph_coords.y1 &&
                badge_coords.x2 == glyph_coords.x2 &&
