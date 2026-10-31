@@ -250,6 +250,8 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_build_settings_screen_v9(ui);
     assert(ui->screen_settings_v9 != NULL);
     assert(smart_home_lvgl_v9_settings_category_count() == 6);
+    assert(smart_home_lvgl_v9_settings_select_category(1) == 1);
+    capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_NETWORK_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(2) == 2);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MODEL_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(99) == -1);
@@ -531,6 +533,18 @@ int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
         }
     }
     return AGENT_ERROR_NOT_FOUND;
+}
+
+int smart_home_network_connect_credentials(
+    smart_home_network_status_t *status, const char *ssid,
+    const char *password)
+{
+    (void)ssid; (void)password;
+    if (status) {
+        memset(status, 0, sizeof(*status));
+        status->ip_status = SMART_HOME_NETWORK_ERR_DHCP;
+    }
+    return AGENT_ERROR_INVALID;
 }
 
 static void test_v9_views(void)

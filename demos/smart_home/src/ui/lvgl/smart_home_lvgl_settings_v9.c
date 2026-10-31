@@ -3,6 +3,9 @@
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
 #include "../../config/smart_home_backends.h"
+#include "../../net/smart_home_network.h"
+
+#include <pthread.h>
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../../miloco/smart_home_miloco.h"
 #endif
@@ -28,6 +31,9 @@ typedef struct {
     lv_obj_t *model_timeout;
     lv_obj_t *model_tokens;
     lv_obj_t *model_status;
+    lv_obj_t *net_ssid;
+    lv_obj_t *net_password;
+    lv_obj_t *net_status;
     lv_obj_t *keyboard;
     int model_index;
     char model_name_draft[8][64];
@@ -170,15 +176,179 @@ static void build_display_panel(lv_obj_t *panel, lv_obj_t *settings_target)
     panel_button(panel, "打开完整设置", settings_target);
 }
 
+typedef struct {
+    smart_home_lvgl_t *ui;
+    char ssid[33];
+    char password[65];
+} v9_net_job_t;
+
+static struct {
+    pthread_t thread;
+    v9_net_job_t *job;
+    int active;
+    int ready;
+    int result;
+} g_net;
+
+static void *v9_net_worker(void *argument)
+{
+    v9_net_job_t *job = argument;
+    smart_home_network_status_t status;
+    int ret;
+
+    if (!job || !job->ui || !job->ui->app) {
+        free(job);
+        return NULL;
+    }
+    ret = smart_home_network_connect_credentials(&status, job->ssid,
+                                                 job->password);
+    pthread_mutex_lock(&job->ui->pending_mutex);
+    job->ui->app->system_status.network_status = status;
+    g_net.result = ret;
+    g_net.ready = 1;
+    pthread_mutex_unlock(&job->ui->pending_mutex);
+    memset(job->password, 0, sizeof(job->password));
+    memset(job->ssid, 0, sizeof(job->ssid));
+    free(job);
+    return NULL;
+}
+
+static void v9_net_status_refresh(smart_home_lvgl_t *ui)
+{
+    smart_home_network_status_t status;
+
+    if (!ui || !ui->app || !g_settings.net_status) {
+        return;
+    }
+    status = ui->app->system_status.network_status;
+    if (status.online) {
+        lv_label_set_text(g_settings.net_status, "已连接互联网");
+        lv_obj_set_style_text_color(g_settings.net_status,
+                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+    } else if (status.ip_status == SMART_HOME_NETWORK_OK) {
+        lv_label_set_text(g_settings.net_status,
+                          "已连接 Wi-Fi，互联网/DNS 暂不可用");
+        lv_obj_set_style_text_color(g_settings.net_status,
+                                    SMART_HOME_UI_COLOR_WARNING, 0);
+    } else if (g_net.active) {
+        lv_label_set_text(g_settings.net_status, "正在连接，请稍候…");
+        lv_obj_set_style_text_color(g_settings.net_status,
+                                    SMART_HOME_UI_COLOR_TEXT_SECONDARY, 0);
+    } else if (g_net.result < 0) {
+        lv_label_set_text(g_settings.net_status, "连接失败，请检查密码或路由器");
+        lv_obj_set_style_text_color(g_settings.net_status,
+                                    SMART_HOME_UI_COLOR_DANGER, 0);
+    } else {
+        lv_label_set_text(g_settings.net_status, "未连接");
+        lv_obj_set_style_text_color(g_settings.net_status,
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+    }
+    smart_home_lvgl_refresh_network_indicators(ui);
+}
+
+static void v9_net_timer_cb(lv_timer_t *timer)
+{
+    smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
+    int ready = 0;
+
+    pthread_mutex_lock(&ui->pending_mutex);
+    if (g_net.ready) {
+        ready = 1;
+        g_net.ready = 0;
+    }
+    pthread_mutex_unlock(&ui->pending_mutex);
+    if (ready) {
+        pthread_join(g_net.thread, NULL);
+        g_net.active = 0;
+    }
+    v9_net_status_refresh(ui);
+}
+
+static void v9_net_connect(smart_home_lvgl_t *ui)
+{
+    v9_net_job_t *job;
+    pthread_attr_t attr;
+    const char *ssid;
+    const char *password;
+    int ret;
+
+    if (!ui || !ui->app || !g_settings.net_ssid ||
+        !g_settings.net_password || g_net.active) {
+        return;
+    }
+    ssid = lv_textarea_get_text(g_settings.net_ssid);
+    password = lv_textarea_get_text(g_settings.net_password);
+    if (!ssid || !ssid[0] || strlen(ssid) > 32u || strlen(password) > 64u) {
+        lv_label_set_text(g_settings.net_status, "SSID 或密码长度不合法");
+        return;
+    }
+    job = calloc(1u, sizeof(*job));
+    if (!job) {
+        lv_label_set_text(g_settings.net_status, "内存不足，无法开始连接");
+        return;
+    }
+    job->ui = ui;
+    snprintf(job->ssid, sizeof(job->ssid), "%s", ssid);
+    snprintf(job->password, sizeof(job->password), "%s", password);
+    g_net.job = job;
+    g_net.result = 0;
+    g_net.ready = 0;
+    g_net.active = 1;
+    lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    if (pthread_attr_init(&attr) != 0) {
+        free(job);
+        g_net.active = 0;
+        return;
+    }
+    (void)pthread_attr_setstacksize(&attr, 8192u);
+    ret = pthread_create(&g_net.thread, &attr, v9_net_worker, job);
+    pthread_attr_destroy(&attr);
+    if (ret != 0) {
+        free(job);
+        g_net.active = 0;
+        lv_label_set_text(g_settings.net_status, "无法创建连接任务");
+        return;
+    }
+    v9_net_status_refresh(ui);
+}
+
+static void v9_net_connect_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+        v9_net_connect(lv_event_get_user_data(event));
+    }
+}
+
+static lv_obj_t *model_input(lv_obj_t *panel, const char *caption, int x,
+                             int y, int width, const char *placeholder);
+
 static void build_network_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
-    int online = ui && ui->app && ui->app->system_status.network_status.online;
+    lv_obj_t *button;
+    lv_obj_t *label;
 
     panel_title(panel, "无线网络");
-    panel_row(panel, 56, "家庭网络", online ? "已连接" : "未连接");
-    panel_row(panel, 106, "外部网络", "由网络服务提供");
-    panel_row(panel, 156, "Wi-Fi 凭据", "不回显");
-    panel_button(panel, "打开网络设置", ui ? ui->screen_network : NULL);
+    g_settings.net_ssid = model_input(panel, "Wi-Fi 名称（SSID）", 0, 68, 420,
+                                      "家庭 Wi-Fi");
+    g_settings.net_password = model_input(panel, "密码", 0, 136, 420,
+                                          "开放网络可留空");
+    lv_textarea_set_password_mode(g_settings.net_password, true);
+    g_settings.net_status = smart_home_lvgl_label_create(
+        panel, "未连接", SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
+    lv_obj_set_pos(g_settings.net_status, 0, 196);
+
+    button = lv_button_create(panel);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 180, 40);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_style_radius(button, 10, 0);
+    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, v9_net_connect_cb, LV_EVENT_CLICKED, ui);
+    label = smart_home_lvgl_label_create(button, "连接",
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+    lv_obj_center(label);
 }
 
 static void model_focus_cb(lv_event_t *event)
@@ -761,6 +931,11 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_add_event_cb(g_settings.keyboard, model_keyboard_cb, LV_EVENT_ALL,
                         NULL);
     lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+
+    if (ui->v9_network_timer) {
+        lv_timer_delete(ui->v9_network_timer);
+    }
+    ui->v9_network_timer = lv_timer_create(v9_net_timer_cb, 250, ui);
 
     panel_show(0);
     smart_home_lvgl_build_nav_bar(screen, ui);
