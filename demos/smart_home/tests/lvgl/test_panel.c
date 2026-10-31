@@ -11,6 +11,8 @@
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
+static void capture_v9_device_modals(smart_home_lvgl_t *ui);
+static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
 
@@ -78,6 +80,25 @@ size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
 static int submit_result;
 static int submissions;
 static bool gateway_online = true;
+bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
+                                    const char *did, smart_home_miloco_device_t *out)
+{
+    (void)service;
+    for (size_t i = 0; i < snapshot_count; i++) {
+        if (!strcmp(snapshot[i].did, did)) { *out = snapshot[i]; return true; }
+    }
+    return false;
+}
+int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
+    const char *did, const char *iid, const char *operation, int32_t value,
+    uint32_t *request_id)
+{
+    if (request_id) *request_id = 1;
+    return smart_home_miloco_submit_control(service, did, iid, operation, value);
+}
+bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
+                                      uint32_t id, int *result)
+{ (void)service; (void)id; (void)result; return false; }
 void *smart_home_bulk_alloc(size_t size) { return malloc(size); }
 void smart_home_bulk_free(void *ptr) { free(ptr); }
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
@@ -268,6 +289,7 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
     assert(smart_home_lvgl_v9_select_room(0) == 6);
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
+    capture_v9_device_modals(ui);
     test_v9_cards(ui);
 
     smart_home_lvgl_build_settings_screen_v9(ui);
@@ -283,6 +305,7 @@ static void test_home(smart_home_lvgl_t *ui)
     /* 非法分类不改选中态，回到第一类再截图，否则这张图和 model 那张重复。 */
     assert(smart_home_lvgl_v9_settings_select_category(0) == 0);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
+    capture_v9_settings_categories(ui);
     smart_home_lvgl_build_chat_screen(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     smart_home_lvgl_append_msg_bubble(ui,
@@ -747,6 +770,9 @@ int smart_home_device_service_set_device_control(
     (void)fan_speed;
     return AGENT_ERROR_INVALID;
 }
+int smart_home_device_service_get_device(smart_home_device_service_t *service,
+                                          int id, smart_home_device_t *out)
+{ (void)service; (void)id; (void)out; return AGENT_ERROR_NOT_FOUND; }
 
 static void test_room_transaction(void)
 {
@@ -842,6 +868,62 @@ static lv_obj_t *find_v9_carousel(lv_obj_t *root)
     return NULL;
 }
 
+/* 六类演示卡各自的设备弹窗截图，供二级菜单视觉核对。 */
+static void capture_v9_device_modals(smart_home_lvgl_t *ui)
+{
+    static const char *const keys[6] = {
+        "SMART_HOME_V9_MODAL_LIGHT_CAPTURE",
+        "SMART_HOME_V9_MODAL_AC_CAPTURE",
+        "SMART_HOME_V9_MODAL_WASHER_CAPTURE",
+        "SMART_HOME_V9_MODAL_ROBOT_CAPTURE",
+        "SMART_HOME_V9_MODAL_CAMERA_CAPTURE",
+        "SMART_HOME_V9_MODAL_FAN_CAPTURE",
+    };
+    lv_obj_t *carousel;
+    uint32_t i;
+    int opened = 0;
+
+    if (!getenv(keys[0])) return;
+    lv_obj_update_layout(ui->screen_home);   /* 刚建完的视口尺寸要等布局才算出来 */
+    carousel = find_v9_carousel(ui->screen_home);
+    if (!carousel) return;
+    for (i = 0; i < lv_obj_get_child_count(carousel); i++) {
+        lv_obj_t *card = lv_obj_get_child(carousel, i);
+
+        if (lv_obj_get_width(card) != 176 || lv_obj_get_height(card) != 244)
+            continue;
+        lv_obj_send_event(card, LV_EVENT_CLICKED, NULL);
+        if (lv_obj_get_child_count(ui->screen_home) > 0) {
+            lv_obj_t *mask = lv_obj_get_child(ui->screen_home, -1);
+
+            lv_obj_update_layout(ui->screen_home);
+            capture_to(ui, keys[opened < 6 ? opened : 5]);
+            lv_obj_send_event(mask, LV_EVENT_CLICKED, NULL);
+        }
+        if (++opened >= 6) break;
+    }
+}
+/* 设置页六个分类各导一张，供 v6 设计稿逐页比对。 */
+static void capture_v9_settings_categories(smart_home_lvgl_t *ui)
+{
+    static const char *const keys[6] = {
+        "SMART_HOME_V9_CAT_DISPLAY_CAPTURE",
+        "SMART_HOME_V9_CAT_NETWORK_CAPTURE",
+        "SMART_HOME_V9_CAT_MODEL_CAPTURE",
+        "SMART_HOME_V9_CAT_TOOLS_CAPTURE",
+        "SMART_HOME_V9_CAT_SERVICES_CAPTURE",
+        "SMART_HOME_V9_CAT_HEALTH_CAPTURE",
+    };
+    int i;
+
+    if (!getenv(keys[0])) return;
+    for (i = 0; i < 6; i++) {
+        if (smart_home_lvgl_v9_settings_select_category(i) != i) return;
+        lv_obj_update_layout(ui->screen_settings_v9);
+        capture_screen(ui->screen_settings_v9, keys[i]);
+    }
+    (void)smart_home_lvgl_v9_settings_select_category(0);
+}
 static void test_v9_cards(smart_home_lvgl_t *ui)
 {
     lv_obj_t *carousel;
