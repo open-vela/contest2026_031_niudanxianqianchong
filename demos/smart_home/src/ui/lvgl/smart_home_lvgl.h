@@ -255,6 +255,7 @@ typedef struct {
     lv_timer_t *network_status_timer;
     lv_obj_t *home_miloco_sub_label;
     lv_obj_t *home_weather_temp_label;
+    lv_obj_t *home_weather_condition_label;
     lv_obj_t *home_weather_city_label;
     lv_obj_t *home_weather_badge;
     lv_obj_t *home_date_label;

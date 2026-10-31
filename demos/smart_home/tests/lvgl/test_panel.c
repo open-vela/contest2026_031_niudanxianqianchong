@@ -6,9 +6,9 @@
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
 { (void)area; (void)data; lv_display_flush_ready(display); }
-static void capture_home(smart_home_lvgl_t *ui)
+static void capture_to(smart_home_lvgl_t *ui, const char *env)
 {
-    const char *path = getenv("SMART_HOME_LVGL_CAPTURE");
+    const char *path = getenv(env);
     if (!path) return;
     lv_screen_load(ui->screen_home);
     lv_refr_now(NULL);
@@ -22,6 +22,11 @@ static void capture_home(smart_home_lvgl_t *ui)
         fwrite(rgb, 1, 3, file);
     }
     fclose(file);
+}
+
+static void capture_home(smart_home_lvgl_t *ui)
+{
+    capture_to(ui, "SMART_HOME_LVGL_CAPTURE");
 }
 
 static smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
@@ -220,8 +225,26 @@ static void test_home(smart_home_lvgl_t *ui)
     lv_timer_delete(ui->home_time_timer);
     ui->home_time_timer = NULL;
     lv_obj_delete(ui->screen_home);
+    ui->screen_home = NULL;
+
+    /* V9 merged home: six cards, room filter and final card art. */
+    ui->topbar_clock_count = 0;
+    ui->topbar_wifi_icon_count = 0;
+    ui->topbar_camera_icon_count = 0;
+    smart_home_lvgl_build_home_screen_v9(ui);
+    assert(ui->screen_home != NULL);
+    assert(ui->home_weather_condition_label != NULL);
+    assert(smart_home_lvgl_v9_visible_card_count() == 6);
+    assert(smart_home_lvgl_v9_select_room(3) == 0); /* 书房: empty */
+    assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
+    assert(smart_home_lvgl_v9_select_room(0) == 6);
+    capture_to(ui, "SMART_HOME_V9_CAPTURE");
+    lv_timer_delete(ui->home_time_timer);
+    ui->home_time_timer = NULL;
+    lv_obj_delete(ui->screen_home);
+    ui->screen_home = NULL;
     lv_obj_delete(ui->screen_screensaver);
-    puts("PASS: cached weather/city, truthful counts, unknown status, midnight date, separated layout");
+    puts("PASS: cached weather/city, truthful counts, unknown status, midnight date, V9 home");
 }
 
 static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)

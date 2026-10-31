@@ -65,7 +65,7 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_log_build_stage("screensaver", "done");
 
     smart_home_lvgl_log_build_stage("home", "begin");
-    smart_home_lvgl_build_home_screen(ui);
+    smart_home_lvgl_build_home_screen_v9(ui);
     smart_home_lvgl_log_build_stage("home", "done");
 
     smart_home_lvgl_log_build_stage("panel", "begin");

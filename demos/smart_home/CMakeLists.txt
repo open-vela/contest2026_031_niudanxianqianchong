@@ -55,6 +55,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl_history.c
       src/ui/lvgl/smart_home_lvgl_chat.c
       src/ui/lvgl/smart_home_lvgl_home.c
+      src/ui/lvgl/smart_home_lvgl_home_v9.c
       src/ui/lvgl/smart_home_lvgl_nav.c
       src/ui/lvgl/smart_home_lvgl_panel.c
       src/ui/lvgl/smart_home_lvgl_pages.c
@@ -160,6 +161,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl_chat.c
       src/ui/lvgl/smart_home_lvgl_history.c
       src/ui/lvgl/smart_home_lvgl_home.c
+      src/ui/lvgl/smart_home_lvgl_home_v9.c
       src/ui/lvgl/smart_home_lvgl_nav.c
       src/ui/lvgl/smart_home_lvgl_panel.c
       src/ui/lvgl/smart_home_lvgl_pages.c

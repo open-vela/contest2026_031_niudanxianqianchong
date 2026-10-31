@@ -104,6 +104,10 @@ lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
                                         smart_home_lvgl_t *ui);
 
 void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui);
+void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui);
+void smart_home_lvgl_open_scene_popup(smart_home_lvgl_t *ui);
+int smart_home_lvgl_v9_visible_card_count(void);
+int smart_home_lvgl_v9_select_room(int index);
 void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui);

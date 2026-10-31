@@ -103,6 +103,12 @@ if [[ "${WITH_ICONS}" == "1" ]]; then
   mkdir -p "${STAGING_DIR}/res/icons"
   find "${SMART_HOME_DIR}/res/icons" -maxdepth 1 -type f -name '*.png' \
     -exec cp {} "${STAGING_DIR}/res/icons/" \;
+
+  if [[ -d "${SMART_HOME_DIR}/res/devices" ]]; then
+    mkdir -p "${STAGING_DIR}/res/devices"
+    find "${SMART_HOME_DIR}/res/devices" -maxdepth 1 -type f -name '*.png' \
+      -exec cp {} "${STAGING_DIR}/res/devices/" \;
+  fi
 fi
 
 if [[ "${WITH_FONTS}" == "1" ]]; then

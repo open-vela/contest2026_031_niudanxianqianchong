@@ -74,7 +74,7 @@ static void scene_mode_click_cb(lv_event_t *event)
     }
 }
 
-static void open_scene_mode_popup(smart_home_lvgl_t *ui)
+void smart_home_lvgl_open_scene_popup(smart_home_lvgl_t *ui)
 {
     lv_obj_t *mask;
     lv_obj_t *card;
@@ -480,7 +480,7 @@ static void home_action_cb(lv_event_t *event)
         smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_DEVICES);
         break;
     case HOME_ACTION_SCENES:
-        open_scene_mode_popup(ui);
+        smart_home_lvgl_open_scene_popup(ui);
         break;
     case HOME_ACTION_SECURITY:
         smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_SECURITY);
@@ -601,6 +601,10 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                 if (ui->home_weather_temp_label) {
                     lv_label_set_text(ui->home_weather_temp_label, buf);
                 }
+                if (ui->home_weather_condition_label) {
+                    lv_label_set_text(ui->home_weather_condition_label,
+                                      wx.condition_cn);
+                }
                 snprintf(buf, sizeof(buf), "%s · 湿度 %d%%\n风速 %d km/h",
                          wx.condition_cn, wx.humidity, wx.wind_kmph);
                 if (ui->home_env_label) {
@@ -609,8 +613,10 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                 /* 图标随真实天气同步：晴=太阳，降水=云雨，其他保持云雨。 */
                 if (ui->home_weather_badge) {
                     const char *icon = weather_icon_for(wx.condition_en);
+                    int icon_size =
+                        lv_obj_get_width(ui->home_weather_badge) > 40 ? 60 : 32;
                     const lv_image_dsc_t *asset =
-                        smart_home_lvgl_png_icon_get(icon, 60);
+                        smart_home_lvgl_png_icon_get(icon, icon_size);
 
                     if (asset) {
                         lv_obj_t *glyph =
@@ -628,6 +634,9 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
                     lv_label_set_text(ui->home_weather_city_label, "天气城市待获取");
                 if (ui->home_env_label)
                     lv_label_set_text(ui->home_env_label, "天气数据暂不可用");
+                if (ui->home_weather_condition_label)
+                    lv_label_set_text(ui->home_weather_condition_label,
+                                      "天气待获取");
                 if (ui->screensaver_weather_label)
                     lv_label_set_text(ui->screensaver_weather_label, "天气数据暂不可用");
             }

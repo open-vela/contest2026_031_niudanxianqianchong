@@ -6,6 +6,10 @@
 #define LV_USE_STDLIB_STRING 1
 #define LV_USE_STDLIB_SPRINTF 1
 #define LV_USE_LOG 0
+#define LV_USE_FS_POSIX 1
+#define LV_FS_POSIX_LETTER 'A'
+#define LV_FS_POSIX_PATH "/"
+#define LV_USE_LODEPNG 1
 #define LV_USE_NUTTX 0
 #define LV_USE_TINY_TTF 1
 #define LV_TINY_TTF_FILE_SUPPORT 0
