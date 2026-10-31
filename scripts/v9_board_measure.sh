@@ -41,19 +41,49 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-WT_REL="worktrees/$(basename "${PROJECT_ROOT}")"
+CONFIG_PATH="${PROJECT_ROOT}/board/esp32p4/esp32p4-function-ev-board/configs/${CONFIG}"
 LINK_PAIRS=(
-  "vendor/espressif/boards/esp32p4/esp32p4-function-ev-board|../../../../${WT_REL}/board/esp32p4/esp32p4-function-ev-board|../../../../contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board"
-  "packages/demos/smart_home|../../${WT_REL}/demos/smart_home|../../contest2026_031_niudanxianqianchong/demos/smart_home"
-  "packages/cAGENT|../${WT_REL}/packages/cAGENT|../contest2026_031_niudanxianqianchong/packages/cAGENT"
-  "packages/cagent_addons|../${WT_REL}/packages/cagent_addons|../contest2026_031_niudanxianqianchong/packages/cagent_addons"
+  "vendor/espressif/boards/esp32p4/esp32p4-function-ev-board|${PROJECT_ROOT}/board/esp32p4/esp32p4-function-ev-board"
+  "packages/demos/smart_home|${PROJECT_ROOT}/demos/smart_home"
+  "packages/cAGENT|${PROJECT_ROOT}/packages/cAGENT"
+  "packages/cagent_addons|${PROJECT_ROOT}/packages/cagent_addons"
 )
 
-restore_links() {
+# Snapshot every link before changing any of them, including dangling links.
+ORIGINAL_TARGETS=()
+ORIGINAL_PRESENT=()
+SWITCHED_LINKS=0
+
+save_links() {
+    local pair link target path
     for pair in "${LINK_PAIRS[@]}"; do
-        IFS='|' read -r link _original <<< "$pair"
-        ln -sfn "$original" "${OPENVELA_ROOT}/${link}"
+        IFS='|' read -r link target <<< "$pair"
+        path="${OPENVELA_ROOT}/${link}"
+        if [ -L "$path" ]; then
+            target=$(readlink -- "$path") || return 1
+            ORIGINAL_TARGETS+=("$target")
+            ORIGINAL_PRESENT+=(1)
+        elif [ -e "$path" ]; then
+            echo "拒绝替换非软链接路径: $path" >&2
+            return 1
+        else
+            ORIGINAL_TARGETS+=("")
+            ORIGINAL_PRESENT+=(0)
+        fi
     done
+}
+
+restore_links() {
+    local i link target result=0
+    for ((i=0; i<SWITCHED_LINKS; i++)); do
+        IFS='|' read -r link target <<< "${LINK_PAIRS[i]}"
+        if [ "${ORIGINAL_PRESENT[i]}" -eq 1 ]; then
+            ln -sfn -- "${ORIGINAL_TARGETS[i]}" "${OPENVELA_ROOT}/${link}" || result=1
+        elif [ -L "${OPENVELA_ROOT}/${link}" ]; then
+            rm -- "${OPENVELA_ROOT}/${link}" || result=1
+        fi
+    done
+    return "$result"
 }
 
 plan() {
@@ -62,7 +92,7 @@ plan() {
     echo "配置        : ${CONFIG}"
     echo "串口        : ${PORT} (${BAUD})"
     echo
-    echo "构建   : cd ${OPENVELA_ROOT} && ./build.sh ../${WT_REL}/board/esp32p4/esp32p4-function-ev-board/configs/${CONFIG} -j8"
+    echo "构建   : cd ${OPENVELA_ROOT} && ./build.sh ${CONFIG_PATH} -j8"
     echo "镜像   : OPENVELA_ROOT=${OPENVELA_ROOT} ./scripts/make_p4x_littlefs_data_image.sh"
     echo "备份   : esptool.py --chip esp32p4 --port ${PORT} read_flash 0x0 0x1000000 out/board_backup_<ts>.bin（会复位芯片）"
     echo "烧录   : esptool.py --chip esp32p4 --port ${PORT} --baud ${BAUD} write_flash -fs 16MB -fm dio -ff 80m 0x2000 nuttx/nuttx.bin 0x600000 ${OPENVELA_ROOT}/out/p4x_littlefs_data/data_lfs.bin"
@@ -76,18 +106,25 @@ if [ "${DO_BUILD}" -eq 0 ] && [ "${DO_IMAGE}" -eq 0 ] && [ "${DO_FLASH}" -eq 0 ]
 fi
 
 if [ "${DO_BUILD}" -eq 1 ]; then
-    trap restore_links EXIT INT TERM
+    save_links || exit 1
+    trap restore_links EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     for pair in "${LINK_PAIRS[@]}"; do
-        IFS='|' read -r link target _original <<< "$pair"
-        ln -sfn "$target" "${OPENVELA_ROOT}/${link}"
+        IFS='|' read -r link target <<< "$pair"
+        SWITCHED_LINKS=$((SWITCHED_LINKS + 1))
+        ln -sfn -- "$target" "${OPENVELA_ROOT}/${link}" || exit 1
     done
     echo "== 构建 ${CONFIG} =="
     ( cd "${OPENVELA_ROOT}" && source myenv/bin/activate && \
-      ./build.sh "../${WT_REL}/board/esp32p4/esp32p4-function-ev-board/configs/${CONFIG}" -j8 )
+      ./build.sh "${CONFIG_PATH}" -j8 )
     rc=$?
-    restore_links
+    restore_links || exit 1
     trap - EXIT INT TERM
-    # 已知无害：savedefconfig 回写步骤在相对路径参数下会 cp 失败，固件已生成。
+    if [ "$rc" -ne 0 ]; then
+        echo "构建失败：退出码 ${rc}，拒绝使用可能残留的旧固件" >&2
+        exit "$rc"
+    fi
     if [ ! -f "${OPENVELA_ROOT}/nuttx/nuttx.bin" ]; then
         echo "构建失败：没有 nuttx.bin（build 退出码 ${rc}）" >&2
         exit 1
@@ -97,7 +134,7 @@ fi
 
 if [ "${DO_IMAGE}" -eq 1 ]; then
     echo "== 生成数据镜像 =="
-    ( cd "${PROJECT_ROOT}" && OPENVELA_ROOT="${OPENVELA_ROOT}" ./scripts/make_p4x_littlefs_data_image.sh )
+    ( cd "${PROJECT_ROOT}" && OPENVELA_ROOT="${OPENVELA_ROOT}" ./scripts/make_p4x_littlefs_data_image.sh ) || exit $?
 fi
 
 if [ "${DO_BACKUP}" -eq 1 ]; then
