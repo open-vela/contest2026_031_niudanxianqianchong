@@ -288,14 +288,15 @@ static int smart_home_model_config_resolve_key(
         return AGENT_ERROR_NOT_FOUND;
     }
 
-    if ((preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) != 0u) {
-        if (!config->api_key[0]) {
-            return AGENT_ERROR_NOT_FOUND;
-        }
+    /* A non-empty field is an explicit session override for any backend. */
+    if (config->api_key[0]) {
         strncpy(resolved->api_key, config->api_key,
                 sizeof(resolved->api_key) - 1u);
         resolved->api_key[sizeof(resolved->api_key) - 1u] = '\0';
         return AGENT_OK;
+    }
+    if ((preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) != 0u) {
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     ret = smart_home_secrets_get_model_api_key(config->backend_id,
@@ -688,13 +689,15 @@ int smart_home_agent_app_apply_model_config(
     }
     ret = smart_home_model_config_validate(config, error, sizeof(error));
     if (ret != AGENT_OK) goto done;
+    int manual_key = config->api_key[0] != '\0';
     ret = smart_home_model_config_resolve_key(config, &resolved);
     if (ret != AGENT_OK) goto done;
     ret = smart_home_agent_backend_apply(app->backend, &resolved);
     if (ret != AGENT_OK) goto done;
 
     app->model_config = resolved;
-    if (strcmp(resolved.backend_id, "custom") != 0)
+    /* Keep an explicit session override; never retain a system-resolved key. */
+    if (!manual_key && strcmp(resolved.backend_id, "custom") != 0)
         secure_clear(app->model_config.api_key, sizeof(app->model_config.api_key));
     app->system_status.model_status = AGENT_OK;
     app->system_status.last_error[0] = '\0';

@@ -213,8 +213,8 @@ static void set_settings_status(smart_home_lvgl_t *ui,
     lv_obj_set_style_text_color(ui->settings_status_label, color, 0);
 }
 
-/* 内置云后端的凭据只来自 secrets.json。设置页既不显示也不接受其明文；
- * Custom 仍可使用一次性、仅当前运行期的手工 Key。 */
+/* 内置后端默认沿用 secrets.json；输入非空值时作为本次运行的手工覆盖，
+ * 不写回普通配置。Custom 仍要求手工 Key。 */
 static void update_api_key_input_for_backend(
     smart_home_lvgl_t *ui,
     const smart_home_llm_backend_preset_t *preset)
@@ -223,14 +223,10 @@ static void update_api_key_input_for_backend(
         return;
     }
 
-    if ((preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) != 0u) {
-        lv_obj_clear_state(ui->settings_api_key_input, LV_STATE_DISABLED);
-        lv_textarea_set_text(ui->settings_api_key_input, "");
-    } else {
-        lv_textarea_set_text(ui->settings_api_key_input,
-                             "由系统安全配置管理");
-        lv_obj_add_state(ui->settings_api_key_input, LV_STATE_DISABLED);
-    }
+    lv_obj_clear_state(ui->settings_api_key_input, LV_STATE_DISABLED);
+    lv_textarea_set_text(ui->settings_api_key_input, "");
+    lv_textarea_set_placeholder_text(ui->settings_api_key_input,
+                                     "留空沿用系统凭据，本次运行有效");
 }
 
 static void show_backend_key_status(smart_home_lvgl_t *ui,
@@ -451,14 +447,11 @@ static void apply_settings_event(lv_event_t *event)
     copy_textarea(config.path, sizeof(config.path), ui->settings_path_input);
     copy_textarea(config.port, sizeof(config.port), ui->settings_port_input);
     copy_textarea(config.model, sizeof(config.model), ui->settings_model_input);
-    if (preset && (preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) != 0u) {
-        copy_textarea(config.api_key,
-                      sizeof(config.api_key),
-                      ui->settings_api_key_input);
-    } else {
-        /* Never carry a prior backend's key into a built-in backend. */
-        config.api_key[0] = '\0';
-    }
+    /* Empty means "use the backend's system credential"; a non-empty value
+     * is a session-only override and is never written to settings.json. */
+    copy_textarea(config.api_key,
+                  sizeof(config.api_key),
+                  ui->settings_api_key_input);
 
     timeout_text = lv_textarea_get_text(ui->settings_timeout_input);
     timeout_ms = timeout_text ? atoi(timeout_text) : 0;
