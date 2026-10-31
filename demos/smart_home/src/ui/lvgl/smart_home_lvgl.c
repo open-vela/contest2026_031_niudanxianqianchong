@@ -8,6 +8,7 @@
 
 #include <nuttx/config.h>
 
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -375,10 +376,18 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
             perf_sum_ms += elapsed;
             if (elapsed > perf_max_ms) perf_max_ms = elapsed;
             if (lv_tick_elaps(perf_window) >= 5000u) {
-                printf("[v9-perf] frames=%u avg_ms=%u max_ms=%u\n",
+                /* 同一行带出用户堆快照，P01-P12 只需一份串口日志即可回填；
+                 * mallinfo() 反映 umm 用户堆（LVGL 与业务对象所在堆）。
+                 */
+                struct mallinfo mem = mallinfo();
+
+                printf("[v9-perf] frames=%u avg_ms=%u max_ms=%u "
+                       "heap_used=%u heap_free=%u heap_largest=%u\n",
                        (unsigned)perf_frames,
                        (unsigned)(perf_sum_ms / (perf_frames ? perf_frames : 1)),
-                       (unsigned)perf_max_ms);
+                       (unsigned)perf_max_ms,
+                       (unsigned)mem.uordblks, (unsigned)mem.fordblks,
+                       (unsigned)mem.mxordblk);
                 perf_frames = 0;
                 perf_sum_ms = 0;
                 perf_max_ms = 0;
