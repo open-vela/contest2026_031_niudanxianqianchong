@@ -6,6 +6,7 @@
 #
 #   ./scripts/v9_board_measure.sh --plan                 # 打印将执行的命令
 #   ./scripts/v9_board_measure.sh --build --image        # 只构建并生成镜像
+#   ./scripts/v9_board_measure.sh --backup               # 先备份板上 16 MiB flash（会复位芯片）
 #   ./scripts/v9_board_measure.sh --flash                # 烧录（会覆盖板上固件）
 #   ./scripts/v9_board_measure.sh --capture 1800         # 采集 30 分钟串口日志
 #   ./scripts/v9_board_measure.sh --all --capture 1800   # 全流程
@@ -23,7 +24,7 @@ PORT="${PORT:-/dev/ttyACM0}"
 BAUD="${BAUD:-921600}"
 LOG="${LOG:-${PROJECT_ROOT}/board.log}"
 
-DO_BUILD=0 DO_IMAGE=0 DO_FLASH=0 CAPTURE_SECONDS=0
+DO_BUILD=0 DO_IMAGE=0 DO_FLASH=0 DO_BACKUP=0 CAPTURE_SECONDS=0 BACKUP=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
         --build) DO_BUILD=1 ;;
         --image) DO_IMAGE=1 ;;
         --flash) DO_FLASH=1 ;;
+        --backup) DO_BACKUP=1 ;;
         --capture) shift; CAPTURE_SECONDS="${1:-0}" ;;
         --all) DO_BUILD=1; DO_IMAGE=1; DO_FLASH=1 ;;
         -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -62,12 +64,13 @@ plan() {
     echo
     echo "构建   : cd ${OPENVELA_ROOT} && ./build.sh ../${WT_REL}/board/esp32p4/esp32p4-function-ev-board/configs/${CONFIG} -j8"
     echo "镜像   : OPENVELA_ROOT=${OPENVELA_ROOT} ./scripts/make_p4x_littlefs_data_image.sh"
+    echo "备份   : esptool.py --chip esp32p4 --port ${PORT} read_flash 0x0 0x1000000 out/board_backup_<ts>.bin（会复位芯片）"
     echo "烧录   : esptool.py --chip esp32p4 --port ${PORT} --baud ${BAUD} write_flash -fs 16MB -fm dio -ff 80m 0x2000 nuttx/nuttx.bin 0x600000 ${OPENVELA_ROOT}/out/p4x_littlefs_data/data_lfs.bin"
     echo "采集   : python3 读 ${PORT} 写入 ${LOG}"
     echo "汇总   : python3 scripts/v9_perf_report.py ${LOG} --out report.md"
 }
 
-if [ "${DO_BUILD}" -eq 0 ] && [ "${DO_IMAGE}" -eq 0 ] && [ "${DO_FLASH}" -eq 0 ] && [ "${CAPTURE_SECONDS}" -eq 0 ]; then
+if [ "${DO_BUILD}" -eq 0 ] && [ "${DO_IMAGE}" -eq 0 ] && [ "${DO_FLASH}" -eq 0 ] && [ "${DO_BACKUP}" -eq 0 ] && [ "${CAPTURE_SECONDS}" -eq 0 ]; then
     plan
     exit 0
 fi
@@ -95,6 +98,19 @@ fi
 if [ "${DO_IMAGE}" -eq 1 ]; then
     echo "== 生成数据镜像 =="
     ( cd "${PROJECT_ROOT}" && OPENVELA_ROOT="${OPENVELA_ROOT}" ./scripts/make_p4x_littlefs_data_image.sh )
+fi
+
+if [ "${DO_BACKUP}" -eq 1 ]; then
+    # 先把板上现有 16 MiB flash 整体读出，便于回滚。注意 esptool 会把芯片
+    # 复位进下载模式，当前运行的固件会被打断。
+    BACKUP="${OPENVELA_ROOT}/out/board_backup_$(date +%Y%m%d-%H%M%S).bin"
+    mkdir -p "$(dirname "${BACKUP}")"
+    echo "== 备份板上 flash 到 ${BACKUP}（会复位芯片）=="
+    ( cd "${OPENVELA_ROOT}" && source myenv/bin/activate && \
+      esptool.py --chip esp32p4 --port "${PORT}" --baud "${BAUD}" \
+        read_flash 0x0 0x1000000 "${BACKUP}" ) || { echo "备份失败，中止" >&2; exit 1; }
+    ls -l "${BACKUP}"
+    echo "回滚: esptool.py --chip esp32p4 --port ${PORT} --baud ${BAUD} write_flash -fs 16MB -fm dio -ff 80m 0x0 ${BACKUP}"
 fi
 
 if [ "${DO_FLASH}" -eq 1 ]; then
