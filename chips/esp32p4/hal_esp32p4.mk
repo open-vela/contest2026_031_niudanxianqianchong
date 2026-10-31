@@ -178,6 +178,19 @@ INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY
 ifneq ($(CONFIG_ESP32P4_SELECTS_REV_LESS_V3),y)
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.ld
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.libc.ld
+
+# The ROM libgcc table is linked unconditionally, including on soft-float
+# builds (CONFIG_ARCH_FPU unset).  Its float entries must therefore be kept
+# out by the "#ifndef __NuttX__" guards inside the script itself, not here:
+# see patches/0008-esp32p4-rom-libgcc-guard-float-symbols.patch.
+#
+# Without those guards the ROM implementations of __fixdfdi, __fixsfdi,
+# __powidf2 and the complex helpers were bound as absolute ROM symbols.  The
+# P4 ROM is built with hardware floating point, so calling one executes
+# "frrm" (CSRRS on frm) and traps as an illegal instruction on a soft-float
+# image.  Integer helpers (__divdi3, __mulsi3, __ashldi3, ...) stay bound to
+# ROM on purpose, so the ROM acceleration is retained.
+
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.libgcc.ld
 ifeq ($(CONFIG_ESPRESSIF_DONT_USE_ROM_LIBC),y)
  # Use NuttX libc instead of ROM newlib functions
