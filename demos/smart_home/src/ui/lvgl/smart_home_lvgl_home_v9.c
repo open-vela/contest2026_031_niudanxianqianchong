@@ -5,6 +5,7 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "smart_home_v9_device_view.h"
 #include "../../device/smart_home_device_service.h"
+#include "../../smart_home_memory.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../../miloco/smart_home_miloco.h"
 #endif
@@ -97,13 +98,100 @@ typedef struct {
 
 static v9_home_state_t g_v9;
 
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+static void v9_camera_preview_stop(void);
+#endif
+
 static void v9_close_modal(void)
 {
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    v9_camera_preview_stop();
+#endif
     if (g_v9.modal) {
         lv_obj_delete(g_v9.modal);
         g_v9.modal = NULL;
     }
 }
+
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+static lv_timer_t *g_cam_timer;
+static void *g_cam_buffer;
+static lv_image_dsc_t g_cam_image;
+static lv_obj_t *g_cam_view;
+static int g_cam_started;
+static uint32_t g_cam_sequence;
+
+static void v9_camera_timer_cb(lv_timer_t *timer)
+{
+    uint32_t sequence = 0;
+
+    (void)timer;
+    if (!g_cam_buffer || !g_cam_view) {
+        return;
+    }
+    if (smart_home_camera_copy_latest(g_cam_buffer,
+                                      SMART_HOME_CAMERA_PREVIEW_BYTES,
+                                      &sequence) == AGENT_OK &&
+        sequence != g_cam_sequence) {
+        g_cam_sequence = sequence;
+        lv_obj_invalidate(g_cam_view);
+    }
+}
+
+static void v9_camera_preview_stop(void)
+{
+    if (g_cam_timer) {
+        lv_timer_delete(g_cam_timer);
+        g_cam_timer = NULL;
+    }
+    g_cam_view = NULL;
+    if (g_cam_buffer) {
+        smart_home_bulk_free(g_cam_buffer);
+        g_cam_buffer = NULL;
+    }
+    if (g_cam_started) {
+        (void)smart_home_camera_stop();
+        g_cam_started = 0;
+    }
+}
+
+static int v9_camera_preview_start(smart_home_lvgl_t *ui, lv_obj_t *panel)
+{
+    if (!ui || !panel || g_cam_timer) {
+        return 0;
+    }
+    g_cam_buffer = smart_home_bulk_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES);
+    if (!g_cam_buffer) {
+        lv_obj_t *label = smart_home_lvgl_label_create(
+            panel, "预览缓冲区分配失败", SMART_HOME_UI_COLOR_DANGER, 14);
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 60);
+        return -1;
+    }
+    memset(g_cam_buffer, 0, SMART_HOME_CAMERA_PREVIEW_BYTES);
+    memset(&g_cam_image, 0, sizeof(g_cam_image));
+    g_cam_image.header.magic = LV_IMAGE_HEADER_MAGIC;
+    g_cam_image.header.cf = LV_COLOR_FORMAT_RGB565;
+    g_cam_image.header.w = SMART_HOME_CAMERA_PREVIEW_WIDTH;
+    g_cam_image.header.h = SMART_HOME_CAMERA_PREVIEW_HEIGHT;
+    g_cam_image.header.stride = SMART_HOME_CAMERA_PREVIEW_WIDTH * 2u;
+    g_cam_image.data_size = SMART_HOME_CAMERA_PREVIEW_BYTES;
+    g_cam_image.data = g_cam_buffer;
+
+    g_cam_view = lv_image_create(panel);
+    lv_image_set_src(g_cam_view, &g_cam_image);
+    lv_obj_set_size(g_cam_view, SMART_HOME_CAMERA_PREVIEW_WIDTH,
+                    SMART_HOME_CAMERA_PREVIEW_HEIGHT);
+    lv_obj_align(g_cam_view, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_set_style_radius(g_cam_view, 10, 0);
+    lv_obj_clear_flag(g_cam_view, LV_OBJ_FLAG_CLICKABLE);
+
+    if (smart_home_camera_start() == AGENT_OK) {
+        g_cam_started = 1;
+    }
+    g_cam_timer = lv_timer_create(v9_camera_timer_cb, 66, ui);
+    return 0;
+}
+#endif
 
 static void v9_mask_click_cb(lv_event_t *event)
 {
@@ -466,6 +554,9 @@ static void v9_card_click_cb(lv_event_t *event)
     lv_obj_set_pos(label, 0, 152);
     if (index == 4) {
         smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+        (void)v9_camera_preview_start(ui, panel);
+#endif
         lv_obj_t *button = lv_button_create(panel);
         lv_obj_t *button_label;
 
