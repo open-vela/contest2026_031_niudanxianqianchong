@@ -2,11 +2,13 @@
 
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
+#include "../../config/smart_home_backends.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../../miloco/smart_home_miloco.h"
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define V9_SETTINGS_CATEGORIES 6
@@ -20,6 +22,16 @@ typedef struct {
     lv_obj_t *panel[V9_SETTINGS_CATEGORIES];
     lv_obj_t *button[V9_SETTINGS_CATEGORIES];
     lv_obj_t *services_modal;
+    lv_obj_t *model_dd;
+    lv_obj_t *model_name;
+    lv_obj_t *model_key;
+    lv_obj_t *model_timeout;
+    lv_obj_t *model_tokens;
+    lv_obj_t *model_status;
+    lv_obj_t *keyboard;
+    int model_index;
+    char model_name_draft[8][64];
+    char model_key_draft[8][128];
     char service_status[3][32];
     int category;
 } v9_settings_t;
@@ -32,6 +44,10 @@ static void panel_show(int category)
         return;
     }
     g_settings.category = category;
+    if (g_settings.keyboard) {
+        lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(g_settings.keyboard, NULL);
+    }
     for (int i = 0; i < V9_SETTINGS_CATEGORIES; i++) {
         lv_obj_t *btn = g_settings.button[i];
         lv_obj_t *label;
@@ -163,16 +179,219 @@ static void build_network_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     panel_button(panel, "打开网络设置", ui ? ui->screen_network : NULL);
 }
 
+static void model_focus_cb(lv_event_t *event)
+{
+    lv_obj_t *textarea = lv_event_get_target(event);
+
+    if (g_settings.keyboard) {
+        lv_keyboard_set_textarea(g_settings.keyboard, textarea);
+        lv_obj_clear_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void model_keyboard_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(g_settings.keyboard, NULL);
+    }
+}
+
+static lv_obj_t *model_input(lv_obj_t *panel, const char *caption, int x,
+                             int y, int width, const char *placeholder)
+{
+    lv_obj_t *label = smart_home_lvgl_label_create(
+        panel, caption, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
+    lv_obj_t *textarea = lv_textarea_create(panel);
+
+    lv_obj_set_pos(label, x, y - 20);
+    lv_obj_set_pos(textarea, x, y);
+    lv_obj_set_size(textarea, width, 40);
+    lv_textarea_set_one_line(textarea, true);
+    lv_textarea_set_placeholder_text(textarea, placeholder);
+    lv_obj_add_event_cb(textarea, model_focus_cb, LV_EVENT_FOCUSED, NULL);
+    return textarea;
+}
+
+static void model_save_draft(void)
+{
+    int index = g_settings.model_index;
+
+    if (index < 0 || index >= 8) {
+        return;
+    }
+    if (g_settings.model_name) {
+        lv_textarea_get_text(g_settings.model_name);
+        snprintf(g_settings.model_name_draft[index],
+                 sizeof(g_settings.model_name_draft[index]), "%s",
+                 lv_textarea_get_text(g_settings.model_name));
+    }
+    if (g_settings.model_key) {
+        snprintf(g_settings.model_key_draft[index],
+                 sizeof(g_settings.model_key_draft[index]), "%s",
+                 lv_textarea_get_text(g_settings.model_key));
+    }
+}
+
+static void model_load(smart_home_lvgl_t *ui, int index)
+{
+    const smart_home_llm_backend_preset_t *preset =
+        smart_home_llm_backend_get((size_t)index);
+    char buffer[32];
+
+    g_settings.model_index = index;
+    if (!preset) {
+        return;
+    }
+    if (g_settings.model_name) {
+        lv_textarea_set_text(g_settings.model_name,
+                             g_settings.model_name_draft[index][0] ?
+                             g_settings.model_name_draft[index] :
+                             (preset->default_model ? preset->default_model : ""));
+    }
+    if (g_settings.model_key) {
+        lv_textarea_set_text(g_settings.model_key,
+                             g_settings.model_key_draft[index]);
+    }
+    if (g_settings.model_timeout) {
+        snprintf(buffer, sizeof(buffer), "%u",
+                 (unsigned)preset->default_timeout_ms);
+        lv_textarea_set_text(g_settings.model_timeout, buffer);
+    }
+    if (g_settings.model_tokens && ui && ui->app) {
+        snprintf(buffer, sizeof(buffer), "%u",
+                 (unsigned)ui->app->model_config.max_output_tokens);
+        lv_textarea_set_text(g_settings.model_tokens, buffer);
+    }
+    if (g_settings.model_status) {
+        lv_label_set_text(g_settings.model_status, "切换后端会保留当前草稿");
+        lv_obj_set_style_text_color(g_settings.model_status,
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+    }
+}
+
+static void model_dropdown_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    int index;
+
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    index = (int)lv_dropdown_get_selected(g_settings.model_dd);
+    model_save_draft();
+    model_load(ui, index);
+}
+
+static void model_apply_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    const smart_home_llm_backend_preset_t *preset;
+    smart_home_model_config_t config;
+    int index;
+    int timeout;
+    int tokens;
+    int ret;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app) {
+        return;
+    }
+    index = (int)lv_dropdown_get_selected(g_settings.model_dd);
+    preset = smart_home_llm_backend_get((size_t)index);
+    if (!preset) {
+        return;
+    }
+    config = ui->app->model_config;
+    if (!(preset->flags & SMART_HOME_LLM_FLAG_CUSTOM)) {
+        (void)smart_home_model_config_from_preset(&config, preset, 0);
+    }
+    snprintf(config.backend_id, sizeof(config.backend_id), "%s", preset->id);
+    snprintf(config.model, sizeof(config.model), "%s",
+             lv_textarea_get_text(g_settings.model_name));
+    snprintf(config.api_key, sizeof(config.api_key), "%s",
+             lv_textarea_get_text(g_settings.model_key));
+    timeout = atoi(lv_textarea_get_text(g_settings.model_timeout));
+    if (timeout > 0) {
+        config.timeout_ms = (uint32_t)timeout;
+    }
+    tokens = atoi(lv_textarea_get_text(g_settings.model_tokens));
+    if (tokens > 0) {
+        config.max_output_tokens = (uint32_t)tokens;
+    }
+    ret = smart_home_agent_app_apply_model_config(ui->app, &config);
+    if (g_settings.model_status) {
+        lv_label_set_text(g_settings.model_status,
+                          ret == AGENT_OK ? "本次配置已应用" : "配置应用失败");
+        lv_obj_set_style_text_color(g_settings.model_status,
+            ret == AGENT_OK ? SMART_HOME_UI_COLOR_SUCCESS :
+                              SMART_HOME_UI_COLOR_DANGER, 0);
+    }
+    if (g_settings.keyboard) {
+        lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
-    int ready = ui && ui->app &&
-                ui->app->system_status.model_status == AGENT_OK;
+    char options[256] = "";
+    size_t count = smart_home_llm_backend_count();
+    int initial = 0;
 
     panel_title(panel, "模型服务");
-    panel_row(panel, 56, "当前服务", state_text(ready));
-    panel_row(panel, 106, "模型标识", "由模型配置提供");
-    panel_row(panel, 156, "API 密钥", "不回显");
-    panel_button(panel, "打开模型服务", ui ? ui->screen_model : NULL);
+    g_settings.model_dd = lv_dropdown_create(panel);
+    lv_obj_set_pos(g_settings.model_dd, 0, 68);
+    lv_obj_set_size(g_settings.model_dd, 240, 40);
+    for (size_t i = 0; i < count; i++) {
+        const smart_home_llm_backend_preset_t *preset =
+            smart_home_llm_backend_get(i);
+        if (!preset) continue;
+        if (i) strncat(options, "\n", sizeof(options) - strlen(options) - 1);
+        strncat(options, preset->name, sizeof(options) - strlen(options) - 1);
+    }
+    lv_dropdown_set_options(g_settings.model_dd, options);
+    lv_obj_add_event_cb(g_settings.model_dd, model_dropdown_cb,
+                        LV_EVENT_VALUE_CHANGED, ui);
+
+    g_settings.model_name = model_input(panel, "模型标识", 260, 68, 300,
+                                        "模型名称");
+    g_settings.model_key = model_input(panel, "API 密钥", 0, 136, 560,
+                                       "留空沿用系统凭据，本次运行有效");
+    g_settings.model_timeout = model_input(panel, "请求超时 / 毫秒", 0, 204,
+                                           160, "30000");
+    g_settings.model_tokens = model_input(panel, "最大输出 / 词元", 180, 204,
+                                          160, "512");
+
+    g_settings.model_status = smart_home_lvgl_label_create(
+        panel, "", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(g_settings.model_status, 0, 258);
+
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *label;
+        lv_obj_remove_style_all(button);
+        lv_obj_set_size(button, 180, 40);
+        lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+        lv_obj_set_style_radius(button, 10, 0);
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        smart_home_lvgl_press_feedback(button);
+        lv_obj_add_event_cb(button, model_apply_cb, LV_EVENT_CLICKED, ui);
+        label = smart_home_lvgl_label_create(button, "应用本次配置",
+                                             SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+        lv_obj_center(label);
+    }
+
+    if (ui && ui->app) {
+        initial = smart_home_llm_backend_index_for_config(
+            &ui->app->model_config);
+    }
+    if (initial < 0 || initial >= (int)count) {
+        initial = 0;
+    }
+    lv_dropdown_set_selected(g_settings.model_dd, (uint32_t)initial);
+    model_load(ui, initial);
 }
 
 static void build_tools_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
@@ -463,6 +682,14 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     build_tools_panel(ui, g_settings.panel[3]);
     build_services_panel(ui, g_settings.panel[4]);
     build_health_panel(ui, g_settings.panel[5]);
+
+    g_settings.keyboard = lv_keyboard_create(screen);
+    smart_home_lvgl_style_keyboard(g_settings.keyboard);
+    lv_obj_set_size(g_settings.keyboard, 704, 180);
+    lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
+    lv_obj_add_event_cb(g_settings.keyboard, model_keyboard_cb, LV_EVENT_ALL,
+                        NULL);
+    lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
 
     panel_show(0);
     smart_home_lvgl_build_nav_bar(screen, ui);

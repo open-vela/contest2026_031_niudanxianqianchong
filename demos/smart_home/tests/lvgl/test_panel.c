@@ -1,6 +1,7 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
 #include "smart_home_v9_device_view.h"
+#include "../../src/config/smart_home_backends.h"
 #include <assert.h>
 #include <stdlib.h>
 
@@ -250,6 +251,7 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(ui->screen_settings_v9 != NULL);
     assert(smart_home_lvgl_v9_settings_category_count() == 6);
     assert(smart_home_lvgl_v9_settings_select_category(2) == 2);
+    capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_MODEL_CAPTURE");
     assert(smart_home_lvgl_v9_settings_select_category(99) == -1);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     lv_obj_delete(ui->screen_settings_v9);
@@ -485,6 +487,37 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
 #endif
     puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
 }
+
+static const smart_home_llm_backend_preset_t g_test_preset = {
+    "deepseek", "DeepSeek", "api.deepseek.com", "/chat", "443",
+    "deepseek-chat", 30000, 0
+};
+size_t smart_home_llm_backend_count(void) { return 1; }
+const smart_home_llm_backend_preset_t *smart_home_llm_backend_get(size_t i)
+{ return i == 0 ? &g_test_preset : NULL; }
+const smart_home_llm_backend_preset_t *smart_home_llm_backend_default(void)
+{ return &g_test_preset; }
+int smart_home_llm_backend_index_by_id(const char *id)
+{ (void)id; return 0; }
+int smart_home_llm_backend_index_for_config(
+    const smart_home_model_config_t *config)
+{ (void)config; return 0; }
+int smart_home_model_config_from_preset(smart_home_model_config_t *config,
+                                        const smart_home_llm_backend_preset_t *p,
+                                        int keep_api_key)
+{
+    if (!config || !p) return AGENT_ERROR_INVALID;
+    snprintf(config->host, sizeof(config->host), "%s", p->host);
+    snprintf(config->path, sizeof(config->path), "%s", p->path);
+    snprintf(config->port, sizeof(config->port), "%s", p->port);
+    snprintf(config->model, sizeof(config->model), "%s", p->default_model);
+    config->timeout_ms = p->default_timeout_ms;
+    if (!keep_api_key) config->api_key[0] = '\0';
+    return AGENT_OK;
+}
+int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,
+                                            const smart_home_model_config_t *c)
+{ (void)app; (void)c; return AGENT_OK; }
 
 static void test_v9_views(void)
 {
