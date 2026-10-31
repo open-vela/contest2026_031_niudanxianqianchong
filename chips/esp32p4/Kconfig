@@ -42,6 +42,23 @@ config ARCH_CHIP_ESP32P4
 
 if ARCH_CHIP_ESP32P4
 
+config ESP32P4_ESPRESSIF_TOOLCHAIN
+	bool "Build ESP32-P4 with the Espressif riscv32-esp-elf toolchain"
+	default n
+	---help---
+		Use Espressif's crosstool-NG riscv32-esp-elf GCC for the whole
+		firmware, the same way ESP32-S3 uses xtensa-esp32s3-elf.  Required
+		by packages that emit Espressif PIE (xespv) instructions, such as
+		packages/esp-nn.
+
+		The toolchain must be on PATH as riscv32-esp-elf-gcc (fixed
+		version esp-14.2.0_20260121 or newer, which is the first release
+		carrying ESP32-P4 ECO5 / xespv support).
+
+		Defaults to n so that a plain checkout builds with the generic
+		riscv-none-elf toolchain shipped in prebuilts; enable it explicitly
+		per configuration.
+
 config ESP32P4_SMP
 	bool "Experimental ESP32-P4 dual-core SMP"
 	depends on SMP && EXPERIMENTAL
