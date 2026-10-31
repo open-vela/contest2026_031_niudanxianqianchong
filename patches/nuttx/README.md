@@ -45,3 +45,33 @@ git apply --unidiff-zero ../contest2026_031_niudanxianqianchong/patches/nuttx/00
 P4 SMP 由本项目实现启核与 IPI；其他配置继续使用原有通用实现。
 适用基线为 NuttX `106bf012365ed035c6d6c717e73448e76089d721`。
 构建和板端验收见[独立 SMP 配置](../../board/esp32p4/esp32p4-function-ev-board/configs/smp/README.md)。
+
+## ESP-NN / 工具链相关
+
+10. `0010-riscv-allow-custom-smp.patch`：允许自定义 SMP 配置。
+11. `0011-cmake-multi-ld-script.patch`：CMake 路径支持多个链接脚本。
+12. `0012-espressif-riscv-toolchain.patch`：`CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y`
+    时，Make（`arch/risc-v/src/common/Toolchain.defs`）与 CMake
+    （`arch/risc-v/src/cmake/Toolchain.cmake`）都把工具链前缀切到
+    `riscv32-esp-elf`。开关默认 `n`，关闭时行为与打补丁前完全一致。
+    需要该开关的配置必须先准备乐鑫工具链，见
+    `docs/开发日志/编译/ESP32-P4X-乐鑫工具链S0-S3接入记录.md`。
+
+```sh
+git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0012-espressif-riscv-toolchain.patch
+git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0012-espressif-riscv-toolchain.patch
+```
+
+13. `0013-usrsock-guard-net-only-inline.patch`：把 `usrsock_sem_timedwait()`
+    包进 `#ifdef CONFIG_NET`。该 inline 函数调用 `net_sem_timedwait2()`，
+    而后者在 `include/nuttx/net/net.h` 里位于 `#ifdef CONFIG_NET` 之内。
+    `drivers/drivers_initialize.c` 通过 `usrsock_rpmsg.h` 无条件引入本头文件，
+    在 `CONFIG_NET=n` 的配置（如 `nsh`）下 GCC 14 报
+    `implicit declaration of function net_sem_timedwait2` 错误（GCC 13 只是警告）。
+    其余三个 inline（`usrsock_lock` / `usrsock_unlock` / `usrsock_mutex_timedlock`）
+    只依赖 `nxrmutex_*` 与 `nxmutex_*`，保持无条件。
+
+```sh
+git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
+git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
+```

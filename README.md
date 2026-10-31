@@ -123,6 +123,42 @@ cd ~/openvela
   -j2
 ```
 
+### 3.1 `smp_smart_home` 需要乐鑫工具链（必须用 `build_p4x.sh`）
+
+`smp_smart_home` 开启了 `CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN`，用乐鑫
+`riscv32-esp-elf` 工具链构建（与 ESP32-S3 用 `xtensa-esp32s3-elf` 同理）。
+这个开关是为 ESP-NN 的 PIE 指令准备的；其余配置仍用 OpenVela 自带的
+`riscv-none-elf`，行为不变。
+
+**这个配置不要用 `./build.sh`。** `build.sh` 不会应用 `patches/nuttx/*`，
+开关会被 Kconfig 静默丢弃，最终编出的是 xPack 的镜像，而且没有任何提示。
+
+正确步骤：
+
+```bash
+cd ~/openvela/contest2026_031_niudanxianqianchong
+
+# 1. 准备工具链（约 430 MB，不入库，位置 prebuilts/gcc/linux-x86_64/）
+scripts/setup_toolchain.sh --check    # 已装好时只校验
+scripts/setup_toolchain.sh            # 未安装时下载 + 校验 + 裁剪
+scripts/setup_toolchain.sh --source ~/.espressif/tools/riscv32-esp-elf/esp-14.2.0_20260121/riscv32-esp-elf
+                                      # 或从本机已有安装复制
+
+# 2. 构建（会自动打补丁、切换编译器，工具链缺失时硬报错）
+scripts/build_p4x.sh smp_smart_home -j8
+```
+
+第一行输出应是：
+
+```text
+CC: .../prebuilts/gcc/linux-x86_64/riscv32-esp-elf/bin/riscv32-esp-elf-gcc (14.2.0)
+```
+
+看到 `riscv-none-elf-gcc` 就说明开关没生效，先停下来排查。
+
+工具链的裁剪内容、查找顺序、回滚方式见
+[docs/开发日志/编译/ESP32-P4X-乐鑫工具链S0-S3接入记录.md](docs/开发日志/编译/ESP32-P4X-乐鑫工具链S0-S3接入记录.md)。
+
 ### 4. 烧录和串口连接
 
 ```bash

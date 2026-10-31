@@ -1,0 +1,29 @@
+diff --git a/include/nuttx/net/usrsock.h b/include/nuttx/net/usrsock.h
+index 7309e147632..502dccf648f 100644
+--- a/include/nuttx/net/usrsock.h
++++ b/include/nuttx/net/usrsock.h
+@@ -314,8 +314,15 @@ static inline_function void usrsock_unlock(void)
+  * Description:
+  *   Wait for sem while temporarily releasing the usrsock lock.
+  *
++ *   This helper is only meaningful with networking enabled: it forwards to
++ *   net_sem_timedwait2(), which is declared in <nuttx/net/net.h> inside the
++ *   CONFIG_NET block.  The other helpers in this header only use nxrmutex_*
++ *   and nxmutex_*, which are always available, so they stay unconditional.
++ *
+  ****************************************************************************/
+ 
++#ifdef CONFIG_NET
++
+ static inline_function int
+ usrsock_sem_timedwait(FAR sem_t *sem, bool interruptible,
+                       unsigned int timeout)
+@@ -324,6 +331,8 @@ usrsock_sem_timedwait(FAR sem_t *sem, bool interruptible,
+                             NULL);
+ }
+ 
++#endif /* CONFIG_NET */
++
+ /****************************************************************************
+  * Name: usrsock_mutex_timedlock
+  *
