@@ -154,24 +154,9 @@ int smart_home_secrets_get_miloco(char *host, size_t host_size,
     if (token && token_size) token[0] = '\0';
     return AGENT_OK;
 }
-int smart_home_miloco_qr_encode(const char *text, uint8_t *matrix,
-                                int *modules)
-{
-    int n = 21;
-    int i;
-
-    (void)text;
-    if (!matrix || !modules) return -1;
-    memset(matrix, 0, (size_t)n * (size_t)n);
-    for (i = 0; i < n; i++) {
-        matrix[i] = 1;                    /* 顶边 */
-        matrix[(size_t)(n - 1) * n + i] = 1;  /* 底边 */
-        matrix[(size_t)i * n] = 1;            /* 左边 */
-        matrix[(size_t)i * n + (n - 1)] = 1;  /* 右边 */
-    }
-    *modules = n;
-    return 0;
-}
+/* 二维码编码用真实实现（third_party/qrcodegen），否则画出来的图
+ * 与固件不一致，也无法验证扫码。桩只覆盖 secrets 回落。
+ */
 void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui) { (void)ui; }
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
 int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)

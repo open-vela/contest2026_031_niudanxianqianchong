@@ -30,7 +30,9 @@
 #define BIND_MODAL_W 840
 #define BIND_MODAL_H 480
 #define BIND_QR_CARD_PX 256
-#define BIND_QR_MODULE_PAD 20
+/* 静区（quiet zone）取 12px：25 模块 × 9px = 225px，占白卡 88%，
+ * 既保证扫码识读又保留必要留白。 */
+#define BIND_QR_MODULE_PAD 12
 #define BIND_JUMP_DELAY_TICKS 2
 
 static uint8_t s_qr_matrix[SMART_HOME_MILOCO_QR_MAX_MODULES *
@@ -343,10 +345,12 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
     s_qr_card = card;
     bind_render_qr(card, ui);
 
-    /* 示意二维码 (252,439) 13px 居中。 */
-    label = smart_home_lvgl_label_create(panel, "示意二维码",
+    /* 米家二维码标注：与 QR 白卡同宽同左边界，水平居中于卡片下方。
+     * 白卡在面板内位于 (32,100) 宽 256，标注取 x=32 宽 256 即居中。
+     */
+    label = smart_home_lvgl_label_create(panel, "米家二维码",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
-    lv_obj_set_pos(label, 92, 368);
+    lv_obj_set_pos(label, 32, 368);
     lv_obj_set_width(label, BIND_QR_CARD_PX);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 
