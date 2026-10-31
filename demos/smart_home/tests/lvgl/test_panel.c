@@ -1,5 +1,6 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
+#include "smart_home_v9_device_view.h"
 #include <assert.h>
 #include <stdlib.h>
 
@@ -485,6 +486,45 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
     puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
 }
 
+static void test_v9_views(void)
+{
+    smart_home_state_t state;
+    smart_home_v9_device_view_t views[SMART_HOME_V9_MAX_VIEWS];
+    smart_home_v9_control_t control;
+    size_t count;
+
+    smart_home_device_init(&state);
+    count = smart_home_v9_collect_views(&state, NULL, views,
+                                        SMART_HOME_V9_MAX_VIEWS);
+    assert(count == 3);
+    assert(views[0].source == SMART_HOME_V9_SOURCE_LOCAL);
+    assert(views[0].kind == SMART_HOME_V9_KIND_LIGHT);
+    assert((views[0].capabilities & SMART_HOME_V9_CAP_BRIGHTNESS) != 0);
+    assert(views[2].kind == SMART_HOME_V9_KIND_AC);
+    assert((views[2].capabilities & SMART_HOME_V9_CAP_TEMPERATURE) != 0);
+
+    count = smart_home_v9_demo_views(views, SMART_HOME_V9_MAX_VIEWS);
+    assert(count == 6);
+    assert(views[3].kind == SMART_HOME_V9_KIND_ROBOT);
+    assert(views[3].source == SMART_HOME_V9_SOURCE_DEMO);
+
+    smart_home_v9_control_begin(&control, &views[0], 0, 7, 1000);
+    assert(control.state == SMART_HOME_V9_CONTROL_QUEUED);
+    smart_home_v9_control_result(&control, AGENT_OK);
+    assert(control.state == SMART_HOME_V9_CONTROL_WAIT_READBACK);
+    views[0].on = 0;
+    views[0].state_valid = true;
+    smart_home_v9_control_snapshot(&control, &views[0], 1100, 10000);
+    assert(control.state == SMART_HOME_V9_CONTROL_SUCCEEDED);
+
+    smart_home_v9_control_begin(&control, &views[0], 0, 8, 1000);
+    smart_home_v9_control_result(&control, AGENT_OK);
+    views[0].on = 1;
+    smart_home_v9_control_snapshot(&control, &views[0], 12000, 10000);
+    assert(control.state == SMART_HOME_V9_CONTROL_TIMED_OUT);
+    puts("PASS: V9 view mapping and async control readback/timeout");
+}
+
 static void test_room_transaction(void)
 {
     smart_home_state_t state;
@@ -518,6 +558,7 @@ static void test_room_transaction(void)
 
 int main(void)
 {
+    test_v9_views();
     test_room_transaction();
     lv_init();
     lv_display_t *display = lv_display_create(1024, 600);
