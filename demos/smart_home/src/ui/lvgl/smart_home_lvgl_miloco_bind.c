@@ -24,6 +24,9 @@
 
 #include <stdio.h>
 
+/* 面板在 1024×600 画布上的位置，对齐 v9 设计 34-mi-qr 的 (92,60)。 */
+#define BIND_MODAL_X 92
+#define BIND_MODAL_Y 60
 #define BIND_MODAL_W 840
 #define BIND_MODAL_H 480
 #define BIND_QR_CARD_PX 256
@@ -122,16 +125,22 @@ static void bind_refresh_head(smart_home_lvgl_t *ui)
     }
     if (smart_home_miloco_bound(ui->app->miloco)) {
         lv_label_set_text(ui->bind_head_label, "账号已绑定");
-        lv_obj_set_style_text_color(ui->bind_head_label,
-                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+        if (ui->bind_head_dot) {
+            lv_obj_set_style_bg_color(ui->bind_head_dot,
+                                      SMART_HOME_UI_COLOR_SUCCESS, 0);
+        }
     } else if (smart_home_miloco_reachable(ui->app->miloco)) {
         lv_label_set_text(ui->bind_head_label, "网关已连接");
-        lv_obj_set_style_text_color(ui->bind_head_label,
-                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+        if (ui->bind_head_dot) {
+            lv_obj_set_style_bg_color(ui->bind_head_dot,
+                                      SMART_HOME_UI_COLOR_SUCCESS, 0);
+        }
     } else {
-        lv_label_set_text(ui->bind_head_label, "网关未连接");
-        lv_obj_set_style_text_color(ui->bind_head_label,
-                                    SMART_HOME_UI_COLOR_WARNING, 0);
+        lv_label_set_text(ui->bind_head_label, "尚未连接");
+        if (ui->bind_head_dot) {
+            lv_obj_set_style_bg_color(ui->bind_head_dot,
+                                      SMART_HOME_UI_COLOR_WARNING, 0);
+        }
     }
 }
 
@@ -243,6 +252,7 @@ void smart_home_lvgl_miloco_bind_close(smart_home_lvgl_t *ui)
     ui->screen_miloco_bind = NULL;
     ui->bind_status_label = NULL;
     ui->bind_head_label = NULL;
+    ui->bind_head_dot = NULL;
     ui->bind_check_button = NULL;
     s_qr_card = NULL;
     s_qr_drawn_host[0] = '\0';
@@ -261,7 +271,7 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
     lv_obj_t *label;
     lv_obj_t *card;
     lv_obj_t *button;
-    lv_obj_t *chip;
+    lv_obj_t *dot;
 
     if (!ui) {
         return;
@@ -272,42 +282,57 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, smart_home_lvgl_disp_w(), smart_home_lvgl_disp_h());
     lv_obj_set_style_bg_color(mask, lv_color_hex(0x071726), 0);
-    lv_obj_set_style_bg_opa(mask, 148, 0);   /* 58% */
+    lv_obj_set_style_bg_opa(mask, 148, 0);   /* 58%，对齐 34-mi-qr */
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(mask, bind_modal_close_cb, LV_EVENT_CLICKED, ui);
     ui->screen_miloco_bind = mask;
 
+    /* 面板左上对齐设计的 (92,60)；内部一律用设计给出的页面绝对坐标
+     * 减去该原点，因此不能加 pad —— 否则所有子元素整体偏移。
+     */
     panel = lv_obj_create(mask);
     lv_obj_remove_style_all(panel);
     lv_obj_set_size(panel, BIND_MODAL_W, BIND_MODAL_H);
-    lv_obj_center(panel);
+    lv_obj_set_pos(panel, BIND_MODAL_X, BIND_MODAL_Y);
     smart_home_lvgl_card_style(panel);
     lv_obj_set_style_radius(panel, 24, 0);
-    lv_obj_set_style_pad_all(panel, 24, 0);
+    lv_obj_set_style_pad_all(panel, 0, 0);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(panel, bind_stop_cb, LV_EVENT_CLICKED, NULL);
 
+    /* 标题 (116,102) 24px。 */
     label = smart_home_lvgl_label_create(panel, "绑定米家账号",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
-    lv_obj_set_pos(label, 0, 12);
+    lv_obj_set_pos(label, 24, 22);
 
+    /* 右上关闭 chip (868,76) 48×48，圆角 16。 */
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 48, 48);
-    lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_set_pos(button, 776, 16);
     lv_obj_set_style_radius(button, 16, 0);
-    smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE_ON);
+    smart_home_lvgl_set_bg(button, lv_color_hex(0xE2E9EC));
     smart_home_lvgl_press_feedback(button);
     lv_obj_add_event_cb(button, bind_modal_close_cb, LV_EVENT_CLICKED, ui);
     label = smart_home_lvgl_label_create(button, "X",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
     lv_obj_center(label);
 
-    ui->bind_head_label = smart_home_lvgl_label_create(
-        panel, "网关未连接", SMART_HOME_UI_COLOR_WARNING, 14);
-    lv_obj_align(ui->bind_head_label, LV_ALIGN_TOP_RIGHT, -64, 18);
+    /* 网关状态：绿点 (432,175) r=3 + 14px 文字 (446,166)。 */
+    dot = lv_obj_create(panel);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, 6, 6);
+    lv_obj_set_pos(dot, 337, 112);
+    lv_obj_set_style_radius(dot, 3, 0);
+    smart_home_lvgl_set_bg(dot, SMART_HOME_UI_COLOR_SUCCESS);
+    lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    ui->bind_head_dot = dot;
 
-    /* 左：白底二维码卡片。 */
+    ui->bind_head_label = smart_home_lvgl_label_create(
+        panel, "尚未连接", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+    lv_obj_set_pos(ui->bind_head_label, 354, 106);
+
+    /* 左：QR 白卡 (124,160) 256×256，圆角 12。 */
     card = lv_obj_create(panel);
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, BIND_QR_CARD_PX, BIND_QR_CARD_PX);
@@ -318,63 +343,52 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
     s_qr_card = card;
     bind_render_qr(card, ui);
 
-    /* 右侧标题与三步说明。 */
+    /* 示意二维码 (252,439) 13px 居中。 */
+    label = smart_home_lvgl_label_create(panel, "示意二维码",
+                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(label, 92, 368);
+    lv_obj_set_width(label, BIND_QR_CARD_PX);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+
+    /* 右侧：标题 (420,236) 24px。 */
     label = smart_home_lvgl_label_create(panel, "等待手机完成授权",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
-    lv_obj_set_pos(label, 328, 118);
+    lv_obj_set_pos(label, 328, 153);
 
+    /* 三步说明 (420,280/318/356) 16px，行内编号，不用圆形 chip。 */
     {
         static const char *const steps[3] = {
-            "手机扫描二维码进入家庭服务器",
-            "在手机页面完成账号授权",
-            "授权成功后，此处同步设备",
+            "1. 手机扫描二维码进入家庭服务器",
+            "2. 在手机页面完成账号授权",
+            "3. 授权成功后，此处同步设备",
         };
 
         for (int i = 0; i < 3; i++) {
-            char index_text[4];
-
-            chip = lv_obj_create(panel);
-            lv_obj_remove_style_all(chip);
-            lv_obj_set_size(chip, 24, 24);
-            lv_obj_set_pos(chip, 328, 172 + i * 40);
-            lv_obj_set_style_radius(chip, 12, 0);
-            smart_home_lvgl_set_bg(chip, SMART_HOME_UI_COLOR_SURFACE_ON);
-            lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE |
-                                   LV_OBJ_FLAG_CLICKABLE);
-            snprintf(index_text, sizeof(index_text), "%d", i + 1);
-            label = smart_home_lvgl_label_create(
-                chip, index_text, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 13);
-            lv_obj_center(label);
-
             label = smart_home_lvgl_label_create(
                 panel, steps[i], SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
-            lv_obj_set_pos(label, 364, 174 + i * 40);
+            lv_obj_set_pos(label, 328, 204 + i * 38);
         }
     }
 
-    /* 实时状态条。 */
-    card = lv_obj_create(panel);
-    lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, 440, 36);
-    lv_obj_set_pos(card, 328, 300);
-    lv_obj_set_style_radius(card, 10, 0);
-    smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_SURFACE_SOFT);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    /* 实时状态（设计里没有，实现层补：每秒轮询需要可见反馈）。
+     * 放在第三行之后、提示语之前的空档 (420,380)，不挤占设计位置。
+     */
     ui->bind_status_label = smart_home_lvgl_label_create(
-        card, "等待手机完成授权…  已等待 00:00  ·  每秒自动检查",
-        SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
-    lv_obj_set_pos(ui->bind_status_label, 16, 8);
+        panel, "等待手机完成授权…  已等待 00:00",
+        SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(ui->bind_status_label, 328, 314);
 
+    /* 提示语 (420,408) 14px。 */
     label = smart_home_lvgl_label_create(
-        panel, "请在手机上完成账号授权，本页会自动检测，无需手动刷新。",
+        panel, "请在手机上完成账号授权，再检查绑定状态。",
         SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
-    lv_obj_set_pos(label, 328, 348);
+    lv_obj_set_pos(label, 328, 336);
 
-    /* 底部：返回配置（次）+ 检查绑定状态（主）。 */
+    /* 底部左：返回配置 (116,464) 168×48，描边按钮。 */
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 168, 48);
-    lv_obj_set_pos(button, 24, BIND_MODAL_H - 72);
+    lv_obj_set_pos(button, 24, 404);
     lv_obj_set_style_radius(button, 12, 0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
@@ -385,10 +399,11 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 18);
     lv_obj_center(label);
 
+    /* 底部右：检查绑定状态 (652,464) 256×48，深色实底。 */
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 256, 48);
-    lv_obj_set_pos(button, BIND_MODAL_W - 24 - 256, BIND_MODAL_H - 72);
+    lv_obj_set_pos(button, 560, 404);
     lv_obj_set_style_radius(button, 12, 0);
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY_DARK);
     smart_home_lvgl_press_feedback(button);
@@ -403,7 +418,7 @@ void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
     }
     ui->bind_timer = lv_timer_create(bind_timer_cb, 1000, ui);
 
-    /* 打开即刷新一次头部状态，避免首秒显示网关未连接。 */
+    /* 打开即刷新一次头部状态，避免首秒显示未连接。 */
     bind_refresh_head(ui);
 }
 

@@ -283,6 +283,7 @@ typedef struct {
     lv_obj_t *screen_miloco_bind;   /* 绑定弹窗的遮罩根对象，NULL = 未打开 */
     lv_obj_t *bind_status_label;
     lv_obj_t *bind_head_label;
+    lv_obj_t *bind_head_dot;
     lv_obj_t *bind_check_button;
     lv_timer_t *bind_timer;
     lv_obj_t *screen_miloco;
