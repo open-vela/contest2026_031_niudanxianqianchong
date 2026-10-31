@@ -519,6 +519,20 @@ int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,
                                             const smart_home_model_config_t *c)
 { (void)app; (void)c; return AGENT_OK; }
 
+int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
+                                               const char *tool_name,
+                                               int allowed)
+{
+    if (!app || !tool_name) return AGENT_ERROR_INVALID;
+    for (size_t i = 0; i < app->local_tool_access_count; i++) {
+        if (!strcmp(app->local_tool_access[i].name, tool_name)) {
+            app->local_tool_access[i].allowed = allowed ? 1 : 0;
+            return AGENT_OK;
+        }
+    }
+    return AGENT_ERROR_NOT_FOUND;
+}
+
 static void test_v9_views(void)
 {
     smart_home_state_t state;
@@ -540,6 +554,29 @@ static void test_v9_views(void)
     assert(count == 6);
     assert(views[3].kind == SMART_HOME_V9_KIND_ROBOT);
     assert(views[3].source == SMART_HOME_V9_SOURCE_DEMO);
+
+    memset(snapshot, 0, sizeof(snapshot));
+    snapshot_count = 1;
+    snapshot[0].category = SMART_HOME_MILOCO_CATEGORY_OTHER;
+    snapshot[0].online = true;
+    snapshot[0].power_on = true;
+    snapshot[0].control_count = 1;
+    strcpy(snapshot[0].controls[0].type_name, "wash-mode");
+    strcpy(snapshot[0].controls[0].desc, "洗涤模式");
+    count = smart_home_v9_collect_views(NULL,
+                                        (const smart_home_miloco_t *)snapshot,
+                                        views, SMART_HOME_V9_MAX_VIEWS);
+    assert(count == 1);
+    assert(views[0].kind == SMART_HOME_V9_KIND_WASHER);
+
+    strcpy(snapshot[0].controls[0].type_name, "dock");
+    strcpy(snapshot[0].controls[0].desc, "回充");
+    count = smart_home_v9_collect_views(NULL,
+                                        (const smart_home_miloco_t *)snapshot,
+                                        views, SMART_HOME_V9_MAX_VIEWS);
+    assert(count == 1);
+    assert(views[0].kind == SMART_HOME_V9_KIND_ROBOT);
+    snapshot_count = 0;
 
     smart_home_v9_control_begin(&control, &views[0], 0, 7, 1000);
     assert(control.state == SMART_HOME_V9_CONTROL_QUEUED);

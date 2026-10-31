@@ -32,6 +32,8 @@ typedef struct {
     int model_index;
     char model_name_draft[8][64];
     char model_key_draft[8][128];
+    char model_timeout_draft[8][16];
+    char model_tokens_draft[8][16];
     char service_status[3][32];
     int category;
 } v9_settings_t;
@@ -233,6 +235,16 @@ static void model_save_draft(void)
                  sizeof(g_settings.model_key_draft[index]), "%s",
                  lv_textarea_get_text(g_settings.model_key));
     }
+    if (g_settings.model_timeout) {
+        snprintf(g_settings.model_timeout_draft[index],
+                 sizeof(g_settings.model_timeout_draft[index]), "%s",
+                 lv_textarea_get_text(g_settings.model_timeout));
+    }
+    if (g_settings.model_tokens) {
+        snprintf(g_settings.model_tokens_draft[index],
+                 sizeof(g_settings.model_tokens_draft[index]), "%s",
+                 lv_textarea_get_text(g_settings.model_tokens));
+    }
 }
 
 static void model_load(smart_home_lvgl_t *ui, int index)
@@ -256,14 +268,24 @@ static void model_load(smart_home_lvgl_t *ui, int index)
                              g_settings.model_key_draft[index]);
     }
     if (g_settings.model_timeout) {
-        snprintf(buffer, sizeof(buffer), "%u",
-                 (unsigned)preset->default_timeout_ms);
-        lv_textarea_set_text(g_settings.model_timeout, buffer);
+        if (g_settings.model_timeout_draft[index][0]) {
+            lv_textarea_set_text(g_settings.model_timeout,
+                                 g_settings.model_timeout_draft[index]);
+        } else {
+            snprintf(buffer, sizeof(buffer), "%u",
+                     (unsigned)preset->default_timeout_ms);
+            lv_textarea_set_text(g_settings.model_timeout, buffer);
+        }
     }
-    if (g_settings.model_tokens && ui && ui->app) {
-        snprintf(buffer, sizeof(buffer), "%u",
-                 (unsigned)ui->app->model_config.max_output_tokens);
-        lv_textarea_set_text(g_settings.model_tokens, buffer);
+    if (g_settings.model_tokens) {
+        if (g_settings.model_tokens_draft[index][0]) {
+            lv_textarea_set_text(g_settings.model_tokens,
+                                 g_settings.model_tokens_draft[index]);
+        } else if (ui && ui->app) {
+            snprintf(buffer, sizeof(buffer), "%u",
+                     (unsigned)ui->app->model_config.max_output_tokens);
+            lv_textarea_set_text(g_settings.model_tokens, buffer);
+        }
     }
     if (g_settings.model_status) {
         lv_label_set_text(g_settings.model_status, "切换后端会保留当前草稿");
@@ -394,16 +416,65 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     model_load(ui, initial);
 }
 
+static void tool_switch_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    lv_obj_t *sw = lv_event_get_current_target(event);
+    const char *name = lv_obj_get_user_data(sw);
+
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !ui || !ui->app ||
+        !name) {
+        return;
+    }
+    (void)smart_home_agent_app_set_local_tool_access(
+        ui->app, name, lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0);
+}
+
 static void build_tools_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
-    int ready = ui && ui->app &&
-                ui->app->system_status.tools_status == AGENT_OK;
+    size_t count = ui && ui->app ? ui->app->local_tool_access_count : 0;
+    int y = 56;
 
     panel_title(panel, "工具权限");
-    panel_row(panel, 56, "本地工具", state_text(ready));
-    panel_row(panel, 106, "外部工具", "随服务连接");
-    panel_row(panel, 156, "权限生效范围", "本次运行有效");
-    panel_button(panel, "打开工具与权限", ui ? ui->screen_tools : NULL);
+    if (!ui || !ui->app) {
+        panel_row(panel, y, "工具目录", "服务未初始化");
+        return;
+    }
+    if (count == 0) {
+        panel_row(panel, y, "本地工具", "尚未加载工具目录");
+    }
+    for (size_t i = 0; i < count && i < 6; i++) {
+        smart_home_local_tool_access_t *tool =
+            &ui->app->local_tool_access[i];
+        lv_obj_t *name = smart_home_lvgl_label_create(
+            panel, tool->name, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 17);
+        lv_obj_t *sub = smart_home_lvgl_label_create(
+            panel, "本地工具 · 本次运行有效",
+            SMART_HOME_UI_COLOR_TEXT_MUTED, 12);
+        lv_obj_t *sw = lv_switch_create(panel);
+
+        lv_obj_set_pos(name, 0, y);
+        lv_obj_set_pos(sub, 0, y + 22);
+        lv_obj_set_size(sw, 50, 28);
+        lv_obj_align(sw, LV_ALIGN_TOP_RIGHT, 0, y + 2);
+        lv_obj_set_style_bg_color(sw, lv_color_hex(0xCCD6D6), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(sw, 14, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sw, SMART_HOME_UI_COLOR_PRIMARY,
+                                  LV_PART_MAIN | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_opa(sw, LV_OPA_TRANSP, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
+        lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+        lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
+        lv_obj_set_style_radius(sw, 12, LV_PART_KNOB);
+        lv_obj_set_style_pad_all(sw, 2, LV_PART_KNOB);
+        lv_obj_set_style_shadow_width(sw, 0, LV_PART_KNOB);
+        if (tool->allowed) lv_obj_add_state(sw, LV_STATE_CHECKED);
+        lv_obj_set_user_data(sw, tool->name);
+        lv_obj_add_event_cb(sw, tool_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
+        y += 54;
+    }
+    panel_button(panel, "打开完整工具页", ui->screen_tools);
 }
 
 static void services_modal_close(void)

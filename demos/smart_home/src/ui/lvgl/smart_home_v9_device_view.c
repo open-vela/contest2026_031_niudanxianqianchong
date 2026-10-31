@@ -30,6 +30,54 @@ static smart_home_v9_kind_t kind_from_local(smart_home_device_type_t type)
     }
 }
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+static bool control_has(const smart_home_miloco_control_t *control,
+                        const char *needle)
+{
+    return (control->type_name[0] &&
+            strstr(control->type_name, needle) != NULL) ||
+           (control->desc[0] && strstr(control->desc, needle) != NULL);
+}
+
+static smart_home_v9_kind_t kind_from_miloco(
+    const smart_home_miloco_device_t *device)
+{
+    switch (device->category) {
+    case SMART_HOME_MILOCO_CATEGORY_LIGHT:
+        return SMART_HOME_V9_KIND_LIGHT;
+    case SMART_HOME_MILOCO_CATEGORY_AC:
+        return SMART_HOME_V9_KIND_AC;
+    case SMART_HOME_MILOCO_CATEGORY_CAMERA:
+        return SMART_HOME_V9_KIND_CAMERA;
+    case SMART_HOME_MILOCO_CATEGORY_FAN:
+        return SMART_HOME_V9_KIND_FAN;
+    default:
+        break;
+    }
+
+    /* OTHER is common for washers and robot vacuums.  Use spec-provided
+     * control type_name/description anchors; never infer from device name. */
+    for (uint8_t i = 0; i < device->control_count; i++) {
+        const smart_home_miloco_control_t *control = &device->controls[i];
+
+        if (control_has(control, "wash") || control_has(control, "洗涤") ||
+            control_has(control, "wash-mode") ||
+            control_has(control, "remaining-time")) {
+            return SMART_HOME_V9_KIND_WASHER;
+        }
+        if (control_has(control, "sweep") || control_has(control, "vacuum") ||
+            control_has(control, "robot") || control_has(control, "mop") ||
+            control_has(control, "dock") || control_has(control, "battery") ||
+            control_has(control, "清扫") || control_has(control, "回充") ||
+            control_has(control, "电量")) {
+            return SMART_HOME_V9_KIND_ROBOT;
+        }
+    }
+    return SMART_HOME_V9_KIND_UNKNOWN;
+}
+
+#endif
+
 static smart_home_v9_device_view_t *append_view(
     smart_home_v9_device_view_t *out, size_t capacity, size_t *count)
 {
@@ -107,23 +155,7 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
             }
             snprintf(view->key, sizeof(view->key), "milo:%s", device->did);
             view->source = SMART_HOME_V9_SOURCE_MILOCO;
-            switch (device->category) {
-            case SMART_HOME_MILOCO_CATEGORY_LIGHT:
-                view->kind = SMART_HOME_V9_KIND_LIGHT;
-                break;
-            case SMART_HOME_MILOCO_CATEGORY_AC:
-                view->kind = SMART_HOME_V9_KIND_AC;
-                break;
-            case SMART_HOME_MILOCO_CATEGORY_CAMERA:
-                view->kind = SMART_HOME_V9_KIND_CAMERA;
-                break;
-            case SMART_HOME_MILOCO_CATEGORY_FAN:
-                view->kind = SMART_HOME_V9_KIND_FAN;
-                break;
-            default:
-                view->kind = SMART_HOME_V9_KIND_UNKNOWN;
-                break;
-            }
+            view->kind = kind_from_miloco(device);
             copy_text(view->name, sizeof(view->name), device->name);
             copy_text(view->room_id, sizeof(view->room_id), device->room);
             copy_text(view->room_label, sizeof(view->room_label), device->room);
@@ -135,6 +167,10 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
                                  SMART_HOME_V9_CAP_POWER : 0;
             if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
                 view->capabilities |= SMART_HOME_V9_CAP_PREVIEW;
+            }
+            if (view->kind == SMART_HOME_V9_KIND_WASHER ||
+                view->kind == SMART_HOME_V9_KIND_ROBOT) {
+                view->capabilities |= SMART_HOME_V9_CAP_PAUSE;
             }
         }
     }
