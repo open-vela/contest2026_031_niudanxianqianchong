@@ -68,7 +68,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:propeller", &smart_home_icon_propeller_20, &smart_home_icon_propeller_32, NULL, NULL},
     {"asset:robot-vacuum", NULL, &smart_home_icon_robot_vacuum_32, NULL, NULL},
     {"asset:robot", &smart_home_icon_robot_20, &smart_home_icon_robot_32, &smart_home_icon_robot_48, NULL},
-    {"asset:run", NULL, &smart_home_icon_run_32, NULL, NULL},
+    {"asset:run", &smart_home_icon_run_20, &smart_home_icon_run_32, NULL, NULL},
     {"asset:sailboat", NULL, &smart_home_icon_sailboat_32, NULL, NULL},
     {"asset:setting-ai", &smart_home_icon_setting_ai_20, &smart_home_icon_setting_ai_32, NULL, NULL},
     {"asset:settings", &smart_home_icon_settings_20, &smart_home_icon_settings_32, NULL, NULL},
@@ -78,7 +78,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:status-ok", &smart_home_icon_status_ok_20, &smart_home_icon_status_ok_32, NULL, NULL},
     {"asset:stopwatch", NULL, &smart_home_icon_stopwatch_32, NULL, NULL},
     {"asset:sun", &smart_home_icon_sun_20, &smart_home_icon_sun_32, NULL, &smart_home_icon_sun_128},
-    {"asset:television-classic", NULL, &smart_home_icon_television_classic_32, NULL, NULL},
+    {"asset:television-classic", &smart_home_icon_television_classic_20, &smart_home_icon_television_classic_32, NULL, NULL},
     {"asset:temperature", &smart_home_icon_temperature_20, &smart_home_icon_temperature_32, NULL, NULL},
     {"asset:tool", &smart_home_icon_tool_20, &smart_home_icon_tool_32, NULL, NULL},
     {"asset:user", &smart_home_icon_user_20, &smart_home_icon_user_32, NULL, NULL},
@@ -90,7 +90,7 @@ static const smart_home_png_icon_entry_t g_png_icons[] = {
     {"asset:wifi-off", &smart_home_icon_wifi_off_20, &smart_home_icon_wifi_off_32, NULL, NULL},
     {"asset:wifi", &smart_home_icon_wifi_20, &smart_home_icon_wifi_32, NULL, NULL},
     {"asset:window", NULL, &smart_home_icon_window_32, NULL, NULL},
-    {"asset:zzz", NULL, &smart_home_icon_zzz_32, NULL, NULL},
+    {"asset:zzz", &smart_home_icon_zzz_20, &smart_home_icon_zzz_32, NULL, NULL},
 };
 
 const lv_image_dsc_t *smart_home_lvgl_png_icon_get(const char *name, int requested_size)

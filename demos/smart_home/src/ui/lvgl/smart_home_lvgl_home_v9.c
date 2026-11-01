@@ -43,6 +43,16 @@
 #define V9_VIEW_W       976
 #define V9_VIEW_H       256
 
+/* 场景切换器：房间筛选行右侧，右边界与天气图标、卡片区共用 24px 边距。 */
+#define V9_SCENE_BTN_X   844
+#define V9_SCENE_BTN_Y   206
+#define V9_SCENE_BTN_W   156
+#define V9_SCENE_BTN_H   48
+#define V9_SCENE_ITEM_H  40
+#define V9_SCENE_MENU_PAD 6
+#define V9_SCENE_ICON_PX 20
+#define V9_SCENE_COUNT   4
+
 typedef struct {
     const char *id;
     const char *name;
@@ -78,6 +88,38 @@ static const char *const g_v9_rooms[V9_ROOM_COUNT] = {
     "客厅", "卧室", "书房", "阳台", "厨房"
 };
 
+/* ── 场景切换器 ──────────────────────────────────────────────
+ * 四个场景的 scene id 必须与 res/skills/smart_home_scenes.md 及
+ * miloco 的 g_miloco_scenes 一致，run_scene 才能解析。
+ */
+typedef struct {
+    const char *id;
+    const char *title;
+    const char *icon;
+} v9_scene_def_t;
+
+static const v9_scene_def_t g_v9_scenes[V9_SCENE_COUNT] = {
+    { "home",  "回家模式", ICON_NAV_HOME },
+    { "movie", "观影模式", ICON_MEDIA_VIDEO },
+    { "sleep", "睡眠模式", ICON_SCENE_SLEEP },
+    { "away",  "离家模式", ICON_SCENE_AWAY },
+};
+
+static int v9_scene_index(const char *id)
+{
+    int i;
+
+    if (!id) {
+        return -1;
+    }
+    for (i = 0; i < V9_SCENE_COUNT; i++) {
+        if (!strcmp(g_v9_scenes[i].id, id)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 typedef struct {
     lv_obj_t *screen;
     lv_obj_t *view;
@@ -110,14 +152,24 @@ typedef struct {
     int dynamic;
     int room_filter;
     int visible;
+    lv_obj_t *scene_btn;
+    lv_obj_t *scene_icon;
+    lv_obj_t *scene_label;
+    lv_obj_t *scene_menu;
+    lv_obj_t *scene_item[V9_SCENE_COUNT];
+    lv_obj_t *scene_item_icon[V9_SCENE_COUNT];
+    int scene;
     lv_obj_t *modal;
 } v9_home_state_t;
 
 static v9_home_state_t g_v9;
 
 
+static void v9_scene_menu_close(void);
+
 static void v9_close_modal(void)
 {
+    v9_scene_menu_close();
     smart_home_lvgl_device_dialog_close();
     smart_home_lvgl_room_dialog_close();
     smart_home_lvgl_camera_dialog_close();
@@ -532,6 +584,257 @@ static lv_obj_t *v9_text(lv_obj_t *parent, const char *text, int x, int y,
     lv_obj_t *label = smart_home_lvgl_label_create(parent, text, color, size);
     lv_obj_set_pos(label, x, y);
     return label;
+}
+
+
+/* ── 场景切换器 ──────────────────────────────────────────── */
+
+static void v9_scene_menu_close(void);
+
+static void v9_scene_apply_label(void)
+{
+    const v9_scene_def_t *def;
+
+    if (g_v9.scene < 0 || g_v9.scene >= V9_SCENE_COUNT) {
+        return;
+    }
+    def = &g_v9_scenes[g_v9.scene];
+    if (g_v9.scene_label) {
+        lv_label_set_text(g_v9.scene_label, def->title);
+    }
+    if (g_v9.scene_icon) {
+        const lv_image_dsc_t *asset =
+            smart_home_lvgl_png_icon_get(def->icon, V9_SCENE_ICON_PX);
+
+        if (asset) {
+            lv_image_set_src(g_v9.scene_icon, asset);
+            /* 必须先有 src 再判定格式：icon_color 在 src 为空时会按 A8 处理，
+             * 把 ARGB8888 像素图整块涂成单色。 */
+            smart_home_lvgl_icon_color(g_v9.scene_icon,
+                                       SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+        }
+    }
+}
+
+/* 菜单里高亮当前项：LVGL 主题对 LV_PART_SELECTED|LV_STATE_CHECKED 的
+ * 优先级高于 LV_PART_SELECTED，两个选择器都要设，否则仍显示主题蓝。 */
+static void v9_scene_item_selected(int index, int selected)
+{
+    lv_obj_t *item = g_v9.scene_item[index];
+
+    if (!item) {
+        return;
+    }
+    lv_obj_set_style_bg_color(item,
+        selected ? SMART_HOME_UI_COLOR_SURFACE_ON : SMART_HOME_UI_COLOR_SURFACE, 0);
+    lv_obj_set_style_bg_opa(item, LV_OPA_COVER, 0);
+    smart_home_lvgl_icon_color(g_v9.scene_item_icon[index], selected ?
+        SMART_HOME_UI_COLOR_TEXT_PRIMARY : SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+}
+
+static void v9_scene_menu_refresh(void)
+{
+    int i;
+
+    for (i = 0; i < V9_SCENE_COUNT; i++) {
+        v9_scene_item_selected(i, i == g_v9.scene);
+    }
+}
+
+/* 菜单只做显隐，不销毁：菜单项的点击回调运行在自己的对象上，若在回调里
+ * 删除父容器，回调返回后 LVGL 仍会访问已释放的子对象。 */
+static void v9_scene_menu_close(void)
+{
+    if (g_v9.scene_menu) {
+        lv_obj_add_flag(g_v9.scene_menu, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* 场景执行：直接走 miloco 语义锚点匹配（与 run_scene 工具同一条路径），
+ * 不经过 agent，因此点一下即刻提交，不需要用户再按发送、也不再等 LLM。 */
+static void v9_scene_run(smart_home_lvgl_t *ui, int index)
+{
+    const v9_scene_def_t *def;
+
+    if (!ui || index < 0 || index >= V9_SCENE_COUNT) {
+        return;
+    }
+    def = &g_v9_scenes[index];
+    g_v9.scene = index;
+    v9_scene_apply_label();
+
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    {
+        smart_home_miloco_t *gateway = ui->app ? ui->app->miloco : NULL;
+        char report[256];
+        int ret;
+
+        if (!gateway || !smart_home_miloco_reachable(gateway)) {
+            v9_info_modal("场景未执行",
+                          "米家网关未连接，请先在设置中完成米家绑定。");
+            return;
+        }
+        report[0] = '\0';
+        ret = smart_home_miloco_run_scene(gateway, def->id, report,
+                                          sizeof(report));
+        if (ret == 0) {
+            v9_info_modal("场景已提交",
+                          report[0] ? report : "已对在线设备提交场景动作。");
+        } else {
+            v9_info_modal("场景未执行",
+                          report[0] ? report : "网关拒绝了本次场景请求。");
+        }
+    }
+#else
+    v9_info_modal("场景未执行", "当前固件未启用米家网关。");
+#endif
+}
+
+/* ── 下拉菜单 ────────────────────────────────────────────── */
+
+static void v9_scene_item_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    lv_obj_t *item = lv_event_get_current_target(event);
+    int index = (int)(intptr_t)lv_obj_get_user_data(item);
+
+    v9_scene_menu_close();
+    v9_scene_run(ui, index);
+}
+
+static void v9_scene_menu_open(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *menu;
+    int i;
+    int y = V9_SCENE_BTN_Y + V9_SCENE_BTN_H + 6;
+
+    if (!ui || !g_v9.screen) {
+        return;
+    }
+    if (g_v9.scene_menu) {
+        lv_obj_clear_flag(g_v9.scene_menu, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(g_v9.scene_menu);
+        v9_scene_menu_refresh();
+        return;
+    }
+    /* 挂到顶层图层而不是首页：首页的最后一个子对象必须是底部导航栏
+     * （测试与相机弹窗都依赖这个约定）。顶层图层坐标与屏幕一致。 */
+    menu = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(menu);
+    lv_obj_set_size(menu, V9_SCENE_BTN_W,
+                    V9_SCENE_COUNT * V9_SCENE_ITEM_H + 2 * V9_SCENE_MENU_PAD);
+    lv_obj_set_pos(menu, V9_SCENE_BTN_X, y);
+    lv_obj_set_style_radius(menu, 12, 0);
+    lv_obj_set_style_bg_color(menu, SMART_HOME_UI_COLOR_SURFACE, 0);
+    lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(menu, 1, 0);
+    lv_obj_set_style_border_color(menu, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_all(menu, V9_SCENE_MENU_PAD, 0);
+    lv_obj_set_style_shadow_width(menu, 18, 0);
+    lv_obj_set_style_shadow_opa(menu, LV_OPA_20, 0);
+    lv_obj_set_style_shadow_ofs_y(menu, 4, 0);
+    lv_obj_clear_flag(menu, LV_OBJ_FLAG_SCROLLABLE);
+    g_v9.scene_menu = menu;
+
+    for (i = 0; i < V9_SCENE_COUNT; i++) {
+        lv_obj_t *item = lv_obj_create(menu);
+        lv_obj_t *icon;
+        lv_obj_t *label;
+
+        lv_obj_remove_style_all(item);
+        lv_obj_set_size(item, V9_SCENE_BTN_W - 2 * V9_SCENE_MENU_PAD,
+                        V9_SCENE_ITEM_H);
+        lv_obj_set_pos(item, 0, i * V9_SCENE_ITEM_H);
+        lv_obj_set_style_radius(item, 8, 0);
+        lv_obj_set_style_pad_all(item, 0, 0);
+        lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(item, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_user_data(item, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(item, v9_scene_item_cb, LV_EVENT_CLICKED, ui);
+        smart_home_lvgl_press_feedback(item);
+
+        icon = lv_image_create(item);
+        lv_image_set_src(icon,
+            smart_home_lvgl_png_icon_get(g_v9_scenes[i].icon, V9_SCENE_ICON_PX));
+        lv_obj_set_pos(icon, 10, (V9_SCENE_ITEM_H - V9_SCENE_ICON_PX) / 2);
+        lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+        if (lv_image_get_src(icon)) {
+            smart_home_lvgl_icon_color(icon, SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+        }
+        g_v9.scene_item_icon[i] = icon;
+
+        label = smart_home_lvgl_label_create(item, g_v9_scenes[i].title,
+            SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
+        lv_obj_set_pos(label, 10 + V9_SCENE_ICON_PX + 8,
+                       (V9_SCENE_ITEM_H - 20) / 2);
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+        g_v9.scene_item[i] = item;
+    }
+    v9_scene_menu_refresh();
+}
+
+static void v9_scene_btn_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+
+    if (g_v9.scene_menu && !lv_obj_has_flag(g_v9.scene_menu, LV_OBJ_FLAG_HIDDEN)) {
+        v9_scene_menu_close();
+    } else {
+        v9_scene_menu_open(ui);
+    }
+}
+
+static lv_obj_t *v9_make_scene_button(lv_obj_t *screen, smart_home_lvgl_t *ui)
+{
+    lv_obj_t *button = lv_button_create(screen);
+    lv_obj_t *icon;
+    lv_obj_t *label;
+
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, V9_SCENE_BTN_W, V9_SCENE_BTN_H);
+    lv_obj_set_pos(button, V9_SCENE_BTN_X, V9_SCENE_BTN_Y);
+    lv_obj_set_style_radius(button, 10, 0);
+    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_ext_click_area(button, 4);
+    lv_obj_add_event_cb(button, v9_scene_btn_cb, LV_EVENT_CLICKED, ui);
+    smart_home_lvgl_press_feedback(button);
+    g_v9.scene_btn = button;
+
+    icon = lv_image_create(button);
+    lv_obj_set_pos(icon, 13, (V9_SCENE_BTN_H - V9_SCENE_ICON_PX) / 2);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    g_v9.scene_icon = icon;
+    /* src 在 v9_scene_apply_label() 里赋值，避免此处 icon_color 误判格式。 */
+
+    label = smart_home_lvgl_label_create(button, "", 
+                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 17);
+    lv_obj_set_pos(label, 13 + V9_SCENE_ICON_PX + 7,
+                   (V9_SCENE_BTN_H - 22) / 2);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    g_v9.scene_label = label;
+
+    /* 右侧指示箭头：用 lv_line 画折线，避免额外生成一个 20px 图标资产。 */
+    {
+        static lv_point_precise_t arrow_pts[3];
+        lv_obj_t *arrow = lv_line_create(button);
+
+        arrow_pts[0].x = 0;
+        arrow_pts[0].y = 0;
+        arrow_pts[1].x = 5;
+        arrow_pts[1].y = 5;
+        arrow_pts[2].x = 10;
+        arrow_pts[2].y = 0;
+        lv_line_set_points(arrow, arrow_pts, 3);
+        lv_obj_set_pos(arrow, V9_SCENE_BTN_W - 22, (V9_SCENE_BTN_H - 6) / 2);
+        lv_obj_set_style_line_color(arrow, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_line_width(arrow, 2, 0);
+        lv_obj_set_style_line_rounded(arrow, true, 0);
+        lv_obj_clear_flag(arrow, LV_OBJ_FLAG_CLICKABLE);
+    }
+    return button;
 }
 
 static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
@@ -991,6 +1294,8 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
     lv_obj_center(label);
 
+    v9_make_scene_button(screen, ui);
+
     g_v9.view = lv_obj_create(screen);
     lv_obj_remove_style_all(g_v9.view);
     lv_obj_set_size(g_v9.view, V9_VIEW_W, V9_VIEW_H);
@@ -1009,6 +1314,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
 
     v9_create_demo_cards(ui);
     v9_refresh_rooms(ui);
+    v9_scene_apply_label();
     smart_home_lvgl_v9_refresh_views(ui);
 
     if (ui->home_time_timer) {

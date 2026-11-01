@@ -45,6 +45,9 @@ SMALL_ICONS = {
     "air-conditioning", "bulb", "camera", "camera-off", "cloud-rain", "devices", "dots",
     "home", "microphone", "microphone-off", "moon", "propeller", "robot", "shield",
     "sparkle-2", "sun", "temperature", "volume", "wifi", "wifi-off",
+    # Scene-menu glyphs sit in a 20 px slot on the home screen; without a
+    # native 20 px bitmap the lookup would fall back to 32 px and overflow.
+    "run", "television-classic", "zzz",
 }
 
 # These are the only glyphs used as visual anchors on the 1024x600 home page.

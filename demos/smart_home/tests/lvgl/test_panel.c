@@ -11,6 +11,7 @@
 static void test_host_frame_budget(smart_home_lvgl_t *ui);
 static void test_screen_cycle(smart_home_lvgl_t *ui);
 static void test_v9_cards(smart_home_lvgl_t *ui);
+static void test_v9_scene_switcher(smart_home_lvgl_t *ui);
 static void test_v9_room_catalog(smart_home_lvgl_t *ui);
 static int local_state_enabled;
 static void capture_v9_device_modals(smart_home_lvgl_t *ui);
@@ -84,6 +85,7 @@ size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
 
 static int submit_result;
 static int submissions;
+static int scene_result;
 static bool gateway_online = true;
 bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
                                     const char *did, smart_home_miloco_device_t *out)
@@ -126,6 +128,22 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
     (void)service; (void)did; (void)iid; (void)operation; (void)value;
     submissions++;
     return submit_result;
+}
+
+/* 首页场景切换器直接调用真实场景执行入口；宿主 harness 不链接 miloco
+ * 服务，这里记录调用次数与 scene id 供断言。 */
+static int scene_runs;
+static char last_scene[32];
+int smart_home_miloco_run_scene(smart_home_miloco_t *service, const char *scene,
+                                char *report, size_t report_size)
+{
+    (void)service;
+    scene_runs++;
+    snprintf(last_scene, sizeof last_scene, "%s", scene ? scene : "");
+    if (report && report_size) {
+        snprintf(report, report_size, "stub: %s", scene ? scene : "");
+    }
+    return scene_result;
 }
 
 static smart_home_miloco_weather_t weather;
@@ -338,6 +356,7 @@ static void test_home(smart_home_lvgl_t *ui)
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
     capture_v9_device_modals(ui);
     test_v9_cards(ui);
+    test_v9_scene_switcher(ui);
     test_v9_room_catalog(ui);
 
     smart_home_lvgl_build_settings_screen_v9(ui);
@@ -1080,6 +1099,98 @@ static void capture_v9_mi_qr(smart_home_lvgl_t *ui)
     lv_obj_update_layout(ui->screen_settings_v9);
     (void)smart_home_lvgl_v9_settings_select_category(0);
 }
+
+/* 场景切换器：按钮默认显示「回家模式」，点开后菜单有四项且当前项高亮，
+ * 选中「观影模式」后按钮文案/图标同步更新，并把 movie 交给场景执行入口。 */
+static void test_v9_scene_switcher(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *button;
+    int found = 0;
+
+    /* 找到房间行右侧的场景按钮：位置固定，尺寸 156x48。 */
+    for (uint32_t i = 0; i < lv_obj_get_child_count(ui->screen_home); i++) {
+        lv_obj_t *child = lv_obj_get_child(ui->screen_home, i);
+
+        if (lv_obj_get_x(child) == 844 && lv_obj_get_y(child) == 206 &&
+            lv_obj_get_width(child) == 156 && lv_obj_get_height(child) == 48) {
+            button = child;
+            found = 1;
+            break;
+        }
+    }
+    assert(found);
+    lv_screen_load(ui->screen_home);
+    lv_obj_update_layout(ui->screen_home);
+
+    lv_indev_t *input = lv_indev_create();
+    lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(input, read_pointer);
+
+    /* 默认态：文案为回家模式（子对象顺序：图标、文字、折线箭头）。 */
+    lv_obj_t *label = NULL;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(button); i++) {
+        lv_obj_t *child = lv_obj_get_child(button, i);
+
+        if (lv_obj_check_type(child, &lv_label_class)) {
+            label = child;
+            break;
+        }
+    }
+    assert(label && !strcmp(lv_label_get_text(label), "回家模式"));
+
+    /* 展开后菜单应出现四项，且当前项用选中底色。 */
+    touch(input, button, LV_INDEV_STATE_PRESSED);
+    touch(input, button, LV_INDEV_STATE_RELEASED);
+    lv_obj_update_layout(ui->screen_home);
+    lv_obj_update_layout(lv_layer_top());
+    /* 菜单挂在顶层图层（首页最后一个子对象必须留给底部导航栏）。 */
+    lv_obj_t *menu = NULL;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(lv_layer_top()); i++) {
+        lv_obj_t *child = lv_obj_get_child(lv_layer_top(), i);
+
+        if (lv_obj_get_width(child) == 156 &&
+            lv_obj_get_child_count(child) == 4) {
+            menu = child;
+            break;
+        }
+    }
+    assert(menu && !lv_obj_has_flag(menu, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_get_child_count(menu) == 4);
+    capture_screen(ui->screen_home, "SMART_HOME_V9_SCENE_MENU_CAPTURE");
+    /* 默认选中第一项，且第一项的底色是选中色而不是普通卡片色。 */
+    assert(!strcmp(lv_label_get_text(
+               lv_obj_get_child(lv_obj_get_child(menu, 0), 1)), "回家模式"));
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(menu, 0), 0) == LV_OPA_COVER);
+
+    int runs_before = scene_runs;
+    /* 点击第二项「观影模式」。 */
+    lv_obj_t *item = lv_obj_get_child(menu, 1);
+    touch(input, item, LV_INDEV_STATE_PRESSED);
+    touch(input, item, LV_INDEV_STATE_RELEASED);
+
+    assert(scene_runs == runs_before + 1);
+    assert(!strcmp(last_scene, "movie"));
+    assert(!strcmp(lv_label_get_text(label), "观影模式"));
+    /* 菜单点选后隐藏，但不销毁。 */
+    assert(lv_obj_has_flag(menu, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_get_child(menu, 1) != NULL);
+    lv_indev_delete(input);
+
+    /* 场景执行成功会弹出结果框：点一次遮罩关闭它，与用户操作一致，
+     * 也顺带验证弹窗关闭后首页只剩底部导航栏这一约定。 */
+    {
+        lv_obj_t *mask = lv_obj_get_child(ui->screen_home, -1);
+
+        lv_obj_update_layout(ui->screen_home);
+        assert(lv_obj_get_width(mask) == 1024);
+        assert(lv_obj_get_height(mask) == 600);
+        lv_obj_send_event(mask, LV_EVENT_CLICKED, NULL);
+        lv_obj_update_layout(ui->screen_home);
+        assert(lv_obj_get_height(lv_obj_get_child(ui->screen_home, -1)) == 64);
+    }
+    puts("PASS: scene switcher opens a four-item menu and runs the chosen scene");
+}
+
 static void test_v9_cards(smart_home_lvgl_t *ui)
 {
     lv_obj_t *carousel;
