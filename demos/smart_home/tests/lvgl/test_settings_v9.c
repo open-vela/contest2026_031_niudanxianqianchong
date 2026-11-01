@@ -18,6 +18,7 @@ static struct {
 static int mcp_calls;
 static smart_home_mcp_runtime_config_t applied_mcp;
 static smart_home_model_config_t applied_model;
+static unsigned network_probe_calls;
 static const smart_home_llm_backend_preset_t preset = {
     .id = "test", .name = "测试服务", .host = "example.invalid",
     .path = "/chat", .port = "443", .default_model = "test-model",
@@ -79,6 +80,41 @@ int smart_home_network_connect_credentials(smart_home_network_status_t *status,
     memset(status, 0, sizeof(*status));
     status->online = true;
     return block_service(0);
+}
+
+int smart_home_network_probe(smart_home_network_status_t *status)
+{
+    assert(status);
+    network_probe_calls++;
+    status->ip_status = SMART_HOME_NETWORK_OK;
+    status->dns_status = SMART_HOME_NETWORK_OK;
+    status->online = true;
+    return SMART_HOME_NETWORK_OK;
+}
+
+bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
+                                  smart_home_miloco_config_t *config)
+{
+    (void)service;
+    if (config) memset(config, 0, sizeof(*config));
+    return false;
+}
+
+bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
+{ (void)service; return false; }
+
+bool smart_home_miloco_bound(const smart_home_miloco_t *service)
+{ (void)service; return false; }
+
+size_t smart_home_miloco_list(const smart_home_miloco_t *service,
+                              smart_home_miloco_device_t *devices,
+                              size_t capacity, uint32_t *revision)
+{
+    (void)service;
+    (void)devices;
+    (void)capacity;
+    if (revision) *revision = 0;
+    return 0;
 }
 
 int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,

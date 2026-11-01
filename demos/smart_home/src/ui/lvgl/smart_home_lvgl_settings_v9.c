@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define V9_SETTINGS_CATEGORIES 6
 
@@ -65,6 +66,18 @@ typedef struct {
     lv_obj_t *net_ssid;
     lv_obj_t *net_password;
     lv_obj_t *net_status;
+    lv_obj_t *health_badge;
+    lv_obj_t *health_badge_label;
+    lv_obj_t *health_note;
+    lv_obj_t *health_network;
+    lv_obj_t *health_miloco;
+    lv_obj_t *health_model;
+    lv_obj_t *health_tools;
+    lv_obj_t *health_error;
+    lv_obj_t *health_meta;
+    lv_obj_t *health_refresh;
+    lv_obj_t *health_refresh_label;
+    time_t health_checked_at;
     lv_obj_t *keyboard;
     int model_index;
     char model_name_draft[8][64];
@@ -75,6 +88,7 @@ typedef struct {
 } v9_settings_t;
 
 static v9_settings_t g_settings;
+static void health_panel_refresh(smart_home_lvgl_t *ui);
 
 #if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || defined(CONFIG_SMART_HOME_NODE_GATEWAY)
 static void mcp_config_open(smart_home_lvgl_t *ui);
@@ -197,11 +211,6 @@ static void panel_button(lv_obj_t *panel, const char *text, lv_obj_t *target)
     lv_obj_center(label);
 }
 
-static const char *state_text(int ready)
-{
-    return ready ? "已就绪" : "未就绪";
-}
-
 static void display_unavailable(lv_obj_t *panel, const char *icon_name,
                                 const char *title, int y)
 {
@@ -267,6 +276,8 @@ typedef struct {
     smart_home_lvgl_t *ui;
     char ssid[33];
     char password[65];
+    int probe;
+    smart_home_network_status_t status;
 } v9_net_job_t;
 
 static struct {
@@ -342,15 +353,21 @@ void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui)
 static void *v9_net_worker(void *argument)
 {
     v9_net_job_t *job = argument;
-    smart_home_network_status_t status = {0};
+    smart_home_network_status_t status;
     int ret;
 
     if (!job || !job->ui || !job->ui->app) {
         free(job);
         return NULL;
     }
-    ret = smart_home_network_connect_credentials(&status, job->ssid,
-                                                 job->password);
+    if (job->probe) {
+        status = job->status;
+        ret = smart_home_network_probe(&status);
+    } else {
+        memset(&status, 0, sizeof(status));
+        ret = smart_home_network_connect_credentials(&status, job->ssid,
+                                                      job->password);
+    }
     pthread_mutex_lock(&job->ui->pending_mutex);
     g_net.status = status;
     g_net.result = ret;
@@ -429,6 +446,14 @@ static void v9_net_timer_cb(lv_timer_t *timer)
     if (ready) {
         pthread_join(g_net.thread, NULL);
         g_net.active = 0;
+        g_settings.health_checked_at = time(NULL);
+        if (g_settings.health_refresh) {
+            lv_obj_remove_state(g_settings.health_refresh, LV_STATE_DISABLED);
+        }
+        if (g_settings.health_refresh_label) {
+            lv_label_set_text(g_settings.health_refresh_label, "刷新状态");
+        }
+        health_panel_refresh(ui);
     }
     v9_net_status_refresh(ui);
 }
@@ -1362,20 +1387,376 @@ static void build_services_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     }
 }
 
+static void health_service_row(lv_obj_t *panel, int y,
+                               const char *icon_name, const char *name,
+                               lv_obj_t **value)
+{
+    lv_obj_t *icon = smart_home_lvgl_icon_create(panel, icon_name, 18, 18);
+    lv_obj_t *label = smart_home_lvgl_label_create(
+        panel, name, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 15);
+    lv_obj_t *line = lv_obj_create(panel);
+
+    if (icon) {
+        lv_obj_set_pos(icon, 0, y + 10);
+        lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_set_pos(label, 32, y + 7);
+    *value = smart_home_lvgl_label_create(
+        panel, "未检查", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 15);
+    lv_obj_set_size(*value, 304, 24);
+    lv_obj_set_pos(*value, 400, y + 7);
+    lv_obj_set_style_text_align(*value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(*value, LV_LABEL_LONG_DOT);
+
+    lv_obj_remove_style_all(line);
+    lv_obj_set_size(line, lv_pct(100), 1);
+    lv_obj_set_pos(line, 0, y + 40);
+    lv_obj_set_style_bg_color(line, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+}
+
+static const char *health_build_version(void)
+{
+#ifdef AGENT_BUILD_VERSION
+    return AGENT_BUILD_VERSION;
+#elif defined(CONFIG_VERSION_STRING)
+    return CONFIG_VERSION_STRING;
+#else
+    return "版本未知";
+#endif
+}
+
+static void health_meta_refresh(void)
+{
+    struct tm checked_tm;
+    char checked_text[16] = "--:--:--";
+    char meta[112];
+
+    if (g_settings.health_checked_at > 0 &&
+        gmtime_r(&g_settings.health_checked_at, &checked_tm)) {
+        (void)strftime(checked_text, sizeof(checked_text), "%H:%M:%S",
+                       &checked_tm);
+    }
+
+    snprintf(meta, sizeof(meta), "最后检查 %s · 固件 %s", checked_text,
+             health_build_version());
+    if (g_settings.health_meta) {
+        lv_label_set_text(g_settings.health_meta, meta);
+    }
+}
+
+static void health_panel_refresh(smart_home_lvgl_t *ui)
+{
+    const smart_home_system_status_t *status;
+    const smart_home_network_status_t *network;
+    lv_color_t summary_color;
+    int failures = 0;
+    int pending = 0;
+
+    if (!ui || !ui->app || !g_settings.health_badge_label) return;
+    status = &ui->app->system_status;
+    network = &status->network_status;
+
+    if (network->online) {
+        lv_label_set_text(g_settings.health_network, "已连接互联网");
+        lv_obj_set_style_text_color(g_settings.health_network,
+                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+    } else if (network->ip_status == SMART_HOME_NETWORK_OK) {
+        lv_label_set_text(g_settings.health_network,
+                          "Wi-Fi 已连接，互联网暂不可用");
+        lv_obj_set_style_text_color(g_settings.health_network,
+                                    SMART_HOME_UI_COLOR_WARNING, 0);
+        failures++;
+    } else {
+        lv_label_set_text(g_settings.health_network, "未连接互联网");
+        lv_obj_set_style_text_color(g_settings.health_network,
+                                    SMART_HOME_UI_COLOR_DANGER, 0);
+        failures++;
+    }
+
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (ui->app->miloco) {
+        smart_home_miloco_config_t config = {0};
+        int configured = smart_home_miloco_get_config(ui->app->miloco,
+                                                       &config) &&
+                         config.host[0] != '\0';
+        int reachable = smart_home_miloco_reachable(ui->app->miloco);
+
+        if (reachable && smart_home_miloco_bound(ui->app->miloco)) {
+            size_t count = smart_home_miloco_list(ui->app->miloco, NULL, 0,
+                                                   NULL);
+            char value[48];
+
+            snprintf(value, sizeof(value), "已连接 · %u 台设备",
+                     (unsigned int)count);
+            lv_label_set_text(g_settings.health_miloco, value);
+            lv_obj_set_style_text_color(g_settings.health_miloco,
+                                        SMART_HOME_UI_COLOR_SUCCESS, 0);
+        } else if (reachable) {
+            lv_label_set_text(g_settings.health_miloco, "已连接 · 等待授权");
+            lv_obj_set_style_text_color(g_settings.health_miloco,
+                                        SMART_HOME_UI_COLOR_WARNING, 0);
+        } else if (configured) {
+            lv_label_set_text(g_settings.health_miloco, "连接失败");
+            lv_obj_set_style_text_color(g_settings.health_miloco,
+                                        SMART_HOME_UI_COLOR_DANGER, 0);
+            failures++;
+        } else {
+            lv_label_set_text(g_settings.health_miloco, "未配置");
+            lv_obj_set_style_text_color(g_settings.health_miloco,
+                                        SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+        }
+    } else {
+        lv_label_set_text(g_settings.health_miloco, "未启用");
+        lv_obj_set_style_text_color(g_settings.health_miloco,
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+    }
+#else
+    lv_label_set_text(g_settings.health_miloco, "未启用");
+    lv_obj_set_style_text_color(g_settings.health_miloco,
+                                SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+#endif
+
+    if (status->model_status == SMART_HOME_STATUS_UNKNOWN) {
+        lv_label_set_text(g_settings.health_model, "等待检查");
+        lv_obj_set_style_text_color(g_settings.health_model,
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+        pending++;
+    } else if (status->model_status == AGENT_OK) {
+        lv_label_set_text(g_settings.health_model, "配置已应用");
+        lv_obj_set_style_text_color(g_settings.health_model,
+                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+    } else {
+        lv_label_set_text(g_settings.health_model, "配置未应用");
+        lv_obj_set_style_text_color(g_settings.health_model,
+                                    SMART_HOME_UI_COLOR_DANGER, 0);
+        failures++;
+    }
+
+    if (status->tools_status == SMART_HOME_STATUS_UNKNOWN) {
+        lv_label_set_text(g_settings.health_tools, "等待检查");
+        lv_obj_set_style_text_color(g_settings.health_tools,
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+        pending++;
+    } else if (status->tools_status == AGENT_OK) {
+        lv_label_set_text(g_settings.health_tools, "已就绪");
+        lv_obj_set_style_text_color(g_settings.health_tools,
+                                    SMART_HOME_UI_COLOR_SUCCESS, 0);
+    } else {
+        lv_label_set_text(g_settings.health_tools, "不可用");
+        lv_obj_set_style_text_color(g_settings.health_tools,
+                                    SMART_HOME_UI_COLOR_DANGER, 0);
+        failures++;
+    }
+
+    if (g_settings.health_error) {
+        const char *error = status->last_error[0] ? status->last_error : "无";
+
+        lv_label_set_text(g_settings.health_error, error);
+        lv_obj_set_style_text_color(g_settings.health_error,
+            status->last_error[0] ? SMART_HOME_UI_COLOR_WARNING :
+                                    SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+    }
+
+    if (failures) {
+        lv_label_set_text(g_settings.health_badge_label, "有服务需要处理");
+        lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                          "网络或核心服务异常；未启用的可选服务单独标记。");
+        summary_color = SMART_HOME_UI_COLOR_DANGER;
+    } else if (pending) {
+        lv_label_set_text(g_settings.health_badge_label, "状态待确认");
+        lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                          "部分服务状态未知，点击刷新状态获取最新信息。");
+        summary_color = SMART_HOME_UI_COLOR_WARNING;
+    } else {
+        lv_label_set_text(g_settings.health_badge_label, "核心服务正常");
+        lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                          "网络与核心服务正常，未启用的可选服务单独标记。");
+        summary_color = SMART_HOME_UI_COLOR_SUCCESS;
+    }
+    lv_obj_set_style_text_color(g_settings.health_badge_label,
+                                SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_bg_color(g_settings.health_badge, summary_color, 0);
+    lv_obj_set_style_bg_color(lv_obj_get_child(g_settings.health_badge, 0),
+                              summary_color, 0);
+    lv_obj_set_style_bg_color(g_settings.health_note, summary_color, 0);
+    health_meta_refresh();
+}
+
+static void health_details_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+        panel_show(4);
+    }
+}
+
+static void health_refresh_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    v9_net_job_t *job;
+    pthread_attr_t attr;
+    int ret;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || !ui->app) {
+        return;
+    }
+    if (g_net.active) {
+        if (g_settings.health_note) {
+            lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                              "网络任务正在进行，完成后可再次刷新。");
+        }
+        return;
+    }
+    job = calloc(1u, sizeof(*job));
+    if (!job) {
+        if (g_settings.health_badge_label)
+            lv_label_set_text(g_settings.health_badge_label, "无法开始检查");
+        return;
+    }
+    job->ui = ui;
+    job->probe = 1;
+    job->status = ui->app->system_status.network_status;
+    g_net.owner = ui;
+    g_net.result = 0;
+    g_net.ready = 0;
+    g_net.active = 1;
+    lv_obj_add_state(g_settings.health_refresh, LV_STATE_DISABLED);
+    lv_label_set_text(g_settings.health_refresh_label, "检查中…");
+    lv_label_set_text(g_settings.health_badge_label, "正在检查");
+    lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                      "正在检测网络，其余服务显示当前状态。");
+    if (pthread_attr_init(&attr) != 0) {
+        free(job);
+        g_net.active = 0;
+        lv_obj_remove_state(g_settings.health_refresh, LV_STATE_DISABLED);
+        lv_label_set_text(g_settings.health_refresh_label, "刷新状态");
+        health_panel_refresh(ui);
+        return;
+    }
+    ret = pthread_attr_setstacksize(&attr, 16384u);
+    if (ret == 0) ret = pthread_create(&g_net.thread, &attr, v9_net_worker,
+                                       job);
+    pthread_attr_destroy(&attr);
+    if (ret != 0) {
+        free(job);
+        g_net.active = 0;
+        lv_obj_remove_state(g_settings.health_refresh, LV_STATE_DISABLED);
+        lv_label_set_text(g_settings.health_refresh_label, "刷新状态");
+        lv_label_set_text(g_settings.health_badge_label, "无法开始检查");
+        lv_label_set_text(lv_obj_get_child(g_settings.health_note, 0),
+                          "无法创建网络检查任务，请稍后重试。");
+        return;
+    }
+}
+
+static void health_action_button(lv_obj_t *panel, int x, const char *text,
+                                 lv_event_cb_t callback, void *user_data,
+                                 int primary, lv_obj_t **button_out,
+                                 lv_obj_t **label_out)
+{
+    lv_obj_t *button = lv_button_create(panel);
+    lv_obj_t *label;
+
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, primary ? 168 : 176, 32);
+    lv_obj_set_pos(button, x, 342);
+    lv_obj_set_style_radius(button, 10, 0);
+    if (primary) {
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    } else {
+        lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE, 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(button, 1, 0);
+        lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
+    }
+    smart_home_lvgl_press_feedback(button);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, user_data);
+    label = smart_home_lvgl_label_create(
+        button, text, primary ? SMART_HOME_UI_COLOR_BG :
+                               SMART_HOME_UI_COLOR_TEXT_PRIMARY, 15);
+    lv_obj_center(label);
+    if (button_out) *button_out = button;
+    if (label_out) *label_out = label;
+}
+
 static void build_health_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
-    int net = ui && ui->app && ui->app->system_status.network_status.online;
-    int model = ui && ui->app &&
-                ui->app->system_status.model_status == AGENT_OK;
-    int tools = ui && ui->app &&
-                ui->app->system_status.tools_status == AGENT_OK;
+    lv_obj_t *title;
+    lv_obj_t *badge_dot;
+    lv_obj_t *note_label;
+    lv_obj_t *error_title;
 
-    panel_title(panel, "系统健康");
-    panel_row(panel, 56, "家庭网络", net ? "已连接互联网" : "未连接");
-    panel_row(panel, 106, "模型服务", state_text(model));
-    panel_row(panel, 156, "本地工具", state_text(tools));
-    panel_row(panel, 206, "最近错误", "无");
-    panel_button(panel, "打开系统健康", ui ? ui->screen_settings : NULL);
+    title = smart_home_lvgl_label_create(
+        panel, "系统健康", SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+    lv_obj_set_pos(title, 0, 20);
+
+    g_settings.health_badge = lv_obj_create(panel);
+    lv_obj_remove_style_all(g_settings.health_badge);
+    lv_obj_set_size(g_settings.health_badge, 164, 30);
+    lv_obj_set_pos(g_settings.health_badge, 540, 18);
+    lv_obj_set_style_radius(g_settings.health_badge, 15, 0);
+    lv_obj_set_style_bg_color(g_settings.health_badge,
+                              SMART_HOME_UI_COLOR_SUCCESS, 0);
+    lv_obj_set_style_bg_opa(g_settings.health_badge, LV_OPA_20, 0);
+    badge_dot = lv_obj_create(g_settings.health_badge);
+    lv_obj_remove_style_all(badge_dot);
+    lv_obj_set_size(badge_dot, 7, 7);
+    lv_obj_set_pos(badge_dot, 13, 11);
+    lv_obj_set_style_radius(badge_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(badge_dot, SMART_HOME_UI_COLOR_SUCCESS, 0);
+    lv_obj_set_style_bg_opa(badge_dot, LV_OPA_COVER, 0);
+    g_settings.health_badge_label = smart_home_lvgl_label_create(
+        g_settings.health_badge, "核心服务正常",
+        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
+    lv_obj_set_pos(g_settings.health_badge_label, 27, 6);
+
+    g_settings.health_note = lv_obj_create(panel);
+    lv_obj_remove_style_all(g_settings.health_note);
+    lv_obj_set_size(g_settings.health_note, lv_pct(100), 38);
+    lv_obj_set_pos(g_settings.health_note, 0, 66);
+    lv_obj_set_style_radius(g_settings.health_note, 10, 0);
+    lv_obj_set_style_bg_color(g_settings.health_note,
+                              SMART_HOME_UI_COLOR_SUCCESS, 0);
+    lv_obj_set_style_bg_opa(g_settings.health_note, LV_OPA_20, 0);
+    note_label = smart_home_lvgl_label_create(
+        g_settings.health_note,
+        "网络与核心服务正常，未启用的可选服务单独标记。",
+        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
+    lv_obj_set_pos(note_label, 14, 11);
+    lv_obj_set_width(note_label, 670);
+    lv_label_set_long_mode(note_label, LV_LABEL_LONG_DOT);
+
+    health_service_row(panel, 116, "asset:wifi", "家庭网络",
+                       &g_settings.health_network);
+    health_service_row(panel, 158, "asset:devices", "米家网关",
+                       &g_settings.health_miloco);
+    health_service_row(panel, 200, "asset:setting-ai", "模型服务",
+                       &g_settings.health_model);
+    health_service_row(panel, 242, "asset:tool", "本地工具",
+                       &g_settings.health_tools);
+
+    error_title = smart_home_lvgl_label_create(
+        panel, "最近错误：", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(error_title, 0, 292);
+    g_settings.health_error = smart_home_lvgl_label_create(
+        panel, "无", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(g_settings.health_error, 78, 292);
+    lv_obj_set_width(g_settings.health_error, 626);
+    lv_label_set_long_mode(g_settings.health_error, LV_LABEL_LONG_DOT);
+
+    g_settings.health_meta = smart_home_lvgl_label_create(
+        panel, "", SMART_HOME_UI_COLOR_TEXT_MUTED, 12);
+    lv_obj_set_pos(g_settings.health_meta, 0, 316);
+    lv_obj_set_width(g_settings.health_meta, lv_pct(100));
+    lv_label_set_long_mode(g_settings.health_meta, LV_LABEL_LONG_DOT);
+
+    health_action_button(panel, 0, "服务详情", health_details_cb, ui, 0,
+                         NULL, NULL);
+    health_action_button(panel, 536, "刷新状态", health_refresh_cb, ui, 1,
+                         &g_settings.health_refresh,
+                         &g_settings.health_refresh_label);
+    health_panel_refresh(ui);
 }
 
 void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)

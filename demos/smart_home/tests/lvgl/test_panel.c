@@ -55,6 +55,7 @@ static smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
 static size_t snapshot_count;
 static uint32_t snapshot_revision = 1;
 static unsigned snapshot_reads;
+static unsigned network_probe_calls;
 size_t smart_home_miloco_list(const smart_home_miloco_t *service,
                              smart_home_miloco_device_t *out,
                              size_t capacity, uint32_t *revision)
@@ -107,6 +108,15 @@ void *smart_home_bulk_alloc(size_t size) { return malloc(size); }
 void smart_home_bulk_free(void *ptr) { free(ptr); }
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
 { (void)service; return gateway_online; }
+int smart_home_network_probe(smart_home_network_status_t *status)
+{
+    assert(status);
+    network_probe_calls++;
+    status->ip_status = SMART_HOME_NETWORK_OK;
+    status->dns_status = SMART_HOME_NETWORK_OK;
+    status->online = true;
+    return SMART_HOME_NETWORK_OK;
+}
 int smart_home_miloco_submit_power(smart_home_miloco_t *service,
                                    const char *did, bool on)
 { (void)service; (void)did; (void)on; submissions++; return submit_result; }
@@ -1152,6 +1162,29 @@ static lv_obj_t *find_v9_label(lv_obj_t *root, const char *text)
     return NULL;
 }
 
+static bool v9_label_contains(lv_obj_t *root, const char *text)
+{
+    if (lv_obj_check_type(root, &lv_label_class) &&
+        strstr(lv_label_get_text(root), text)) return true;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(root); i++) {
+        if (v9_label_contains(lv_obj_get_child(root, i), text)) return true;
+    }
+    return false;
+}
+
+static void wait_for_network_probe(smart_home_lvgl_t *ui)
+{
+    const struct timespec pause = {.tv_nsec = 1000000};
+
+    for (unsigned i = 0; i < 3000; i++) {
+        lv_tick_inc(10);
+        lv_timer_handler();
+        if (ui->app->system_status.network_status.online) return;
+        nanosleep(&pause, NULL);
+    }
+    assert(!"health refresh did not complete");
+}
+
 static void test_v9_room_catalog(smart_home_lvgl_t *ui)
 {
     snapshot_count = 12;
@@ -1214,8 +1247,61 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
             }
         }
     }
+
+    ui->app->system_status.network_status.online = true;
+    ui->app->system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
+    ui->app->system_status.model_status = AGENT_OK;
+    ui->app->system_status.tools_status = AGENT_OK;
+    ui->app->system_status.last_error[0] = '\0';
+    ui->app->system_status.network_status.online = true;
+    gateway_online = true;
+    snapshot_count = 6;
+    assert(smart_home_lvgl_v9_settings_select_category(5) == 5);
+    assert(v9_label_contains(ui->screen_settings_v9,
+                             "最后检查 --:--:--"));
+
+    lv_obj_t *details = find_v9_label(ui->screen_settings_v9, "服务详情");
+    assert(details);
+    lv_obj_send_event(lv_obj_get_parent(details), LV_EVENT_CLICKED, NULL);
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 4), 0) == LV_OPA_COVER);
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 5), 0) == LV_OPA_TRANSP);
+    assert(smart_home_lvgl_v9_settings_select_category(5) == 5);
+
+    lv_obj_t *refresh_label = find_v9_label(ui->screen_settings_v9, "刷新状态");
+    assert(refresh_label);
+    lv_obj_t *refresh = lv_obj_get_parent(refresh_label);
+    network_probe_calls = 0;
+    ui->app->system_status.network_status.online = false;
+    lv_obj_send_event(refresh, LV_EVENT_CLICKED, NULL);
+    wait_for_network_probe(ui);
+    assert(network_probe_calls == 1);
+    assert(!lv_obj_has_state(refresh, LV_STATE_DISABLED));
+    assert(find_v9_label(ui->screen_settings_v9, "核心服务正常"));
+    assert(find_v9_label(ui->screen_settings_v9, "已连接 · 6 台设备"));
+    assert(find_v9_label(ui->screen_settings_v9, "配置已应用"));
+    assert(find_v9_label(ui->screen_settings_v9, "已就绪"));
+    assert(find_v9_label(ui->screen_settings_v9, "已连接互联网"));
+    assert(v9_label_contains(ui->screen_settings_v9, "最后检查"));
+
+    snprintf(ui->app->system_status.last_error,
+             sizeof(ui->app->system_status.last_error), "模型密钥缺失");
+    ui->app->system_status.model_status = AGENT_ERROR_AUTH;
+    ui->app->system_status.network_status.online = false;
+    lv_obj_send_event(refresh, LV_EVENT_CLICKED, NULL);
+    wait_for_network_probe(ui);
+    assert(network_probe_calls == 2);
+    assert(find_v9_label(ui->screen_settings_v9, "有服务需要处理"));
+    assert(find_v9_label(ui->screen_settings_v9, "模型密钥缺失"));
+    ui->app->system_status.model_status = AGENT_OK;
+    ui->app->system_status.last_error[0] = '\0';
+    ui->app->system_status.network_status.online = false;
+    lv_obj_send_event(refresh, LV_EVENT_CLICKED, NULL);
+    wait_for_network_probe(ui);
+    assert(network_probe_calls == 3);
+    assert(find_v9_label(ui->screen_settings_v9, "核心服务正常"));
+
     lv_indev_delete(input);
-    puts("PASS: six settings categories switch via real icon/text/button touches");
+    puts("PASS: settings navigation and system health status/actions");
 }
 
 static void test_v9_shell(smart_home_lvgl_t *ui)
