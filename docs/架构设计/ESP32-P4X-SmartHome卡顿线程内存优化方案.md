@@ -272,8 +272,9 @@ smart_home_thread_start(name, entry, arg, stack_bytes, priority, cpu_mask, detac
 | 构建其余 10 个页面（含 settings_v9） | 11.6 s → 17.1 s | 5.5 s |
 | **到首帧合计** | | **14.5 s** |
 
-注：网络段随 AP/DHCP 波动很大，重复测量中出现过 3.4 s 和 37 s 两个极端，
-其余三段（字体、首页、其余页面）稳定。下面的收益对比只比较后三段。
+注：网络段随 AP/DHCP 波动很大，重复测量中出现过 3.4 s、37 s 和 63 s
+三个量级。后三段（字体、首页、其余页面）稳定。网络段的根因是
+`getaddrinfo()` 在 DNS 不可达时要等满 30 s × 3 次重试，而它位于启动路径上。
 
 ### 6.2 已实施项与实测收益
 
@@ -283,6 +284,8 @@ smart_home_thread_start(name, entry, arg, stack_bytes, priority, cpu_mask, detac
 | O-J6（部分） | v9 视图刷新按 revision 门控 | 首页空闲 avg 4~7 → 0 ms，max 180~410 → 0~10 ms |
 | O-M1 | 12 处 19 KB 设备快照移出线程栈 | 主任务栈高水位 43.8 KB（68.5%）→ 19.7 KB（30.1%）；objdump 扫描已无 ≥4 KB 栈帧 |
 | O-J6（定时器） | 隐藏页的 250 ms / 500 ms 定时器不再空转 | 代码路径上已不唤醒；**空闲 CPU 仍稳定在 24.8%**，由 LVGL 主循环（≈50 次/秒的 `lv_timer_handler`）本身主导，未观察到可测收益。此前 `perf(ui)` 提交信息里的“24.5% → 0.0%”是启动后过早采样造成的假象，以此处为准 |
+| J9（部分） | 7 个非首屏页面改为首帧后延迟构建 | 首帧 14.5 s → 11.2 s；延迟页面在首帧后 0.2~1.3 s 内补建完成，栈与堆高水位不变 |
+| 启动-DNS | `NETDB_DNSCLIENT_RECV_TIMEOUT=5`、`RETRIES=2` | DNS 不可达时：DNS 校验 60 s+ → 15.9 s 失败即继续，首帧 66 s → 23.7 s；可解析路径不受影响 |
 
 ### 6.3 结论修正：J2 / O-J2 不成立
 
