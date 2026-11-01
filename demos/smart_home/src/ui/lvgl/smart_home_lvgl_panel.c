@@ -160,12 +160,19 @@ static const char *miloco_room_name(const char *room)
 /* 房间来自真实设备快照；同名房间只列一次，不混入本地演示房间。 */
 static void miloco_room_options(smart_home_lvgl_t *ui, char *buffer, size_t size)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
     const char *rooms[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
     size_t count = 0, room_count = 0, used;
 
     snprintf(buffer, size, "全部");
     used = strlen(buffer);
+
+    /* 整表快照约 19 KB：放 PSRAM，避免下拉菜单构建时压栈。 */
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL) {
+        return;
+    }
     if (ui->app && ui->app->miloco) {
         count = smart_home_miloco_list(ui->app->miloco, devices,
                                       SMART_HOME_MILOCO_MAX_DEVICES, NULL);
@@ -200,6 +207,8 @@ static void miloco_room_options(smart_home_lvgl_t *ui, char *buffer, size_t size
             snprintf(buffer + used, size - used, "\n%s", miloco_room_name(""));
     }
 #endif
+
+    smart_home_bulk_free(devices);
 }
 
 static int miloco_matches_room(smart_home_lvgl_t *ui, const char *room)
@@ -1922,7 +1931,7 @@ static void miloco_card_click_cb(lv_event_t *event);
 
 static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t device_record;
     smart_home_miloco_device_t *dev = NULL;
     miloco_sheet_context_t *context;
     lv_obj_t *sheet;
@@ -1935,16 +1944,11 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
     int y = 0;
     uint8_t k;
     uint8_t req_slot = 0;
-    size_t count;
-    size_t i;
 
-    count = smart_home_miloco_list(ui->app->miloco, devices,
-                                   SMART_HOME_MILOCO_MAX_DEVICES, NULL);
-    for (i = 0; i < count; i++) {
-        if (strcmp(devices[i].did, did) == 0) {
-            dev = &devices[i];
-            break;
-        }
+    /* 只取目标设备，避免为打开一个抽屉把整份 19 KB 快照搬上栈。 */
+    if (ui->app && ui->app->miloco &&
+        smart_home_miloco_copy_device(ui->app->miloco, did, &device_record)) {
+        dev = &device_record;
     }
     if (!dev) {
         return;
@@ -2374,11 +2378,17 @@ static void create_miloco_placeholder_card(smart_home_lvgl_t *ui)
 
 static void append_miloco_cards(smart_home_lvgl_t *ui)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
     size_t count = 0;
     int show = device_matches_source(ui, 1);
     int reachable = ui->app && ui->app->miloco &&
                     smart_home_miloco_reachable(ui->app->miloco);
+
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL) {
+        return;
+    }
     if (ui->app && ui->app->miloco) {
         count = smart_home_miloco_list(ui->app->miloco, devices,
                                       SMART_HOME_MILOCO_MAX_DEVICES, &ui->miloco_revision);
@@ -2438,6 +2448,8 @@ static void append_miloco_cards(smart_home_lvgl_t *ui)
             miloco_restore_switch(binding->power, dev->power_on);
         }
     }
+
+    smart_home_bulk_free(devices);
 }
 
 static int miloco_pending_expired(smart_home_lvgl_t *ui)
