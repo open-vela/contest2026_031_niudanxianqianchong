@@ -13,8 +13,8 @@ set -euo pipefail
 
 usage() { grep '^#' "$0" | head -12; exit 1; }
 
-REPO=$(git rev-parse --show-toplevel 2>/dev/null) || {
-  echo "错误: 不在 git 仓库内运行" >&2; exit 1; }
+REPO=$(cd "$(dirname "$0")/../../.." && git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "错误: 无法从脚本位置定位 git 仓库" >&2; exit 1; }
 BRANCHES_NAME=$(basename "$REPO")
 WTROOT="$(dirname "$REPO")/worktrees"
 MAIN_BRANCH="contest2026"
