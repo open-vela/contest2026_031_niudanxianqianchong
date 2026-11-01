@@ -10,6 +10,9 @@
 #include "../../camera/smart_home_camera_control.h"
 #endif
 #include "smart_home_lvgl_room_dialog.h"
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+#include "smart_home_lvgl_onboarding.h"
+#endif
 #include "../../device/smart_home_device_service.h"
 #include "../../smart_home_memory.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -612,6 +615,26 @@ static lv_obj_t *v9_text(lv_obj_t *parent, const char *text, int x, int y,
 
 
 /* ── 场景切换器 ──────────────────────────────────────────── */
+
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+/* 数据来源标签点击：有待完成配置时重开引导，否则提示已全部就绪。 */
+static void v9_source_label_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    smart_home_onboarding_status_t status;
+
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
+        return;
+    }
+    smart_home_lvgl_onboarding_status(ui, &status);
+    if (status.pending > 0) {
+        smart_home_lvgl_onboarding_reset();
+        smart_home_lvgl_onboarding_present(ui);
+    } else {
+        v9_info_modal("配置已就绪", "家庭网络、米家网关与模型服务均已配置。");
+    }
+}
+#endif
 
 static void v9_scene_menu_close(void);
 
@@ -1287,13 +1310,21 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_center(icon);
 
-    /* 演示数据标签：与图标同宽居中，紧随图标下方（不压到房间栏）。 */
+    /* 数据来源标签：与图标同宽居中，紧随图标下方（不压到房间栏）。
+     * 兼作配置入口——有待完成项时点它可重新打开配置引导。 */
     label = smart_home_lvgl_label_create(screen, "演示数据",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
     lv_obj_set_pos(label, V9_WEATHER_ICON_X,
                    V9_WEATHER_ICON_Y + V9_WEATHER_ICON_PX);
     lv_obj_set_width(label, V9_WEATHER_ICON_PX);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+    /* 兼作配置入口：标签只有 14px 高，扩到 56px 才够触控下限。
+     * 关掉引导时不设 CLICKABLE，保持纯展示。 */
+    lv_obj_add_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(label, 21);
+    lv_obj_add_event_cb(label, v9_source_label_cb, LV_EVENT_CLICKED, ui);
+#endif
     g_v9.source_label = label;
 
     g_v9.room_strip = lv_obj_create(screen);
@@ -1352,6 +1383,15 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     smart_home_lvgl_refresh_home(ui);
     v9_reflow();
     smart_home_lvgl_build_nav_bar(screen, ui);
+
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+    /* 首次配置引导：仅当存在未完成项且本次运行未跳过时弹出。
+     * 首页已完整构建，浮层只是覆盖在上层，关掉即可看演示数据。
+     * 关掉 CONFIG_SMART_HOME_ONBOARDING 时整段不编译。 */
+    if (smart_home_lvgl_onboarding_should_present(ui)) {
+        smart_home_lvgl_onboarding_present(ui);
+    }
+#endif
 }
 
 int smart_home_lvgl_v9_visible_card_count(void)

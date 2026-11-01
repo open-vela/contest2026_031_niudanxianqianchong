@@ -623,6 +623,24 @@ config SMART_HOME_MILOCO_BRIDGE
       dedicated worker thread. Gateway host/port/token are stored in
       secrets.json and configured from the settings page.
 
+config SMART_HOME_ONBOARDING
+    bool "First-run configuration guide"
+    depends on SMART_HOME_DEMO_UI_LVGL
+    default y
+    help
+      Show a setup overlay on the home screen while the Wi-Fi link, the
+      Miloco gateway or the model service is still unconfigured. The
+      overlay lists the three items side by side, jumps to the matching
+      settings page, and can always be dismissed with "later".
+
+      It covers the home screen but does not block it: the home page is
+      fully built first, so dismissing the overlay immediately shows the
+      demo content. The dismissal is memory-only for this boot, because
+      writing LittleFS from the LVGL thread hard-freezes the system.
+
+      Say N to build without the overlay, for example for a demo image
+      that must boot straight into the product screens.
+
 config SMART_HOME_MILOCO_VOLATILE_CONFIG
     bool "Miloco gateway config is memory-only (skip secrets.json write)"
     depends on SMART_HOME_MILOCO_BRIDGE

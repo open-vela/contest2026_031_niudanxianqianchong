@@ -1,6 +1,9 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
 #include "smart_home_v9_device_view.h"
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+#include "smart_home_lvgl_onboarding.h"
+#endif
 #include "icons/smart_home_lvgl_png_icons.h"
 #include "../../src/config/smart_home_backends.h"
 #include <assert.h>
@@ -19,6 +22,9 @@ static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
 static void capture_v9_model_menu(smart_home_lvgl_t *ui);
 static void capture_v9_mi_qr(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+static void test_v9_onboarding(smart_home_lvgl_t *ui);
+#endif
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
 static lv_obj_t *find_v9_label(lv_obj_t *root, const char *text);
 
@@ -353,6 +359,15 @@ static void test_home(smart_home_lvgl_t *ui)
     ui->topbar_camera_icon_count = 0;
     weather.valid = true;
     weather.temperature = 22;
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+    /* 本用例验证的是首页本身，不是引导浮层：先让三项都算「已配置」，
+     * 否则浮层遮罩会挡住卡片与场景按钮的触摸。引导浮层由
+     * test_v9_onboarding 单独覆盖。 */
+    smart_home_lvgl_onboarding_reset();
+    ui->app->system_status.network_status.online = true;
+    ui->app->system_status.model_status = AGENT_OK;
+    gateway_online = true;
+#endif
     smart_home_lvgl_build_home_screen_v9(ui);
     struct tm design_time = {.tm_year = 126, .tm_mon = 9, .tm_mday = 30,
                               .tm_hour = 11, .tm_min = 39};
@@ -1435,6 +1450,89 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
     puts("PASS: settings navigation and system health status/actions");
 }
 
+
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+/* 首次配置引导：三项未完成时应弹出浮层，跳转设置页对应分类，点「稍后再说」
+ * 后不再重复弹出。宿主 harness 不链接真实 Wi-Fi / 网关，用桩控制状态。 */
+static void test_v9_onboarding(smart_home_lvgl_t *ui)
+{
+    smart_home_onboarding_status_t status;
+    lv_obj_t *modal;
+
+    /* 三项都就绪：状态为 0，不弹。 */
+    smart_home_lvgl_onboarding_reset();
+    smart_home_lvgl_onboarding_status(ui, &status);
+    assert(status.wifi_ready);
+    assert(status.miloco_ready);
+    assert(status.model_ready);
+    assert(status.pending == 0);
+    assert(!smart_home_lvgl_onboarding_should_present(ui));
+    smart_home_lvgl_onboarding_present(ui);
+    assert(!smart_home_lvgl_onboarding_visible());
+
+    /* 三项都未配：pending=3，应弹。 */
+    ui->app->system_status.network_status.online = false;
+    gateway_online = false;
+    ui->app->system_status.model_status = SMART_HOME_STATUS_UNKNOWN;
+    smart_home_lvgl_onboarding_reset();
+    smart_home_lvgl_onboarding_status(ui, &status);
+    assert(!status.wifi_ready && !status.miloco_ready && !status.model_ready);
+    assert(status.pending == 3);
+    assert(smart_home_lvgl_onboarding_should_present(ui));
+
+    smart_home_lvgl_onboarding_present(ui);
+    assert(smart_home_lvgl_onboarding_visible());
+    lv_obj_update_layout(ui->screen_home);
+    capture_screen(ui->screen_home, "SMART_HOME_ONBOARDING_CAPTURE");
+
+    /* 浮层遮罩尺寸应覆盖整屏，面板在 (92,62) 840x476。 */
+    modal = lv_obj_get_child(ui->screen_home, -1);
+    assert(lv_obj_get_width(modal) == 1024 && lv_obj_get_height(modal) == 600);
+    lv_obj_t *panel = lv_obj_get_child(modal, 0);
+    assert(lv_obj_get_x(panel) == 92 && lv_obj_get_y(panel) == 62);
+    assert(lv_obj_get_width(panel) == 840 && lv_obj_get_height(panel) == 476);
+
+    /* 面板内应有三行，第二行点击跳到「设备与服务」。 */
+    lv_obj_t *rows = NULL;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(panel); i++) {
+        lv_obj_t *c = lv_obj_get_child(panel, i);
+
+        if (lv_obj_get_child_count(c) == 3 &&
+            lv_obj_get_width(c) == 840 - 64) {
+            rows = c;
+            break;
+        }
+    }
+    assert(rows);
+    lv_obj_t *row = lv_obj_get_child(rows, 1);
+    assert(lv_obj_get_width(row) == 840 - 64);
+    assert(lv_obj_get_height(row) == 84);
+    lv_obj_send_event(row, LV_EVENT_CLICKED, NULL);
+    assert(!smart_home_lvgl_onboarding_visible());
+    assert(ui->active_tab == SMART_HOME_TAB_SETTINGS);
+
+    /* 再弹一次，点「稍后再说」后本次运行不再提示。 */
+    smart_home_lvgl_onboarding_reset();
+    smart_home_lvgl_onboarding_present(ui);
+    assert(smart_home_lvgl_onboarding_visible());
+    lv_obj_update_layout(ui->screen_home);
+    modal = lv_obj_get_child(ui->screen_home, -1);
+    panel = lv_obj_get_child(modal, 0);
+    lv_obj_t *later = lv_obj_get_child(panel, lv_obj_get_child_count(panel) - 1);
+    lv_obj_send_event(later, LV_EVENT_CLICKED, NULL);
+    assert(!smart_home_lvgl_onboarding_visible());
+    assert(!smart_home_lvgl_onboarding_should_present(ui));
+
+    /* 复位测试环境，避免影响后续用例。 */
+    ui->app->system_status.network_status.online = true;
+    gateway_online = true;
+    ui->app->system_status.model_status = AGENT_OK;
+    smart_home_lvgl_onboarding_reset();
+    smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_HOME);
+    puts("PASS: onboarding overlay shows pending items, jumps to settings and honours skip");
+}
+#endif
+
 static void test_v9_shell(smart_home_lvgl_t *ui)
 {
     lv_obj_t *screens[] = {ui->screen_home, ui->screen_chat, ui->screen_settings_v9};
@@ -1548,5 +1646,8 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     assert(lv_image_get_src(lv_obj_get_child(ui->home_weather_badge, 0)) ==
            smart_home_lvgl_png_icon_get(
                "asset:cloud-rain", lv_obj_get_width(ui->home_weather_badge)));
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+    test_v9_onboarding(ui);
+#endif
     puts("PASS: all three real navigation bars, pixel colors, tab clicks and chat input geometry");
 }

@@ -17,6 +17,7 @@ add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${REPO}/demos/smart_home/src/device/smart_home_device.c"
   "${UI}/smart_home_lvgl_nav.c"
   "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_home_v9.c"
+  "${UI}/smart_home_lvgl_onboarding.c"
   "${UI}/smart_home_lvgl_device_dialog.c"
   "${UI}/smart_home_lvgl_room_dialog.c"
   "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
@@ -28,10 +29,17 @@ add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
   "${UI}/smart_home_v9_device_view.c"
   "${UI}/smart_home_lvgl_screensaver.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+# 与固件 Kconfig 对齐：CONFIG_SMART_HOME_ONBOARDING 默认开启，可用
+# -DSMART_HOME_TEST_ONBOARDING=OFF 关掉，验证「关掉引导」也能编译。
+option(SMART_HOME_TEST_ONBOARDING "Build the first-run guide in host tests" ON)
+
 target_compile_definitions(panel_check PRIVATE _GNU_SOURCE FAR= CONFIG_SMART_HOME_MILOCO_BRIDGE=1
   CONFIG_SMART_HOME_DEMO_DATA_ROOT="${REPO}/demos/smart_home"
   CONFIG_LV_USE_TINY_TTF=1 CONFIG_LV_FONT_MONTSERRAT_12=1
   CONFIG_LV_FONT_MONTSERRAT_14=1 CONFIG_LV_FONT_MONTSERRAT_16=1)
+if(SMART_HOME_TEST_ONBOARDING)
+  target_compile_definitions(panel_check PRIVATE CONFIG_SMART_HOME_ONBOARDING=1)
+endif()
 target_include_directories(panel_check PRIVATE include "${UI}"
   "${REPO}/demos/smart_home/src" "${REPO}/packages/cAGENT/include"
   "${OPENVELA_ROOT}/apps/graphics/lvgl"
