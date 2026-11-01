@@ -690,7 +690,7 @@ static agent_error_t cancel_timer_tool(void *user_data,
     return smart_home_tool_reply(sink, output, ret);
 }
 
-static int register_local_tool(agent_t *agent,
+int smart_home_tool_register_local(agent_t *agent,
                                const char *name,
                                const char *description,
                                const char *input_schema_json,
@@ -723,7 +723,7 @@ int smart_home_tools_register(agent_t *agent,
         return AGENT_ERROR_INVALID;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_home_status",
                               "Get current virtual smart home status.",
                               SCHEMA_GET_HOME_STATUS,
@@ -736,7 +736,7 @@ int smart_home_tools_register(agent_t *agent,
     }
 
 #ifdef CONFIG_SMART_HOME_AHT30_TOOL
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_indoor_environment",
                               "Read current indoor temperature and humidity from the Box3 AHT30 sensor.",
                               SCHEMA_GET_INDOOR_ENVIRONMENT,
@@ -749,7 +749,7 @@ int smart_home_tools_register(agent_t *agent,
     }
 #endif
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_weather",
                               "Get simulated outdoor weather for a location.",
                               SCHEMA_GET_WEATHER,
@@ -761,7 +761,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_light",
                               "Set a room light. Rooms: living_room, bedroom.",
                               SCHEMA_SET_LIGHT,
@@ -773,7 +773,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_ac",
                               "Set bedroom air conditioner.",
                               SCHEMA_SET_AC,
@@ -785,7 +785,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "run_scene",
                               "Run a smart home scene: sleep, movie, away, home.",
                               SCHEMA_RUN_SCENE,
@@ -797,7 +797,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_timer",
                               "Create a demo timer or reminder.",
                               SCHEMA_SET_TIMER,
@@ -809,7 +809,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "list_timers",
                               "List active demo timers.",
                               SCHEMA_LIST_TIMERS,
@@ -821,7 +821,7 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
-    return register_local_tool(agent,
+    return smart_home_tool_register_local(agent,
                                "cancel_timer",
                                "Cancel a demo timer by id.",
                                SCHEMA_CANCEL_TIMER,

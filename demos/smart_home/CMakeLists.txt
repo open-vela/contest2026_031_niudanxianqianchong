@@ -34,6 +34,11 @@ if(CONFIG_SMART_HOME_DEMO)
       src/camera/smart_home_camera_service.c
       src/camera/smart_home_camera_control.c
     )
+    if(CONFIG_SMART_HOME_CAMERA_TOOL)
+      list(APPEND SMART_HOME_SRCS
+        src/camera/smart_home_snapshot_store.c
+        src/tools/smart_home_camera_tools.c)
+    endif()
   endif()
 
   if(CONFIG_SMART_HOME_MILOCO_BRIDGE)
@@ -132,6 +137,10 @@ if(CONFIG_SMART_HOME_DEMO)
   if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
     list(APPEND SMART_HOME_SRCS src/camera/smart_home_camera_service.c
       src/camera/smart_home_camera_control.c)
+    if(CONFIG_SMART_HOME_CAMERA_TOOL)
+      list(APPEND SMART_HOME_SRCS src/camera/smart_home_snapshot_store.c
+        src/tools/smart_home_camera_tools.c)
+    endif()
   endif()
 
   if(CONFIG_SMART_HOME_MILOCO_BRIDGE)

@@ -23,6 +23,9 @@
 #include "../skills/smart_home_scene_catalog.h"
 #include "../skills/smart_home_skills.h"
 #include "../tools/smart_home_tools.h"
+#ifdef CONFIG_SMART_HOME_CAMERA_TOOL
+#include "../tools/smart_home_camera_tools.h"
+#endif
 #include "../ui/smart_home_ui.h"
 
 #include <stdio.h>
@@ -515,6 +518,15 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
         smart_home_agent_app_deinit(app);
         return ret;
     }
+
+#ifdef CONFIG_SMART_HOME_CAMERA_TOOL
+    ret = smart_home_camera_tools_register(app->agent);
+    if (ret != AGENT_OK) {
+        smart_home_status_error(app, "Camera tool", ret);
+        smart_home_agent_app_deinit(app);
+        return ret;
+    }
+#endif
 
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     ret = smart_home_miloco_tools_register(app->agent, app);

@@ -51,6 +51,10 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/camera/smart_home_camera_service.c
     CSRCS   += src/camera/smart_home_camera_control.c
   endif
+  ifneq ($(CONFIG_SMART_HOME_CAMERA_TOOL),)
+    CSRCS   += src/camera/smart_home_snapshot_store.c
+    CSRCS   += src/tools/smart_home_camera_tools.c
+  endif
   ifneq ($(CONFIG_SMART_HOME_MILOCO_BRIDGE),)
     CSRCS   += src/miloco/smart_home_miloco_client.c
     CSRCS   += src/miloco/smart_home_miloco_service.c
