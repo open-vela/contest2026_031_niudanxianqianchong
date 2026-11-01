@@ -122,6 +122,13 @@ CONFIG_STACK_COLORATION=y
 CONFIG_START_DAY=29
 CONFIG_START_MONTH=11
 CONFIG_START_YEAR=2019
+# Audio pipeline sizing for ES8311.  Must stay within what one I2S DMA
+# descriptor chain can hold: I2S_DMADESC_NUM descriptors of at most 4032 bytes
+# each (CONFIG_I2S_DMADESC_NUM=2), i.e. 8064 bytes total.  4096 fits and is a
+# multiple of the 64-byte cache line, so no partial frame is ever carried on
+# the steady-state path.
+CONFIG_AUDIO_BUFFER_NUMBYTES=4096
+CONFIG_AUDIO_NUM_BUFFERS=2
 CONFIG_SYSLOG_DEFAULT_MASK=0x7f
 CONFIG_SYSTEM_DHCPC_RENEW=y
 CONFIG_SYSTEM_DUMPSTACK=y
