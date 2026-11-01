@@ -27,6 +27,8 @@ docs/
 
 | 文档 | 用途 | 阅读时机 |
 | --- | --- | --- |
+| [SmartHome 卡顿/线程/内存优化方案](架构设计/ESP32-P4X-SmartHome卡顿线程内存优化方案.md) | 帧管线开销、UI 阻塞、双核分工、优先级、栈与 PSRAM/SRAM 分区、S0–S4 实施与验收 | 做性能或内存相关改动前 |
+| [SmartHome 问题分析](架构设计/ESP32-P4X-SmartHome问题分析.md) | P0–P3 分级问题、证据等级、已修复项、处理顺序与复核方法 | 排期修复或评审前 |
 | [SmartHome 整体架构](架构设计/ESP32-P4X-SmartHome整体架构.md) | 硬件资源、七层分层、启动序列、内存布局、线程模型、数据流与控制流、架构风险 | 首次了解项目或做跨层改动前 |
 | [ESP32-P4 Function EV Board 适配文档](硬件适配/esp32p4-ev-board-adaptation.md) | 适配范围、目录映射、构建与排障信息 | 开始移植或定位构建错误时 |
 | [Route A 移植方案](硬件适配/esp32p4-function-ev-board-route-a-porting.md) | custom chip / custom board 架构、阶段目标和风险 | 评审架构或新增 P4 外设前 |
