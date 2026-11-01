@@ -393,9 +393,19 @@ void smart_home_lvgl_device_dialog_open(smart_home_lvgl_t *ui,
     lv_obj_clear_flag(art_area, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     const char *ids[] = {"light", "ac", "washer", "robot", "camera", "fan"};
     if (view->kind >= 0 && view->kind < 6) {
+        const char *state = view->on ? "on" : "off";
+        if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
+            if (!view->online) {
+                state = "offline";
+            } else if (view->source == SMART_HOME_V9_SOURCE_BOARD &&
+                       view->activity == SMART_HOME_V9_CAMERA_PREVIEWING) {
+                state = "patrol";
+            } else {
+                state = "online";
+            }
+        }
         snprintf(ctx->art_path, sizeof(ctx->art_path), "A:%s/res/devices/%s-%s.png",
-                 CONFIG_SMART_HOME_DEMO_DATA_ROOT, ids[view->kind],
-                 view->on ? "on" : "off");
+                 CONFIG_SMART_HOME_DEMO_DATA_ROOT, ids[view->kind], state);
         lv_obj_t *art = lv_image_create(art_area);
         lv_image_set_src(art, ctx->art_path);
         lv_image_set_antialias(art, false);

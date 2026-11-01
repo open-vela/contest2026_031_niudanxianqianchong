@@ -70,8 +70,8 @@ typedef struct {
 } v9_device_def_t;
 
 static const v9_device_def_t g_v9_devices[V9_DEVICE_COUNT] = {
-    { "light", "吸顶灯", "客厅", "已开启", "已关闭", "80%", "0%", "亮度",
-      103, 89, 61, 143, 1 },
+    { "light", "吊灯", "客厅", "已开启", "已关闭", "80%", "0%", "亮度",
+      92, 108, 72, 122, 1 },
     { "ac", "立式空调", "客厅", "制冷中", "已关闭", "24°", "--", "目标温度",
       98, 138, 66, 94, 1 },
     { "washer", "洗衣机", "阳台", "洗涤中", "待机", "32分", "--", "剩余时间",
@@ -79,7 +79,7 @@ static const v9_device_def_t g_v9_devices[V9_DEVICE_COUNT] = {
     { "robot", "扫地机器人", "客厅", "清扫中", "待机", "75%", "--", "电量",
       101, 58, 63, 174, 1 },
     { "camera", "摄像头", "客厅", "预览中", "预览关闭", "在线", "在线", "设备状态",
-      92, 110, 72, 122, 0 },
+      90, 116, 74, 118, 0 },
     { "fan", "落地风扇", "卧室", "运行中", "已关闭", "2档", "--", "风速",
       88, 124, 76, 108, 1 },
 };
@@ -87,6 +87,25 @@ static const v9_device_def_t g_v9_devices[V9_DEVICE_COUNT] = {
 static const char *const g_v9_rooms[V9_ROOM_COUNT] = {
     "客厅", "卧室", "书房", "阳台", "厨房"
 };
+
+static const char *v9_art_state(const v9_device_def_t *def, int on,
+                                const smart_home_v9_device_view_t *view)
+{
+    if (!strcmp(def->id, "camera")) {
+        if (view) {
+            if (!view->online) return "offline";
+            if (view->source == SMART_HOME_V9_SOURCE_BOARD &&
+                view->activity == SMART_HOME_V9_CAMERA_PREVIEWING) {
+                return "patrol";
+            }
+            return "online";
+        }
+
+        /* The demo camera represents an available camera; the switch previews it. */
+        return on ? "patrol" : "online";
+    }
+    return on ? "on" : "off";
+}
 
 /* ── 场景切换器 ──────────────────────────────────────────────
  * 四个场景的 scene id 必须与 res/skills/smart_home_scenes.md 及
@@ -256,7 +275,7 @@ static void v9_update_card(int index)
 {
     const v9_device_def_t *def = &g_v9_devices[g_v9.def_index[index]];
     int on = g_v9.on[index];
-    const char *state = on ? "on" : "off";
+    const char *state = v9_art_state(def, on, NULL);
 
     if (g_v9.status[index]) {
         lv_label_set_text(g_v9.status[index], on ? def->status_on : def->status_off);
@@ -403,7 +422,7 @@ static void v9_apply_view(int index,
         return;
     }
     def = &g_v9_devices[g_v9.def_index[index]];
-    state = view->on ? "on" : "off";
+    state = v9_art_state(def, view->on, view);
     g_v9.device_view[index] = *view;
     g_v9.real[index] = 1;
     g_v9.source[index] = view->source;

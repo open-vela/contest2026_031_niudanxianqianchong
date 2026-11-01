@@ -20,6 +20,16 @@ static void capture_v9_model_menu(smart_home_lvgl_t *ui);
 static void capture_v9_mi_qr(smart_home_lvgl_t *ui);
 static void test_v9_shell(smart_home_lvgl_t *ui);
 static void test_v9_settings_clicks(smart_home_lvgl_t *ui);
+static lv_obj_t *find_v9_label(lv_obj_t *root, const char *text);
+
+static lv_obj_t *card_image(lv_obj_t *card)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(card); i++) {
+        lv_obj_t *child = lv_obj_get_child(card, i);
+        if (lv_obj_check_type(child, &lv_image_class)) return child;
+    }
+    return NULL;
+}
 
 static uint16_t pixels[1024 * 600];
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -350,6 +360,15 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(ui->screen_home != NULL);
     assert(ui->home_weather_condition_label != NULL);
     assert(smart_home_lvgl_v9_visible_card_count() == 6);
+    lv_obj_t *chandelier = find_v9_label(ui->screen_home, "吊灯");
+    assert(chandelier);
+    lv_obj_t *chandelier_image = card_image(lv_obj_get_parent(chandelier));
+    assert(chandelier_image);
+    const char *chandelier_src = lv_image_get_src(chandelier_image);
+    const char *chandelier_basename = strrchr(chandelier_src, '/');
+    chandelier_basename = chandelier_basename ? chandelier_basename + 1 :
+                                                  chandelier_src;
+    assert(!strcmp(chandelier_basename, "light-on.png"));
     assert(smart_home_lvgl_v9_select_room(3) == 0); /* 书房: empty */
     assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
     assert(smart_home_lvgl_v9_select_room(0) == 6);
@@ -794,6 +813,7 @@ static void test_v9_views(void)
 
     count = smart_home_v9_demo_views(views, SMART_HOME_V9_MAX_VIEWS);
     assert(count == 6);
+    assert(!strcmp(views[0].name, "吊灯"));
     assert(views[3].kind == SMART_HOME_V9_KIND_ROBOT);
     assert(views[3].source == SMART_HOME_V9_SOURCE_DEMO);
 

@@ -45,6 +45,28 @@ static lv_obj_t *camera_card(smart_home_lvgl_t *ui)
     return lv_obj_get_parent(name);
 }
 
+static void assert_camera_art(lv_obj_t *card, const char *filename)
+{
+    lv_obj_t *art = NULL;
+
+    for (uint32_t i = 0; i < lv_obj_get_child_count(card); i++) {
+        lv_obj_t *child = lv_obj_get_child(card, i);
+        if (lv_obj_check_type(child, &lv_image_class)) {
+            art = child;
+            break;
+        }
+    }
+
+    assert(art);
+    const char *src = lv_image_get_src(art);
+    const char *basename;
+
+    assert(src);
+    basename = strrchr(src, '/');
+    basename = basename ? basename + 1 : src;
+    assert(!strcmp(basename, filename));
+}
+
 int main(void)
 {
     lv_init();
@@ -76,6 +98,13 @@ int main(void)
     lv_obj_update_layout(ui.screen_home);
     assert(smart_home_lvgl_v9_visible_card_count() == 12);
     lv_obj_t *card = camera_card(&ui);
+    assert_camera_art(card, "camera-online.png");
+    camera_status.state = SMART_HOME_CAMERA_ERROR;
+    smart_home_lvgl_v9_refresh_views(&ui);
+    assert_camera_art(card, "camera-offline.png");
+    camera_status.state = SMART_HOME_CAMERA_OFF;
+    smart_home_lvgl_v9_refresh_views(&ui);
+    assert_camera_art(card, "camera-online.png");
     assert(lv_obj_get_parent(card) == find_v9_carousel(ui.screen_home));
     assert(lv_obj_get_x(card) == 4);
     assert(find_v9_label(ui.screen_home, "米家灯-0"));
@@ -104,6 +133,7 @@ int main(void)
     smart_home_lvgl_v9_refresh_views(&ui);
     assert(ui.topbar_camera_on);
     assert(find_v9_label(ui.screen_home, "预览中"));
+    assert_camera_art(card, "camera-patrol.png");
 
     unsigned stopped = stop_requests;
     ui.screen_chat = lv_obj_create(NULL);
@@ -112,6 +142,7 @@ int main(void)
     assert(lv_obj_get_child_count(ui.screen_home) == before);
     smart_home_lvgl_v9_refresh_views(&ui);
     assert(!ui.topbar_camera_on);
+    assert_camera_art(card, "camera-online.png");
 
     gateway_online = false;
     smart_home_lvgl_v9_refresh_views(&ui);
