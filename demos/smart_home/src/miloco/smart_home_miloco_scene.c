@@ -16,6 +16,7 @@
  */
 
 #include "smart_home_miloco.h"
+#include "../smart_home_memory.h"
 
 #include <agent/error.h>
 
@@ -91,12 +92,13 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
                                 char *report, size_t report_size)
 {
     const miloco_scene_def_t *def = NULL;
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
     size_t count;
     size_t used = 0;
     size_t i;
     int submitted = 0;
     int d;
+    int ret = -1;
 
     if (!service || !scene || !scene[0] || !report || report_size == 0)
       {
@@ -104,6 +106,15 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
       }
 
     report[0] = '\0';
+
+    /* 整表快照约 19 KB：放 PSRAM，避免调用方（UI 线程或 agent worker）栈越界。 */
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL)
+      {
+        snprintf(report, report_size, "内存不足，无法读取设备列表");
+        return -1;
+      }
     for (i = 0; i < sizeof(g_miloco_scenes) / sizeof(g_miloco_scenes[0]);
          i++)
       {
@@ -117,7 +128,7 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
     if (def == NULL)
       {
         snprintf(report, report_size, "未知场景：%s", scene);
-        return -1;
+        goto out;
       }
 
     count = smart_home_miloco_list(service, devices,
@@ -126,7 +137,7 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
       {
         snprintf(report, report_size,
                  "%s：网关上没有可用设备", def->title);
-        return -1;
+        goto out;
       }
 
     used += (size_t)snprintf(report + used, report_size - used,
@@ -186,8 +197,12 @@ int smart_home_miloco_run_scene(smart_home_miloco_t *service,
       {
         snprintf(report + used, report_size - used,
                  "网关在线但没有设备支持本场景的控件（需要摄像头类设备）");
-        return -1;
+        goto out;
       }
 
-    return 0;
+    ret = 0;
+
+out:
+    smart_home_bulk_free(devices);
+    return ret;
 }

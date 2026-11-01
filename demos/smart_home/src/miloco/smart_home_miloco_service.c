@@ -86,6 +86,13 @@ struct smart_home_miloco {
     smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
     size_t device_count;
     uint32_t revision;
+
+    /* worker 独占的轮询暂存：避免 19 KB × 3 落在 48 KB 工作线程栈上。
+     * 只有 worker 线程访问，不需要加锁。
+     */
+    smart_home_miloco_device_t poll_parse[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t poll_fresh[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t poll_snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
     bool reachable;
     bool xiaomi_bound;
 };
@@ -372,7 +379,7 @@ static int parse_device_list(smart_home_miloco_t *service, const char *body,
     cJSON *root = cJSON_Parse(body);
     cJSON *data;
     cJSON *item;
-    smart_home_miloco_device_t parsed[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *parsed = service->poll_parse;
     size_t count = 0;
 
     *fresh_count = 0;
@@ -765,7 +772,7 @@ static int poll_bind_status(smart_home_miloco_t *service,
 static int poll_device_list(smart_home_miloco_t *service,
                             char *body, size_t body_size)
 {
-    smart_home_miloco_device_t fresh[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *fresh = service->poll_fresh;
     size_t fresh_count = 0;
     int http_status = 0;
     int ret;
@@ -785,7 +792,7 @@ static int poll_device_list(smart_home_miloco_t *service,
         return -EIO;
     }
     ret = parse_device_list(service, body, fresh,
-                            sizeof(fresh) / sizeof(fresh[0]), &fresh_count);
+                            SMART_HOME_MILOCO_MAX_DEVICES, &fresh_count);
     if (ret != AGENT_OK) {
         return ret;
     }
@@ -796,7 +803,7 @@ static int poll_device_list(smart_home_miloco_t *service,
         spec_attempt_take(fresh[i].did);
     }
     {
-        smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
+        smart_home_miloco_device_t *snapshot = service->poll_snapshot;
         size_t count;
 
         count = smart_home_miloco_list(service, snapshot,

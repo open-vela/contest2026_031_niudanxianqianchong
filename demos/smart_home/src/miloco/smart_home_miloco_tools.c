@@ -8,6 +8,7 @@
 
 #include "../agent/smart_home_agent.h"
 #include "../config/cjson_compat.h"
+#include "../smart_home_memory.h"
 
 #include <agent.h>
 #include "../tools/smart_home_tool_io.h"
@@ -108,7 +109,7 @@ static agent_error_t miot_device_list_tool(void *user_data,
 {
     static char output[MILOCO_TOOL_LIST_BUFFER_BYTES];
     smart_home_agent_app_t *app = user_data;
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
     size_t count;
     size_t used;
     size_t i;
@@ -128,6 +129,12 @@ static agent_error_t miot_device_list_tool(void *user_data,
                  "{\"ok\":false,\"error\":\"miloco_gateway_unreachable\"}");
         return smart_home_tool_reply(sink, output, status);
     }
+
+    /* 整表快照约 19 KB：agent worker 只有 32 KB 栈，放 PSRAM。 */
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"out_of_memory\"}", AGENT_ERROR_NOMEM);
 
     count = smart_home_miloco_list(app->miloco, devices,
                                    SMART_HOME_MILOCO_MAX_DEVICES, NULL);
@@ -169,8 +176,12 @@ static agent_error_t miot_device_list_tool(void *user_data,
                         "],\"truncated\":%s,\"total_devices\":%zu}",
                         truncated ? "true" : "false", count);
     if (used >= sizeof(output) - 1u)
-        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"device_list_capacity\"}", AGENT_ERROR_CAPACITY);
-    return smart_home_tool_reply(sink, output, AGENT_OK);
+        status = smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"device_list_capacity\"}", AGENT_ERROR_CAPACITY);
+    else
+        status = smart_home_tool_reply(sink, output, AGENT_OK);
+
+    smart_home_bulk_free(devices);
+    return status;
 }
 
 static agent_error_t miot_device_control_tool(void *user_data,
