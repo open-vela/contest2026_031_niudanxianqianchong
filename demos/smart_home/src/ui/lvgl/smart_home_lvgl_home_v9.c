@@ -542,8 +542,7 @@ static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
 
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 78, 40);
-    lv_obj_set_pos(button, index * 96, 0);
-    lv_obj_set_width(button, 92);
+    lv_obj_set_pos(button, index * 84, 0);
     lv_obj_set_style_radius(button, 20, 0);
     lv_obj_set_ext_click_area(button, 4);
     if (index == 0) {
@@ -560,7 +559,7 @@ static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
         button, text,
         index == 0 ? SMART_HOME_UI_COLOR_TEXT_PRIMARY :
                      SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
-    lv_obj_set_width(label, 80);
+    lv_obj_set_width(label, 70);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
@@ -975,13 +974,13 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     g_v9.room_strip = lv_obj_create(screen);
     lv_obj_remove_style_all(g_v9.room_strip);
     lv_obj_set_pos(g_v9.room_strip, 28, 204);
-    lv_obj_set_size(g_v9.room_strip, 650, 44);
+    lv_obj_set_size(g_v9.room_strip, 500, 44);
     lv_obj_set_scroll_dir(g_v9.room_strip, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(g_v9.room_strip, LV_SCROLLBAR_MODE_OFF);
     button = lv_button_create(screen);
     lv_obj_remove_style_all(button);
-    lv_obj_set_size(button, 48, 40);
-    lv_obj_set_pos(button, 690, 204);
+    lv_obj_set_size(button, 48, 48);
+    lv_obj_set_pos(button, 532, 200);
     lv_obj_set_style_radius(button, 16, 0);
     lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
