@@ -304,7 +304,15 @@ smart_home_thread_start(name, entry, arg, stack_bytes, priority, cpu_mask, detac
   1024×600 RGB565 ≈37 MB/s。总量仍 >150 MB/s，但主要占用方是 DSI。
 - 字体常驻实测 7,943,504 B（7.94 MB），不是 7.6 MB。
 
-### 6.5 仍待处理
+### 6.5 DNS 超时的取舍
+
+把 DNS 上限压到 10 秒后，若现场 DNS 确实需要更久才能解析，首次探测会判
+离线（本次实测环境就是这种情况：`api.deepseek.com` 解析失败）。后续
+`smart_home_network_probe()` 仍会在 agent 请求、设置页刷新等路径重新探测，
+成功后会重新 kick 天气 worker，因此不是永久离线；但“启动即在线”的状态
+需要 DNS 在 10 秒内可用。若现场 DNS 常年偏慢，应改成异步探测而不是调大超时。
+
+### 6.6 仍待处理
 
 - O-J1 拆锁、O-J4 字形缓存、O-M3 字体按需加载、O-M2 内部 SRAM 分区、
   J9 页面按需构建：未实施。
