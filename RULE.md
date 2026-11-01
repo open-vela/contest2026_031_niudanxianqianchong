@@ -70,7 +70,11 @@ git worktree add ../worktrees/<topic>-<agent名> -b feat/<topic>-<agent名>
 1. worktree 分支完成后：在 worktree 内 rebase 到最新 `contest2026`；
 2. 主检出只做 fast-forward 式合并，**合并前必须确认工作区干净**；
 3. 每个提交必须独立可构建（bisect/cherry-pick 安全）；功能跨多提交时，
-   用 fixup 并入首个提交，而不是留半截提交。
+   用 fixup 并入首个提交，而不是留半截提交；
+6. worktree 收尾必须用 `wt.sh finish`（校验"已合并进主线 + 检出干净"后
+   移除检出并删分支）；禁止直接 rm 检出目录；`done` 仅用于分支有意保留
+   （如等待评审）的场景；
+
 
 ## 七、nuttx 工作树补丁纪律
 

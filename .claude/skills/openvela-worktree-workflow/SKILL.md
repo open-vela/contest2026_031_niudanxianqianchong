@@ -50,15 +50,21 @@ description: This skill should be used whenever an agent performs any write oper
 1. worktree 内：确认改动完整 → 按 `openvela-git-commit` 规范提交；
    **每个提交独立可构建**（bisect/cherry-pick 安全）；跨提交功能用 fixup 并入首个提交；
 2. 收工时若仍有未提交改动：`git stash`（可救）或 WIP commit——**不得裸奔过夜**；
-3. 移除 worktree：
+3. 主检出 fast-forward 合并该分支（合并前 `wt.sh check` 确认主检出干净；
+   主检出只做 fast-forward，不做其他合并动作）；
+4. **标准收尾（合并后必做）**：
 
    ```bash
-   .claude/skills/openvela-worktree-workflow/scripts/wt.sh done <worktree路径>
+   .claude/skills/openvela-worktree-workflow/scripts/wt.sh finish <worktree路径>
    ```
 
-   脚本拒绝在有未提交改动时移除；
-4. 主检出只做 fast-forward 合并，合并前确认主检出干净（`wt.sh check`）。
-
+   finish 依次校验：滞留登记已 prune → worktree 干净 → 分支已并入
+   `contest2026` → 主检出干净，全部通过才移除 worktree 并用 `branch -d`
+   删除分支；任何一步不过即拒绝并说明原因，**禁止绕过**；
+5. `wt.sh done` 是特殊出口：仅当分支**有意保留**（如等待评审）时使用，
+   只删 worktree、分支保留；
+6. 分支删除报"仍被检出"时：先 `git worktree prune` 清滞留登记再重试；
+   **禁止 `branch -D` 强删**（曾发生 reset 丢 11 个文件的事故，强删即重演）。
 ## 禁止清单（在主检出）
 
 以下操作一律移到 worktree 执行：实验分支提交、dry-run、rebase、cherry-pick、
