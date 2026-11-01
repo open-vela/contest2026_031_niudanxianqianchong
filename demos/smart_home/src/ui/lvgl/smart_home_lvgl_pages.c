@@ -634,8 +634,16 @@ void smart_home_lvgl_refresh_network_screen(smart_home_lvgl_t *ui)
 
 static void network_status_timer_cb(lv_timer_t *timer)
 {
-    smart_home_lvgl_refresh_network_screen(timer ?
-                                            lv_timer_get_user_data(timer) : NULL);
+    smart_home_lvgl_t *ui = timer ? lv_timer_get_user_data(timer) : NULL;
+
+    /* 250 ms 周期只在网络页可见时刷新；隐藏页不必每 250 ms 取一次状态、
+     * 拼字符串并写 label。切回页面时会显式刷新一次。
+     */
+    if (!ui || lv_scr_act() != ui->screen_network) {
+        return;
+    }
+
+    smart_home_lvgl_refresh_network_screen(ui);
 }
 
 static void network_connect_cb(lv_event_t *event)

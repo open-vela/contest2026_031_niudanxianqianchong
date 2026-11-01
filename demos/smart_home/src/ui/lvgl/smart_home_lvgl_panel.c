@@ -1766,6 +1766,11 @@ static void remote_node_timer_cb(lv_timer_t *timer)
         return;
     }
 
+    /* 仅设备页可见时轮询节点 revision。 */
+    if (lv_scr_act() != ui->screen_panel) {
+        return;
+    }
+
     (void)smart_home_node_gateway_list(ui->app->node_gateway, NULL, 0,
                                         &revision);
     if (revision != ui->remote_node_revision) {
