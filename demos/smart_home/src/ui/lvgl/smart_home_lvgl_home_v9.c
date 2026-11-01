@@ -1132,6 +1132,14 @@ static void v9_make_dynamic_card(smart_home_lvgl_t *ui, int index,
     v9_apply_view(index, view);
 }
 
+/* 每秒轮询一次设备状态；只有设备服务或米家快照的 revision 变化时才重建
+ * 视图。空闲时整条 collect/reflow 路径被跳过，避免每秒一次的无效重排。
+ */
+
+static uint32_t g_v9_last_dev_rev;
+static uint32_t g_v9_last_miloco_rev;
+static int g_v9_refresh_forced = 1;
+
 void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
 {
     smart_home_v9_device_view_t raw[V9_MAX_CARDS];
@@ -1139,15 +1147,55 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
     size_t count = 0;
     size_t valid = 0;
     smart_home_state_t local;
-    int have_local = ui && ui->app && smart_home_device_service_copy_state(
-        &ui->app->device_service, &local) == AGENT_OK;
+    int have_local;
 
     if (!ui || !g_v9.screen) {
         return;
     }
+
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     const smart_home_miloco_t *gateway = ui->app && ui->app->miloco &&
         smart_home_miloco_reachable(ui->app->miloco) && smart_home_miloco_bound(ui->app->miloco) ? ui->app->miloco : NULL;
+#endif
+
+    /* 未变化时只保留两件必须每秒做的事：摄像头指示灯与"等待确认"超时。 */
+
+    {
+        uint32_t dev_rev = ui->app ?
+            smart_home_device_service_revision(&ui->app->device_service) : 0;
+        uint32_t miloco_rev = 0;
+
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+        if (gateway) {
+            (void)smart_home_miloco_list(gateway, NULL, 0, &miloco_rev);
+        }
+#endif
+        if (!g_v9_refresh_forced && g_v9.card_count > 0 &&
+            dev_rev == g_v9_last_dev_rev && miloco_rev == g_v9_last_miloco_rev) {
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+            struct smart_home_camera_status_s camera_status;
+            if (!smart_home_camera_get_status(&camera_status))
+                smart_home_lvgl_set_camera_indicator(ui, camera_status.state == SMART_HOME_CAMERA_RUNNING && camera_status.preview_sequence > 0);
+#endif
+            for (int i = 0; i < g_v9.card_count; i++) {
+                if (g_v9.pending[i] &&
+                    (uint32_t)(lv_tick_get() - g_v9.pending_ms[i]) >= 10000u) {
+                    g_v9.pending[i] = 0;
+                    if (g_v9.status[i]) {
+                        lv_label_set_text(g_v9.status[i], "未确认");
+                    }
+                }
+            }
+            return;
+        }
+        g_v9_last_dev_rev = dev_rev;
+        g_v9_last_miloco_rev = miloco_rev;
+        g_v9_refresh_forced = 0;
+    }
+
+    have_local = ui->app && smart_home_device_service_copy_state(
+        &ui->app->device_service, &local) == AGENT_OK;
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     count = smart_home_v9_collect_views(have_local ? &local : NULL, gateway, raw, V9_MAX_CARDS);
 #else
     count = smart_home_v9_collect_views(have_local ? &local : NULL, raw, V9_MAX_CARDS);
@@ -1262,6 +1310,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
         return;
     }
     memset(&g_v9, 0, sizeof(g_v9));
+    g_v9_refresh_forced = 1;
 
     /* Drop pointers owned by a previous (legacy) home build. */
     ui->home_env_label = NULL;
