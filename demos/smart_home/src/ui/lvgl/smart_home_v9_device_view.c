@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../../smart_home_memory.h"
 static void copy_text(char *dst, size_t size, const char *src)
 {
     if (!dst || size == 0) {
@@ -190,9 +191,15 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
 
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     if (miloco) {
-        smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
-        size_t n = smart_home_miloco_list(miloco, devices,
-                                          SMART_HOME_MILOCO_MAX_DEVICES, NULL);
+        /* 整表快照约 19 KB，放 PSRAM 而不是 LVGL 线程栈。 */
+        smart_home_miloco_device_t *devices = smart_home_bulk_alloc(
+            sizeof(*devices) * SMART_HOME_MILOCO_MAX_DEVICES);
+        size_t n = 0;
+
+        if (devices != NULL) {
+            n = smart_home_miloco_list(miloco, devices,
+                                       SMART_HOME_MILOCO_MAX_DEVICES, NULL);
+        }
 
         for (size_t i = 0; i < n; i++) {
             const smart_home_miloco_device_t *device = &devices[i];
@@ -221,6 +228,7 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
                 view->capabilities |= SMART_HOME_V9_CAP_PAUSE;
             }
         }
+        smart_home_bulk_free(devices);
     }
 #endif
     return count;

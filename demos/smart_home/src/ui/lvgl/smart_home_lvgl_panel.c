@@ -1805,19 +1805,12 @@ static void miloco_sheet_close(lv_event_t *event)
 static int miloco_find_device(smart_home_lvgl_t *ui, const char *did,
                                smart_home_miloco_device_t *out)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
-    if (!ui || !ui->app || !ui->app->miloco) {
+    if (!ui || !ui->app || !ui->app->miloco || !did) {
         return 0;
     }
-    size_t count = smart_home_miloco_list(ui->app->miloco, devices,
-                                         SMART_HOME_MILOCO_MAX_DEVICES, NULL);
-    for (size_t i = 0; i < count; i++) {
-        if (!strcmp(devices[i].did, did)) {
-            *out = devices[i];
-            return 1;
-        }
-    }
-    return 0;
+
+    /* 按 did 单条拷贝，避免为了找一个设备把整份 19 KB 快照搬上栈。 */
+    return smart_home_miloco_copy_device(ui->app->miloco, did, out) ? 1 : 0;
 }
 
 static void miloco_feedback(smart_home_lvgl_t *ui, const char *text, int error)

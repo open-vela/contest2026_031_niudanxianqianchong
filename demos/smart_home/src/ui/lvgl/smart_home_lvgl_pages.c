@@ -921,10 +921,8 @@ void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui)
     }
     if (ui->app && ui->app->miloco &&
         smart_home_miloco_reachable(ui->app->miloco)) {
-        smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
-        size_t count = smart_home_miloco_list(ui->app->miloco, devices,
-                                              SMART_HOME_MILOCO_MAX_DEVICES,
-                                              NULL);
+        /* 只统计台数，不拷贝整份快照（19 KB 不再上栈）。 */
+        size_t count = smart_home_miloco_list(ui->app->miloco, NULL, 0, NULL);
 
         snprintf(text_buffer, sizeof(text_buffer),
                  "网关在线 · %u 台设备", (unsigned)count);
