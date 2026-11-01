@@ -19,6 +19,7 @@ docs/
 ├── 开发日志/    # 已发生问题、命令和结论的历史记录
 │   └── 编译/    # Kconfig 与构建链路排障记录
 ├── 开发计划/    # 按主题分类的计划与设计方案（索引见其 README）
+├── 架构设计/    # 从驱动到应用的整体架构、数据流与控制流
 └── archive/     # 已退出当前范围的历史材料
 ```
 
@@ -26,6 +27,7 @@ docs/
 
 | 文档 | 用途 | 阅读时机 |
 | --- | --- | --- |
+| [SmartHome 整体架构](架构设计/ESP32-P4X-SmartHome整体架构.md) | 硬件资源、七层分层、启动序列、内存布局、线程模型、数据流与控制流、架构风险 | 首次了解项目或做跨层改动前 |
 | [ESP32-P4 Function EV Board 适配文档](硬件适配/esp32p4-ev-board-adaptation.md) | 适配范围、目录映射、构建与排障信息 | 开始移植或定位构建错误时 |
 | [Route A 移植方案](硬件适配/esp32p4-function-ev-board-route-a-porting.md) | custom chip / custom board 架构、阶段目标和风险 | 评审架构或新增 P4 外设前 |
 | [P4 最小 NSH 操作与测试](硬件适配/esp32p4-nsh-operation-and-test.md) | P4 构建、烧录及最小 NSH 上板验收 | 上板测试时 |
