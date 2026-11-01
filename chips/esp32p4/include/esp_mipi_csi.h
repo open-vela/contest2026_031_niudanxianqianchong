@@ -61,6 +61,9 @@ struct esp_mipi_csi_config_s
   bool     byte_swap;
   enum esp_isp_output_e output;
   enum esp_isp_bayer_order_e bayer_order;
+  uint16_t wbg_gain_r;
+  uint16_t wbg_gain_g;
+  uint16_t wbg_gain_b;
   struct esp_ldo_config_s phy_ldo;
 };
 

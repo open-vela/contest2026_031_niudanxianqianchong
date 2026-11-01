@@ -174,6 +174,36 @@ config ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
 		Register the P4X SC2336 camera as /dev/video0. The sensor sends
 		RAW8 while the P4 ISP converts it to RGB565 for V4L2.
 
+if ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_R_GAIN
+	int "White balance red gain (8.4 fixed point)"
+	range 0 4095
+	default 384
+	---help---
+		ISP white balance gain applied to the demosaiced red channel.
+		256 is unity, so 384 means 1.5x.  The P4 ISP runs without AWB,
+		CCM or gamma, so the raw green-dominated sensor response needs a
+		manual correction here.  Set any gain to 0 to disable WBG.
+
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_G_GAIN
+	int "White balance green gain (8.4 fixed point)"
+	range 0 4095
+	default 256
+	---help---
+		ISP white balance gain applied to the green channel.  Usually kept
+		at unity (256); the other two channels are matched against it.
+
+config ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_B_GAIN
+	int "White balance blue gain (8.4 fixed point)"
+	range 0 4095
+	default 320
+	---help---
+		ISP white balance gain applied to the demosaiced blue channel.
+		256 is unity, so 320 means 1.25x.
+
+endif # ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
+
 config ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED
 	bool "Probe onboard ESP32-C6 through ESP-Hosted SDIO"
 	select ESPRESSIF_HOSTED_TRANSPORT
