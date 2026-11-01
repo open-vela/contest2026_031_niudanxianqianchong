@@ -1660,7 +1660,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         lv_obj_set_style_pad_column(row, 8, 0);
 
         label = smart_home_lvgl_label_create(row,
-                                             "语音输入（MiMo ASR）",
+                                             "语音输入（ASR）",
                                              SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                              12);
         lv_obj_set_flex_grow(label, 1);
@@ -1677,12 +1677,29 @@ static void create_voice_announce_card(lv_obj_t *content,
                             LV_EVENT_VALUE_CHANGED,
                             ui);
 
+        snprintf(value, sizeof(value), "%s | %s",
+                 config.backend_id[0] ? config.backend_id : "mimo",
+                 config.model[0] ? config.model : "(未配置)");
+        create_status_row(body,
+                          "ASR 后端",
+                          value,
+                          SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+
         snprintf(value, sizeof(value), "语言: %s（zh/en/auto）",
                  config.language);
         create_status_row(body,
                           "识别语言",
                           value,
                           SMART_HOME_UI_COLOR_TEXT_SECONDARY);
+
+        label = smart_home_lvgl_label_create(
+            body,
+            "端点在 /data/smart_home/asr.json 配置；密钥按 backend_id "
+            "在 secrets.json 的 model_api_keys 中配置",
+            SMART_HOME_UI_COLOR_TEXT_MUTED,
+            10);
+        lv_obj_set_width(label, lv_pct(100));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     }
 #endif
 
