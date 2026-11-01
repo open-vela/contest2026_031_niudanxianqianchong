@@ -47,3 +47,21 @@ board/esp32p4/esp32p4-function-ev-board/configs/*_local/
 # whole; only the README that documents the expected layout is committed.
 prebuilts/*
 !prebuilts/README.md
+
+# ============================================================
+# Python cache
+# ============================================================
+__pycache__/
+*.pyc
+
+# ============================================================
+# Raw screenshot dumps (review keeps the png/md; ppm is redundant)
+# ============================================================
+*.ppm
+
+# ============================================================
+# Large demo material (delivered offline, not in the repo)
+# ============================================================
+competition/演示/演示视频.mp4
+*.mp4
+
