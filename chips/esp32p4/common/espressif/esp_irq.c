@@ -310,7 +310,10 @@ void up_irqinitialize(void)
   /* Initialize GPIO interrupt support */
 
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
-  esp_gpioirqinitialize();
+  if (esp_gpioirqinitialize() < 0)
+    {
+      PANIC();
+    }
 #endif
 
   /* Initialize RTCIO interrupt support */

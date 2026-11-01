@@ -241,14 +241,14 @@ bool esp_gpioread(int pin);
  *   None.
  *
  * Returned Value:
- *   None.
+ *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
-void esp_gpioirqinitialize(void);
+int esp_gpioirqinitialize(void);
 #else
-#  define esp_gpioirqinitialize()
+#  define esp_gpioirqinitialize() (0)
 #endif
 
 /****************************************************************************

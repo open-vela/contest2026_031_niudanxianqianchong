@@ -1,0 +1,51 @@
+--- a/components/upper_hal_gpio/src/gpio.c
++++ b/components/upper_hal_gpio/src/gpio.c
+@@ -550,7 +550,7 @@
+             // isr service already installed, free allocated resource
+             esp_os_exit_critical(&gpio_context.gpio_spinlock);
+             ret = ESP_ERR_INVALID_STATE;
+-            free(isr_func);
++            heap_caps_free(isr_func);
+         }
+     }
+
+@@ -602,7 +602,7 @@
+     gpio_context.isr_core_id = GPIO_ISR_CORE_ID_UNINIT;
+     esp_os_exit_critical(&gpio_context.gpio_spinlock);
+     esp_intr_free(gpio_isr_handle_free);
+-    free(gpio_isr_func_free);
++    heap_caps_free(gpio_isr_func_free);
+     return ESP_OK;
+ }
+
+@@ -635,15 +635,27 @@
+     gpio_isr_register_on_core_static(&p);
+     ret = ESP_OK;
+ #else /* CONFIG_FREERTOS_UNICORE */
+-    ret = esp_ipc_call_blocking(gpio_context.isr_core_id, gpio_isr_register_on_core_static, (void *)&p);
++#ifdef __NuttX__
++    /* up_irqinitialize() runs before IPC tasks and CPU1 are ready.  Only
++     * execute locally when the scheduler is not ready and this is the
++     * target CPU; preserve IPC serialization for all runtime calls.
++     */
++    if (!OSINIT_OS_READY() && gpio_context.isr_core_id == OS_PORT_GET_CORE_ID()) {
++        gpio_isr_register_on_core_static(&p);
++        ret = ESP_OK;
++    } else
++#endif
++    {
++        ret = esp_ipc_call_blocking(gpio_context.isr_core_id, gpio_isr_register_on_core_static, (void *)&p);
++    }
+ #endif /* !CONFIG_FREERTOS_UNICORE */
+     if (ret != ESP_OK) {
+         ESP_LOGE(GPIO_TAG, "esp_ipc_call_blocking failed (0x%x)", ret);
+-        return ESP_ERR_NOT_FOUND;
++        return ret;
+     }
+     if (p.ret != ESP_OK) {
+         ESP_LOGE(GPIO_TAG, "esp_os_intr_alloc failed (0x%x)", p.ret);
+-        return ESP_ERR_NOT_FOUND;
++        return p.ret;
+     }
+     return ESP_OK;
+ }
