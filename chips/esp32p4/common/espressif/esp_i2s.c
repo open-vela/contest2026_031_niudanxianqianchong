@@ -1635,17 +1635,37 @@ static void i2s_rx_worker(void *arg)
 
       bfcontainer->apb->nbytes = 0;
 
-      dmadesc = bfcontainer->dma_link[0];
+      /* Walk the whole inlink and copy every segment the DMA filled in.  The
+       * traversal is bounded by the number of bytes that were requested, not
+       * by the END-OF-FRAME flag: on this peripheral that flag is not a
+       * reliable "last segment" indicator for receive descriptors, and
+       * relying on it silently dropped every segment after the first.
+       */
 
-      do
+      dmadesc = bfcontainer->dma_link[0];
+      while (dmadesc != NULL &&
+             bfcontainer->apb->nbytes < bfcontainer->nbytes)
         {
+          uint32_t seg = dmadesc->length;
+
+          /* A segment that would overrun the buffer means the descriptor
+           * chain no longer matches the request; stop rather than write past
+           * the end of the application buffer.
+           */
+
+          if (seg > bfcontainer->nbytes - bfcontainer->apb->nbytes)
+            {
+              i2serr("RX segment of %" PRIu32 " bytes overruns the %" PRIu32
+                     " byte buffer\n", seg, bfcontainer->nbytes);
+              seg = bfcontainer->nbytes - bfcontainer->apb->nbytes;
+            }
+
           memcpy(bfcontainer->apb->samp + bfcontainer->apb->nbytes,
                  (const void *)dmadesc->buf,
-                 dmadesc->length);
-          bfcontainer->apb->nbytes += dmadesc->length;
+                 seg);
+          bfcontainer->apb->nbytes += seg;
           dmadesc = STAILQ_NEXT(dmadesc, qe);
         }
-      while (dmadesc != NULL && dmadesc->eof == 1);
 
       /* Perform the RX transfer done callback */
 
@@ -2693,11 +2713,18 @@ static bool IRAM_ATTR i2s_rx_interrupt(gdma_channel_handle_t dma_chan,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
 
-      /* If the current descriptor is the last one, schedule the transfer */
+      /* If the current descriptor is the structural end of the inlink, the
+       * whole request has been received.  Scheduling must not additionally
+       * require the END-OF-FRAME bit: the descriptor chain is built with that
+       * bit clear for receive transfers, so testing it here meant the
+       * completion worker was never scheduled and playback worked while
+       * capture produced no data at all.  Ownership returning to the CPU is
+       * the condition the DMA guarantees when it is done with the segment.
+       */
 
       if (STAILQ_NEXT(cur, qe) == NULL)
         {
-          if (cur->eof == 1 && cur->owner == 0)
+          if (cur->owner == 0)
             {
               i2s_rx_schedule(priv, cur);
             }
