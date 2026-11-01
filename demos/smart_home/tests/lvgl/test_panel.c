@@ -1516,7 +1516,7 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     smart_home_lvgl_refresh_home(ui);
     assert(!weather.valid);
     assert(!strcmp(lv_label_get_text(ui->home_weather_condition_label), "晴天"));
-    /* 图标尺寸跟随徽标实际宽度（现为 64），不写死 32。 */
+    /* 图标尺寸跟随徽标实际宽度，不写死 32。 */
     {
         lv_obj_t *glyph = lv_obj_get_child(ui->home_weather_badge, 0);
         const lv_image_dsc_t *src = lv_image_get_src(glyph);
@@ -1526,10 +1526,13 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
 
         lv_obj_get_coords(ui->home_weather_badge, &badge_coords);
         lv_obj_get_coords(glyph, &glyph_coords);
-        /* 天气徽标 96px：图标必须同为 96px 且铺满（STRETCH），
+        /* 天气徽标 128px：图标必须同为 128px 且铺满（STRETCH），
          * 否则 AUTO_TRANSFORM 会按原图居中裁切，只画出中间一小块。
          */
         assert(lv_obj_get_width(ui->home_weather_badge) == 128);
+        /* 水平位置：紧贴温度块右侧（设计稿小太阳同位），不是贴右边缘。 */
+        assert(lv_obj_get_x(ui->home_weather_badge) == 350);
+        assert(lv_obj_get_y(ui->home_weather_badge) == 58);
         assert(src && src->header.w == 128);
         assert(badge_coords.x1 == glyph_coords.x1 &&
                badge_coords.y1 == glyph_coords.y1 &&

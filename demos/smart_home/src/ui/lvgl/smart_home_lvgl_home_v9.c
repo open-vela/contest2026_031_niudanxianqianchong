@@ -32,12 +32,17 @@
 #define V9_CARD_W       176
 #define V9_CARD_H       244
 #define V9_CARD_GAP     16
-/* 右上角天气图标：128px 为 32px 源图的 4 倍整数放大，边缘不会出现
- * 非整数缩放造成的宽窄不均。y 取 56 使图标顶部与左侧日期行对齐，
- * 底部落在房间栏之上，不与卡片区重叠。
+/* 页头天气图标：128px 为 32px 源图的 4 倍整数放大，边缘不会出现
+ * 非整数缩放造成的宽窄不均。y 取 58，顶部与日期行、底部与房间栏
+ * 都留出余量，不与卡片区重叠。
+ *
+ * 水平位置紧贴温度块（设计稿的小太阳也在温度右侧紧邻处）：
+ * 温度「22°」墨迹右边界 314，图标左边界 350，间距 36px 与设计稿
+ * 的小太阳一致。若以后要改为靠右或居中，只需调 V9_WEATHER_ICON_X。
  */
 #define V9_WEATHER_ICON_PX 128
 #define V9_WEATHER_ICON_Y  58
+#define V9_WEATHER_ICON_X  350
 #define V9_VIEW_X       24
 #define V9_VIEW_Y       260
 #define V9_VIEW_W       976
@@ -1264,13 +1269,11 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     ui->home_weather_temp_label = v9_text(
         screen, "--°", 240, 106, 50, SMART_HOME_UI_COLOR_TEXT_PRIMARY);
 
-    /* 天气图标 96px 居右上角，作为首页右侧唯一视觉锚点。
-     * 家庭模式入口已移除，场景选择改由聊天页触发（见 open_scene_popup）。
-     */
+    /* 天气图标 128px 紧随温度块右侧，作为页头的天气读数配图。 */
     badge = lv_obj_create(screen);
     lv_obj_remove_style_all(badge);
     lv_obj_set_size(badge, V9_WEATHER_ICON_PX, V9_WEATHER_ICON_PX);
-    lv_obj_set_pos(badge, 1024 - 24 - V9_WEATHER_ICON_PX, V9_WEATHER_ICON_Y);
+    lv_obj_set_pos(badge, V9_WEATHER_ICON_X, V9_WEATHER_ICON_Y);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
     ui->home_weather_badge = badge;
@@ -1287,7 +1290,7 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     /* 演示数据标签：与图标同宽居中，紧随图标下方（不压到房间栏）。 */
     label = smart_home_lvgl_label_create(screen, "演示数据",
                                          SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
-    lv_obj_set_pos(label, 1024 - 24 - V9_WEATHER_ICON_PX,
+    lv_obj_set_pos(label, V9_WEATHER_ICON_X,
                    V9_WEATHER_ICON_Y + V9_WEATHER_ICON_PX);
     lv_obj_set_width(label, V9_WEATHER_ICON_PX);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
