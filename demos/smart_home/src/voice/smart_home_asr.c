@@ -402,9 +402,14 @@ static int asr_parse_response(const char *body, size_t body_len,
 #define ASR_HTTP_URL_MAX           288
 #define ASR_HTTP_HEADER_BUFFER     512
 #define ASR_HTTP_HEADER_CAPACITY   4
-#define ASR_HTTP_IO_BUFFER         1024
-#define ASR_HTTP_RESPONSE_HEADERS  8
-#define ASR_HTTP_RESP_HEADER_BUF   1024
+#define ASR_HTTP_IO_BUFFER         2048
+/* MiMo 实测返回 11 个响应头（date/content-type/vary×3/cache-control/
+ * pragma/expires/server/x-mife-upstream-status 等）。原先 8 个槽位在上传
+ * 完成后解析响应头时必然越过容量，transport 返回 AGENT_ERROR_CAPACITY(-16)，
+ * 表现为"录音完成后 http failed: -16"。这里与 LLM 后端对齐到 16 个槽位、
+ * 2048 字节，留出 CDN 追加字段的余量。 */
+#define ASR_HTTP_RESPONSE_HEADERS  16
+#define ASR_HTTP_RESP_HEADER_BUF   2048
 
 static struct
 {

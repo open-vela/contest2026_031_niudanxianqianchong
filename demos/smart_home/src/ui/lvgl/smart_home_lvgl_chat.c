@@ -266,6 +266,20 @@ static void chat_mic_event_cb(lv_event_t *event)
 
     if (ui->asr_active) {
         ui->asr_abort = 1;
+        /* 录音循环要等下一个缓冲周期才退出，之后还有云端识别。
+         * 立刻给出状态，否则第二次点击看起来"没有反应"。 */
+        if (ui->chat_mic_btn) {
+            smart_home_lvgl_set_bg(ui->chat_mic_btn,
+                                   SMART_HOME_UI_COLOR_PRIMARY);
+        }
+        if (ui->chat_mic_label) {
+            lv_image_set_src(ui->chat_mic_label,
+                smart_home_lvgl_png_icon_get("asset:microphone", 32));
+        }
+        if (ui->chat_status) {
+            lv_label_set_text(ui->chat_status, "正在识别…");
+            lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+        }
         return;
     }
 

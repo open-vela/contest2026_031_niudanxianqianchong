@@ -547,9 +547,11 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
 #define TTS_HTTP_URL_MAX           288
 #define TTS_HTTP_HEADER_BUFFER     512
 #define TTS_HTTP_HEADER_CAPACITY   4
-#define TTS_HTTP_IO_BUFFER         1024
-#define TTS_HTTP_RESPONSE_HEADERS  8
-#define TTS_HTTP_RESP_HEADER_BUF   1024
+#define TTS_HTTP_IO_BUFFER         2048
+/* 与 ASR 同一原因：MiMo 返回 11 个响应头，8 个槽位在解析阶段越界，
+ * transport 报 AGENT_ERROR_CAPACITY(-16)。对齐 LLM 后端的 16/2048。 */
+#define TTS_HTTP_RESPONSE_HEADERS  16
+#define TTS_HTTP_RESP_HEADER_BUF   2048
 
 static struct
 {
