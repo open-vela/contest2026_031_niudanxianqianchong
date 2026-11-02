@@ -21,16 +21,27 @@
 #include <string.h>
 #include <time.h>
 
-#define V9_SETTINGS_CATEGORIES 6
+#define V9_SETTINGS_CATEGORIES 7
 
 static const char *const g_category_icons[V9_SETTINGS_CATEGORIES] = {
-    "asset:sun", "asset:wifi", "asset:setting-ai", "asset:shield",
-    "asset:devices", "asset:status-ok"
+    "asset:sun", "asset:wifi", "asset:setting-ai", "asset:microphone",
+    "asset:shield", "asset:devices", "asset:status-ok"
 };
 
 static const char *const g_category_names[V9_SETTINGS_CATEGORIES] = {
-    "显示与声音", "网络连接", "模型服务", "工具权限", "设备与服务", "系统健康"
+    "显示与声音", "网络连接", "模型服务", "语音服务",
+    "工具权限", "设备与服务", "系统健康"
 };
+
+/* 分类索引常量：panel[] 的填充顺序与左侧按钮顺序必须一致，
+ * 内部跳转不要写裸数字。 */
+#define V9_CAT_DISPLAY   0
+#define V9_CAT_NETWORK   1
+#define V9_CAT_MODEL     2
+#define V9_CAT_VOICE     3
+#define V9_CAT_TOOLS     4
+#define V9_CAT_SERVICES  5
+#define V9_CAT_HEALTH    6
 
 typedef struct {
     lv_obj_t *screen;
@@ -347,6 +358,10 @@ void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui)
         if (g_model.active) pthread_join(g_model.thread, NULL);
         memset(&g_model, 0, sizeof(g_model));
     }
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    /* 语音任务持有面板控件指针，必须在 g_settings 清零前收掉。 */
+    smart_home_lvgl_voice_settings_deinit(ui);
+#endif
     memset(&g_settings, 0, sizeof(g_settings));
 }
 
@@ -418,6 +433,11 @@ static void v9_net_timer_cb(lv_timer_t *timer)
     int ready = 0;
     int model_ready = 0;
     int model_result = 0;
+
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    /* 语音服务面板的保存/测试任务在独立线程里跑，结果在这里回到 LVGL。 */
+    smart_home_lvgl_voice_settings_poll(ui);
+#endif
 
     pthread_mutex_lock(&ui->pending_mutex);
     if (g_net.ready) {
@@ -1586,7 +1606,7 @@ static void health_panel_refresh(smart_home_lvgl_t *ui)
 static void health_details_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        panel_show(4);
+        panel_show(V9_CAT_SERVICES);
     }
 }
 
@@ -1805,8 +1825,9 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
         lv_obj_t *label;
 
         lv_obj_remove_style_all(button);
-        lv_obj_set_size(button, 184, 50);
-        lv_obj_set_pos(button, 11, 11 + i * 58);
+        /* 7 个分类要装进 408 高的左栏：44 + 50 的间距不能在 11+7*54 处溢出。 */
+        lv_obj_set_size(button, 184, 46);
+        lv_obj_set_pos(button, 11, 8 + i * 51);
         lv_obj_set_style_radius(button, 12, 0);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
         lv_obj_add_event_cb(button, category_cb, LV_EVENT_CLICKED, NULL);
@@ -1816,13 +1837,13 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
         lv_obj_t *icon = smart_home_lvgl_icon_create(button,
                                                      g_category_icons[i], 20, 20);
         if (icon) {
-            lv_obj_set_pos(icon, 12, 15);
+            lv_obj_set_pos(icon, 12, 13);
             lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
         }
         label = smart_home_lvgl_label_create(button, g_category_names[i],
                                              SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                              16);
-        lv_obj_set_pos(label, 46, 14);
+        lv_obj_set_pos(label, 46, 12);
     }
 
     g_settings.panel[0] = make_panel(right);
@@ -1831,13 +1852,17 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     g_settings.panel[3] = make_panel(right);
     g_settings.panel[4] = make_panel(right);
     g_settings.panel[5] = make_panel(right);
+    g_settings.panel[6] = make_panel(right);
 
     build_display_panel(g_settings.panel[0], ui->screen_settings);
     build_network_panel(ui, g_settings.panel[1]);
     build_model_panel(ui, g_settings.panel[2]);
-    build_tools_panel(ui, g_settings.panel[3]);
-    build_services_panel(ui, g_settings.panel[4]);
-    build_health_panel(ui, g_settings.panel[5]);
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    smart_home_lvgl_build_voice_settings(ui, g_settings.panel[3], NULL);
+#endif
+    build_tools_panel(ui, g_settings.panel[4]);
+    build_services_panel(ui, g_settings.panel[5]);
+    build_health_panel(ui, g_settings.panel[6]);
 
     g_settings.keyboard = lv_keyboard_create(screen);
     smart_home_lvgl_style_keyboard(g_settings.keyboard);
@@ -1857,7 +1882,7 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     }
     ui->v9_network_timer = lv_timer_create(v9_net_timer_cb, 250, ui);
 
-    panel_show(0);
+    panel_show(V9_CAT_DISPLAY);
     smart_home_lvgl_build_nav_bar(screen, ui);
     smart_home_lvgl_update_clock(ui);
 }

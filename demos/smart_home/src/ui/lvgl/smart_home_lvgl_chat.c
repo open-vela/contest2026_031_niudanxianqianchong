@@ -225,6 +225,16 @@ void smart_home_lvgl_chat_asr_begin(smart_home_lvgl_t *ui)
         return;
     }
 
+    ret = smart_home_secrets_api_key_status(SMART_HOME_SECRET_ASR,
+                                             config.backend_id);
+    if (ret != AGENT_OK) {
+        if (ui->chat_status) {
+            lv_label_set_text(ui->chat_status, smart_home_secrets_error_text(ret));
+            lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
     ui->asr_active = 1;
     ui->asr_abort = 0;
     if (ui->chat_mic_btn) {

@@ -50,7 +50,7 @@
  ****************************************************************************/
 
 /* TTS 端点预设。首选 MiMo（与 LLM mimo 预设同 host，secrets 里的
- * mimo key 直接复用）；其余为 OpenAI 兼容 speech 形态备选。 */
+ * tts_api_keys.mimo 独立读取）；其余为 OpenAI 兼容 speech 形态备选。 */
 static const smart_home_tts_preset_t g_tts_presets[] =
 {
   {
@@ -528,7 +528,8 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
       return AGENT_ERROR_NOMEM;
     }
 
-  ret = smart_home_config_store_save(TTS_CONFIG_PATH, root);
+  ret = tts_config_validate(root, NULL);
+  if (ret == AGENT_OK) ret = smart_home_config_store_save(TTS_CONFIG_PATH, root);
   cJSON_Delete(root);
 
   if (ret == AGENT_OK)
@@ -703,12 +704,12 @@ int smart_home_tts_synth(const char *text,
   api_style = preset != NULL ? preset->api_style
                              : SMART_HOME_TTS_API_SPEECH;
 
-  ret = smart_home_secrets_get_model_api_key(config.backend_id,
+  ret = smart_home_secrets_get_api_key(SMART_HOME_SECRET_TTS, config.backend_id,
                                              api_key, sizeof(api_key));
   if (ret != AGENT_OK)
     {
-      fprintf(stderr, "tts: no api key for backend '%s' in secrets.json\n",
-              config.backend_id);
+      fprintf(stderr, "tts: credential backend=%s ret=%d: %s\n",
+              config.backend_id, ret, smart_home_secrets_error_text(ret));
       return ret;
     }
 

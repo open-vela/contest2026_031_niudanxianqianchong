@@ -11,10 +11,10 @@
  *
  * 后端预设与 LLM 预设（smart_home_backends）同构但独立成表：端点、
  * 默认模型与音色不同。首选 MiMo（chat completions + base64 wav 形态，
- * 与 LLM mimo 预设同 host，key 直接复用）；siliconflow/dashscope/openai
+ * 与 LLM mimo 预设同 host，key 独立配置）；siliconflow/dashscope/openai
  * 为 OpenAI 兼容 /v1/audio/speech 二进制形态备选，custom 供自定义端点。
  *
- * API key 复用 secrets.json 的 model_api_keys 对象，按 backend_id 查询，
+ * API key 使用 secrets.json 的 tts_api_keys 对象，按 backend_id 查询，
  * 与 LLM 后端的凭据管理保持同一套约定。
  */
 
@@ -76,7 +76,7 @@ size_t smart_home_tts_preset_count(void);
 const smart_home_tts_preset_t *smart_home_tts_preset_get(size_t index);
 const smart_home_tts_preset_t *smart_home_tts_preset_by_id(const char *id);
 
-/* 载入 voice.json；文件缺失或损坏时恢复内存默认（enabled=0，custom）。 */
+/* 载入 voice.json；文件缺失或损坏时恢复内存默认（enabled=0，mimo）。 */
 void smart_home_tts_config_load(smart_home_tts_config_t *config);
 
 /* 保存 voice.json（原子写）。仅设置页调用。 */

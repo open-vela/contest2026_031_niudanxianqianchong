@@ -14,7 +14,7 @@
  * choices[0].message.content。
  *
  * 后端预设与 TTS（smart_home_tts）同构：默认 MiMo（与 LLM/TTS 的 mimo
- * 预设同 host，key 直接复用 secrets.json 的 model_api_keys.<backend_id>），
+ * 预设同 host，key 独立读取 secrets.json 的 asr_api_keys.<backend_id>），
  * custom 供自定义 OpenAI 兼容端点。端点配置持久化在
  * /data/smart_home/asr.json；密钥只放 secrets.json。
  */
@@ -23,6 +23,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "smart_home_voice_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +66,9 @@ const smart_home_asr_preset_t *smart_home_asr_preset_by_id(const char *id);
  * 旧版文件（仅 enabled/language，无端点字段）按 mimo 预设回填端点。 */
 void smart_home_asr_config_load(smart_home_asr_config_t *config);
 
+/* Explicit reload for external provisioning; does not rewrite old v2 files. */
+void smart_home_asr_config_reload(void);
+
 /* 保存 asr.json（原子写）。仅设置页调用。 */
 int smart_home_asr_config_save(const smart_home_asr_config_t *config);
 
@@ -77,6 +81,10 @@ int smart_home_asr_config_save(const smart_home_asr_config_t *config);
  */
 int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
                              char *out_text, size_t out_size);
+
+int smart_home_asr_recognize_ex(const uint8_t *pcm, size_t bytes,
+                             char *out_text, size_t out_size,
+                             smart_home_voice_result_t *result);
 
 #ifdef __cplusplus
 }

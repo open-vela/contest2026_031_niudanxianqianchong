@@ -142,7 +142,8 @@ static cJSON *recover(smart_home_config_default_fn make_default,
     return NULL;
 }
 
-int smart_home_config_store_load(const char *path,
+int smart_home_config_store_load_compatible(const char *path,
+                                 int previous_version,
                                  smart_home_config_default_fn make_default,
                                  smart_home_config_recovery_t recovery,
                                  smart_home_config_validate_fn validate,
@@ -195,6 +196,12 @@ int smart_home_config_store_load(const char *path,
     }
 
     ret = check_version(root, error, error_size);
+    if (ret != AGENT_OK && previous_version > 1) {
+        const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "version");
+        if (cJSON_IsNumber(version) && version->valuedouble == previous_version) {
+            ret = AGENT_OK;
+        }
+    }
     if (ret != AGENT_OK) {
         cJSON_Delete(root);
         root = recover(make_default, recovery, error, error_size);
@@ -221,6 +228,17 @@ int smart_home_config_store_load(const char *path,
 
     *out_root = root;
     return AGENT_OK;
+}
+
+int smart_home_config_store_load(const char *path,
+                                 smart_home_config_default_fn make_default,
+                                 smart_home_config_recovery_t recovery,
+                                 smart_home_config_validate_fn validate,
+                                 void *user_data, cJSON **out_root,
+                                 char *error, size_t error_size)
+{
+    return smart_home_config_store_load_compatible(path, 0, make_default,
+        recovery, validate, user_data, out_root, error, error_size);
 }
 
 static int write_all(int fd, const char *buffer, size_t size)

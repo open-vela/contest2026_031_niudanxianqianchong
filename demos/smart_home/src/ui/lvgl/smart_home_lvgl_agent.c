@@ -67,6 +67,7 @@ typedef enum {
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
 typedef struct {
     char text[SMART_HOME_INPUT_SIZE];
+    smart_home_voice_result_t result;
 } ui_asr_payload_t;
 #endif
 
@@ -425,6 +426,7 @@ static void *asr_worker_main(void *arg)
     uint8_t *pcm = NULL;
     size_t bytes = 0;
     char text[SMART_HOME_INPUT_SIZE];
+    smart_home_voice_result_t result = {AGENT_ERROR, 0, SMART_HOME_VOICE_CAPTURE};
     int ret;
 
     text[0] = '\0';
@@ -436,8 +438,18 @@ static void *asr_worker_main(void *arg)
     if (ret == 0 && bytes >= 3200)
       {
         /* 至少 0.1 s（3200 字节）才值得上传识别。 */
-        smart_home_asr_recognize(pcm, bytes, text, sizeof(text));
+        ret = smart_home_asr_recognize_ex(pcm, bytes, text, sizeof(text), &result);
       }
+    else if (ret == 0)
+      {
+        /* 录音成功但不足 0.1 s：不是云端失败，按采集阶段报错。 */
+        ret = AGENT_ERROR_INVALID;
+        result.code = AGENT_ERROR_INVALID;
+        result.stage = SMART_HOME_VOICE_CAPTURE;
+      }
+
+    /* asr_abort 的语义是"再点一次结束录音并发送"，不是取消：
+     * 录音循环已经提前退出，这里照常上传已录到的内容。 */
 
     if (pcm != NULL)
       {
@@ -448,6 +460,7 @@ static void *asr_worker_main(void *arg)
     if (item != NULL)
       {
         item->type = UI_PENDING_ASR_TEXT;
+        item->data.asr.result = result;
         strncpy(item->data.asr.text, text, sizeof(item->data.asr.text) - 1);
         item->data.asr.text[sizeof(item->data.asr.text) - 1] = '\0';
         if (agent_ui_enqueue(ui, item) != 0)
@@ -638,11 +651,11 @@ void smart_home_lvgl_process_pending(smart_home_lvgl_t *ui)
                 ui->asr_worker_active = 0;
             }
 
-            if (item->data.asr.text[0]) {
+            if (item->data.asr.result.code == AGENT_OK && item->data.asr.text[0]) {
                 smart_home_lvgl_chat_send_text(ui, item->data.asr.text);
             } else {
                 smart_home_lvgl_append_error_bubble(
-                    ui, "语音识别失败：录音太短、密钥未配置或网络错误。");
+                    ui, smart_home_voice_result_text(&item->data.asr.result));
             }
             smart_home_lvgl_chat_asr_finish(ui);
         }

@@ -127,6 +127,9 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl_screensaver.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_settings.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_settings_v9.c
+    ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_VOICE_TTS),)
+      CSRCS += src/ui/lvgl/smart_home_lvgl_voice_settings.c
+    endif
     CSRCS   += src/ui/lvgl/smart_home_v9_device_view.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_style.c
     CSRCS   += src/ui/lvgl/icons/smart_home_lvgl_png_icons.c

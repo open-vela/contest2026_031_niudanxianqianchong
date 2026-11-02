@@ -8,6 +8,9 @@
 #include <agent/error.h>
 
 #include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <time.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <syslog.h>
@@ -16,6 +19,9 @@
 #include <unistd.h>
 
 #define SMART_HOME_SECRETS_VERSION 1
+
+/* Serialize every read-modify-write, including Wi-Fi and Miloco updates. */
+static pthread_mutex_t g_secrets_writer = PTHREAD_MUTEX_INITIALIZER;
 
 static void secure_clear(void *memory, size_t size)
 {
@@ -114,7 +120,8 @@ static int read_secrets_file(char **out_text, size_t *out_size)
     return AGENT_OK;
 }
 
-static int lookup_model_api_key(const char *backend_id,
+static int lookup_api_key(smart_home_secret_service_t service,
+                                const char *backend_id,
                                 char *out,
                                 size_t out_size)
 {
@@ -126,7 +133,9 @@ static int lookup_model_api_key(const char *backend_id,
     cJSON *value;
     int ret;
 
-    if (!backend_id || !out || out_size == 0u || !valid_backend_id(backend_id)) {
+    const char *section = smart_home_secrets_key_section(service);
+
+    if (!section || !backend_id || !out || out_size == 0u || !valid_backend_id(backend_id)) {
         return AGENT_ERROR_INVALID;
     }
     out[0] = '\0';
@@ -145,14 +154,14 @@ static int lookup_model_api_key(const char *backend_id,
     }
 
     version = cJSON_GetObjectItemCaseSensitive(root, "version");
-    keys = cJSON_GetObjectItemCaseSensitive(root, "model_api_keys");
+    keys = cJSON_GetObjectItemCaseSensitive(root, section);
     value = cJSON_IsObject(keys)
                 ? cJSON_GetObjectItemCaseSensitive(keys, backend_id) : NULL;
     if (!cJSON_IsNumber(version) || version->valueint != SMART_HOME_SECRETS_VERSION ||
-        !cJSON_IsObject(keys) || !cJSON_IsString(value) ||
+        (keys != NULL && !cJSON_IsObject(keys)) || !cJSON_IsString(value) ||
         !value->valuestring[0]) {
         ret = (!cJSON_IsNumber(version) || version->valueint != SMART_HOME_SECRETS_VERSION ||
-               !cJSON_IsObject(keys)) ? AGENT_ERROR_PARSE : AGENT_ERROR_NOT_FOUND;
+               (keys != NULL && !cJSON_IsObject(keys))) ? AGENT_ERROR_PARSE : AGENT_ERROR_NOT_FOUND;
         cJSON_Delete(root);
         return ret;
     }
@@ -171,30 +180,167 @@ static int lookup_model_api_key(const char *backend_id,
     return AGENT_OK;
 }
 
-int smart_home_secrets_get_model_api_key(const char *backend_id,
-                                         char *out,
-                                         size_t out_size)
+const char *smart_home_secrets_key_section(smart_home_secret_service_t service)
+{
+    switch (service) {
+    case SMART_HOME_SECRET_LLM: return "model_api_keys";
+    case SMART_HOME_SECRET_ASR: return "asr_api_keys";
+    case SMART_HOME_SECRET_TTS: return "tts_api_keys";
+    default: return NULL;
+    }
+}
+
+const char *smart_home_secrets_error_text(int result)
+{
+    switch (result) {
+    case AGENT_OK: return "已配置（尚未验证云端鉴权）";
+    case AGENT_ERROR_NOT_FOUND: return "密钥未配置（文件、服务条目缺失或为空）";
+    case AGENT_ERROR_PARSE: return "凭据 JSON、版本或密钥格式错误";
+    case AGENT_ERROR_LIMIT: return "凭据文件或密钥超过长度限制";
+    case AGENT_ERROR_INVALID: return "凭据参数不合法";
+    case AGENT_ERROR_NOMEM: return "读取凭据时内存不足";
+    default: return "凭据文件读写失败";
+    }
+}
+
+int smart_home_secrets_get_api_key(smart_home_secret_service_t service,
+                                   const char *backend_id,
+                                   char *out, size_t out_size)
 {
     int ret;
-
-    if (out && out_size > 0u) {
-        out[0] = '\0';
-    }
-    ret = lookup_model_api_key(backend_id, out, out_size);
-    if (ret != AGENT_OK && out && out_size > 0u) {
-        secure_clear(out, out_size);
-    }
+    if (out && out_size) secure_clear(out, out_size);
+    ret = lookup_api_key(service, backend_id, out, out_size);
+    if (ret != AGENT_OK && out && out_size) secure_clear(out, out_size);
     return ret;
+}
+
+int smart_home_secrets_api_key_status(smart_home_secret_service_t service,
+                                      const char *backend_id)
+{
+    char key[256];
+    int ret = smart_home_secrets_get_api_key(service, backend_id, key, sizeof(key));
+    secure_clear(key, sizeof(key));
+    return ret;
+}
+
+int smart_home_secrets_get_model_api_key(const char *backend_id,
+                                         char *out, size_t out_size)
+{
+    return smart_home_secrets_get_api_key(SMART_HOME_SECRET_LLM,
+                                          backend_id, out, out_size);
 }
 
 int smart_home_secrets_model_api_key_status(const char *backend_id)
 {
-    char key[256];
-    int ret = smart_home_secrets_get_model_api_key(backend_id,
-                                                   key,
-                                                   sizeof(key));
+    return smart_home_secrets_api_key_status(SMART_HOME_SECRET_LLM, backend_id);
+}
 
-    secure_clear(key, sizeof(key));
+/* Refuse malformed existing documents rather than replacing other credentials. */
+static int load_update_root(cJSON **out)
+{
+    char *text = NULL;
+    size_t size = 0;
+    cJSON *root;
+    const cJSON *version;
+    int ret = read_secrets_file(&text, &size);
+    if (ret == AGENT_ERROR_NOT_FOUND) {
+        root = cJSON_CreateObject();
+        if (!root || !cJSON_AddNumberToObject(root, "version", 1)) {
+            cJSON_Delete(root);
+            return AGENT_ERROR_NOMEM;
+        }
+    } else {
+        if (ret != AGENT_OK) return ret;
+        root = cJSON_ParseWithLength(text, size);
+        secure_clear(text, size + 1);
+        free(text);
+        version = cJSON_GetObjectItemCaseSensitive(root, "version");
+        if (!cJSON_IsObject(root) || !cJSON_IsNumber(version) ||
+            version->valuedouble != SMART_HOME_SECRETS_VERSION) {
+            cJSON_Delete(root);
+            return AGENT_ERROR_PARSE;
+        }
+    }
+    *out = root;
+    return AGENT_OK;
+}
+
+static int save_update_root(const cJSON *root)
+{
+    char temp[192];
+    char *text = cJSON_PrintUnformatted(root);
+    struct timespec now;
+    size_t length, done = 0;
+    int fd = -1, ret = AGENT_ERROR, attempt;
+    if (!text) return AGENT_ERROR_NOMEM;
+    length = strlen(text);
+    if (length > CONFIG_SMART_HOME_MODEL_SECRETS_MAX_FILE_SIZE) {
+        ret = AGENT_ERROR_LIMIT;
+        goto out;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    for (attempt = 0; attempt < 16; attempt++) {
+        unsigned long generation = ((unsigned long)now.tv_nsec ^
+            (unsigned long)now.tv_sec) + (unsigned long)attempt;
+        if (snprintf(temp, sizeof(temp), "%s.tmp.%08lx",
+            CONFIG_SMART_HOME_MODEL_SECRETS_PATH, generation) >= (int)sizeof(temp)) {
+            ret = AGENT_ERROR_LIMIT;
+            goto out;
+        }
+        fd = open(temp, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
+    if (fd < 0) goto out;
+    while (done < length) {
+        ssize_t n = write(fd, text + done, length - done);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) goto failed;
+        done += (size_t)n;
+    }
+    if (fsync(fd) < 0) goto failed;
+    if (close(fd) < 0) { fd = -1; goto failed; }
+    fd = -1;
+    if (rename(temp, CONFIG_SMART_HOME_MODEL_SECRETS_PATH) < 0) goto failed;
+    ret = AGENT_OK;
+    goto out;
+failed:
+    if (fd >= 0) close(fd);
+    unlink(temp);
+out:
+    secure_clear(text, length);
+    free(text);
+    return ret;
+}
+
+static cJSON *update_object(cJSON *root, const char *name)
+{
+    cJSON *object = cJSON_GetObjectItemCaseSensitive(root, name);
+    if (!object) object = cJSON_AddObjectToObject(root, name);
+    return cJSON_IsObject(object) ? object : NULL;
+}
+
+int smart_home_secrets_set_api_key(smart_home_secret_service_t service,
+                                   const char *backend_id, const char *key)
+{
+    cJSON *root = NULL, *keys;
+    const char *section = smart_home_secrets_key_section(service);
+    int ret;
+    if (!section || !valid_backend_id(backend_id) || !key ||
+        strlen(key) >= 256 || contains_control(key)) return AGENT_ERROR_INVALID;
+    pthread_mutex_lock(&g_secrets_writer);
+    ret = load_update_root(&root);
+    if (ret != AGENT_OK) goto out;
+    keys = update_object(root, section);
+    if (!keys) { ret = AGENT_ERROR_PARSE; goto out; }
+    cJSON_DeleteItemFromObjectCaseSensitive(keys, backend_id);
+    if (!cJSON_AddStringToObject(keys, backend_id, key)) {
+        ret = AGENT_ERROR_NOMEM;
+        goto out;
+    }
+    ret = save_update_root(root);
+out:
+    cJSON_Delete(root);
+    pthread_mutex_unlock(&g_secrets_writer);
     return ret;
 }
 
@@ -257,106 +403,28 @@ int smart_home_secrets_get_wifi_credentials(char *ssid, size_t ssid_size,
 int smart_home_secrets_set_wifi_credentials(const char *ssid,
                                             const char *password)
 {
-    char *text = NULL;
-    size_t text_size = 0u;
-    cJSON *root = NULL;
-    cJSON *wifi;
-    cJSON *version;
-    char *serialized = NULL;
-    char temp_path[192];
-    FILE *file = NULL;
+    cJSON *root = NULL, *wifi;
     int ret;
-
-    if (!ssid || !password || !ssid[0] || strlen(ssid) > 32u ||
-        strlen(password) > 64u || contains_control(ssid) ||
-        contains_control(password)) {
+    if (!ssid || !password || !ssid[0] || strlen(ssid) > 32 ||
+        strlen(password) > 64 || contains_control(ssid) || contains_control(password))
         return AGENT_ERROR_INVALID;
-    }
-    ret = read_secrets_file(&text, &text_size);
-    if (ret == AGENT_ERROR_NOT_FOUND) {
-        /* A first-time Wi-Fi setup must work before a model credential has
-         * been provisioned.  Create the minimal versioned document. */
-        root = cJSON_CreateObject();
-        if (!root || !cJSON_AddNumberToObject(root, "version",
-                                               SMART_HOME_SECRETS_VERSION) ||
-            !cJSON_AddObjectToObject(root, "model_api_keys")) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_NOMEM;
-        }
-    } else {
-        if (ret != AGENT_OK) {
-            return ret;
-        }
-        root = cJSON_ParseWithLength(text, text_size);
-        secure_clear(text, text_size + 1u);
-        free(text);
-        if (!root || !cJSON_IsObject(root)) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_PARSE;
-        }
-        version = cJSON_GetObjectItemCaseSensitive(root, "version");
-        if (!cJSON_IsNumber(version) ||
-            version->valueint != SMART_HOME_SECRETS_VERSION) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_PARSE;
-        }
-    }
-    wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
-    if (!cJSON_IsObject(wifi)) {
-        wifi = cJSON_AddObjectToObject(root, "wifi");
-    }
-    if (!wifi) {
-        cJSON_Delete(root);
-        return AGENT_ERROR_NOMEM;
-    }
+    pthread_mutex_lock(&g_secrets_writer);
+    ret = load_update_root(&root);
+    if (ret != AGENT_OK) goto out;
+    wifi = update_object(root, "wifi");
+    if (!wifi) { ret = AGENT_ERROR_PARSE; goto out; }
     cJSON_DeleteItemFromObjectCaseSensitive(wifi, "ssid");
     cJSON_DeleteItemFromObjectCaseSensitive(wifi, "password");
     if (!cJSON_AddStringToObject(wifi, "ssid", ssid) ||
         !cJSON_AddStringToObject(wifi, "password", password)) {
-        cJSON_Delete(root);
-        return AGENT_ERROR_NOMEM;
+        ret = AGENT_ERROR_NOMEM;
+        goto out;
     }
-    serialized = cJSON_PrintUnformatted(root);
+    ret = save_update_root(root);
+out:
     cJSON_Delete(root);
-    syslog(LOG_INFO, "[milo] sec: serialized\n");
-    if (!serialized) {
-        return AGENT_ERROR_NOMEM;
-    }
-    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp",
-                 CONFIG_SMART_HOME_MODEL_SECRETS_PATH) >= (int)sizeof(temp_path)) {
-        secure_clear(serialized, strlen(serialized));
-        free(serialized);
-        return AGENT_ERROR_LIMIT;
-    }
-    file = fopen(temp_path, "wb");
-    if (!file) {
-        secure_clear(serialized, strlen(serialized));
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    if (fwrite(serialized, 1u, strlen(serialized), file) != strlen(serialized) ||
-        fflush(file) != 0) {
-        fclose(file);
-        unlink(temp_path);
-        secure_clear(serialized, strlen(serialized));
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    if (fclose(file) != 0) {
-        unlink(temp_path);
-        secure_clear(serialized, strlen(serialized));
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    if (rename(temp_path, CONFIG_SMART_HOME_MODEL_SECRETS_PATH) != 0) {
-        unlink(temp_path);
-        secure_clear(serialized, strlen(serialized));
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    secure_clear(serialized, strlen(serialized));
-    free(serialized);
-    return AGENT_OK;
+    pthread_mutex_unlock(&g_secrets_writer);
+    return ret;
 }
 
 /*
@@ -432,103 +500,28 @@ int smart_home_secrets_get_miloco(char *host, size_t host_size,
 int smart_home_secrets_set_miloco(const char *host, uint16_t port,
                                   const char *token)
 {
-    char *text = NULL;
-    size_t text_size = 0u;
-    cJSON *root = NULL;
-    cJSON *miloco;
-    cJSON *version;
-    char *serialized = NULL;
-    char temp_path[192];
-    FILE *file = NULL;
+    cJSON *root = NULL, *miloco;
     int ret;
-
-    if (!host || !host[0] || strlen(host) > 63u || port == 0u ||
-        (token && strlen(token) > 63u) || contains_control(host) ||
-        (token && contains_control(token))) {
-        return AGENT_ERROR_INVALID;
-    }
-    syslog(LOG_INFO, "[milo] sec: read begin\n");
-    ret = read_secrets_file(&text, &text_size);
-    syslog(LOG_INFO, "[milo] sec: read ret=%d\n", ret);
-    if (ret == AGENT_ERROR_NOT_FOUND) {
-        root = cJSON_CreateObject();
-        if (!root || !cJSON_AddNumberToObject(root, "version",
-                                               SMART_HOME_SECRETS_VERSION) ||
-            !cJSON_AddObjectToObject(root, "model_api_keys")) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_NOMEM;
-        }
-    } else {
-        if (ret != AGENT_OK) {
-            return ret;
-        }
-        root = cJSON_ParseWithLength(text, text_size);
-        secure_clear(text, text_size + 1u);
-        free(text);
-        if (!root || !cJSON_IsObject(root)) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_PARSE;
-        }
-        version = cJSON_GetObjectItemCaseSensitive(root, "version");
-        if (!cJSON_IsNumber(version) ||
-            version->valueint != SMART_HOME_SECRETS_VERSION) {
-            cJSON_Delete(root);
-            return AGENT_ERROR_PARSE;
-        }
-    }
-    miloco = cJSON_GetObjectItemCaseSensitive(root, "miloco");
-    if (!cJSON_IsObject(miloco)) {
-        miloco = cJSON_AddObjectToObject(root, "miloco");
-    }
-    if (!miloco) {
-        cJSON_Delete(root);
-        return AGENT_ERROR_NOMEM;
-    }
+    if (!host || !host[0] || strlen(host) > 63 || !port ||
+        (token && strlen(token) > 63) || contains_control(host) ||
+        (token && contains_control(token))) return AGENT_ERROR_INVALID;
+    pthread_mutex_lock(&g_secrets_writer);
+    ret = load_update_root(&root);
+    if (ret != AGENT_OK) goto out;
+    miloco = update_object(root, "miloco");
+    if (!miloco) { ret = AGENT_ERROR_PARSE; goto out; }
     cJSON_DeleteItemFromObjectCaseSensitive(miloco, "host");
     cJSON_DeleteItemFromObjectCaseSensitive(miloco, "port");
     cJSON_DeleteItemFromObjectCaseSensitive(miloco, "token");
     if (!cJSON_AddStringToObject(miloco, "host", host) ||
-        !cJSON_AddNumberToObject(miloco, "port", (double)port) ||
+        !cJSON_AddNumberToObject(miloco, "port", port) ||
         !cJSON_AddStringToObject(miloco, "token", token ? token : "")) {
-        cJSON_Delete(root);
-        return AGENT_ERROR_NOMEM;
+        ret = AGENT_ERROR_NOMEM;
+        goto out;
     }
-    serialized = cJSON_PrintUnformatted(root);
+    ret = save_update_root(root);
+out:
     cJSON_Delete(root);
-    if (!serialized) {
-        return AGENT_ERROR_NOMEM;
-    }
-    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp",
-                 CONFIG_SMART_HOME_MODEL_SECRETS_PATH) >= (int)sizeof(temp_path)) {
-        free(serialized);
-        return AGENT_ERROR_LIMIT;
-    }
-    file = fopen(temp_path, "wb");
-    syslog(LOG_INFO, "[milo] sec: fopen ret=%d\n", file ? 0 : -1);
-    if (!file) {
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    if (fwrite(serialized, 1u, strlen(serialized), file) != strlen(serialized) ||
-        fflush(file) != 0) {
-        fclose(file);
-        unlink(temp_path);
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    syslog(LOG_INFO, "[milo] sec: fwrite done\n");
-    if (fclose(file) != 0) {
-        unlink(temp_path);
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    syslog(LOG_INFO, "[milo] sec: fclose done\n");
-    if (rename(temp_path, CONFIG_SMART_HOME_MODEL_SECRETS_PATH) != 0) {
-        unlink(temp_path);
-        free(serialized);
-        return AGENT_ERROR;
-    }
-    syslog(LOG_INFO, "[milo] sec: rename done\n");
-    free(serialized);
-    return AGENT_OK;
+    pthread_mutex_unlock(&g_secrets_writer);
+    return ret;
 }

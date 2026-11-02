@@ -190,7 +190,7 @@ static cJSON *asr_config_make_default(void *user_data)
 
   root = cJSON_CreateObject();
   if (root == NULL ||
-      !cJSON_AddNumberToObject(root, "version", 2) ||
+      !cJSON_AddNumberToObject(root, "version", 1) ||
       !cJSON_AddBoolToObject(root, "enabled", 0) ||
       !cJSON_AddStringToObject(root, "backend_id", config.backend_id) ||
       !cJSON_AddStringToObject(root, "host", config.host) ||
@@ -294,7 +294,7 @@ static void asr_config_ensure_loaded(void)
       return;
     }
 
-  if (smart_home_config_store_load(ASR_CONFIG_PATH,
+  if (smart_home_config_store_load_compatible(ASR_CONFIG_PATH, 2,
                                    asr_config_make_default,
                                    SMART_HOME_CONFIG_RECOVER_DEFAULT,
                                    asr_config_validate, NULL,
@@ -544,7 +544,7 @@ int smart_home_asr_config_save(const smart_home_asr_config_t *config)
 
   root = cJSON_CreateObject();
   if (root == NULL ||
-      !cJSON_AddNumberToObject(root, "version", 2) ||
+      !cJSON_AddNumberToObject(root, "version", 1) ||
       !cJSON_AddBoolToObject(root, "enabled", config->enabled ? 1 : 0) ||
       !cJSON_AddStringToObject(root, "backend_id", config->backend_id) ||
       !cJSON_AddStringToObject(root, "host", config->host) ||
@@ -557,7 +557,8 @@ int smart_home_asr_config_save(const smart_home_asr_config_t *config)
       return AGENT_ERROR_NOMEM;
     }
 
-  ret = smart_home_config_store_save(ASR_CONFIG_PATH, root);
+  ret = asr_config_validate(root, NULL);
+  if (ret == AGENT_OK) ret = smart_home_config_store_save(ASR_CONFIG_PATH, root);
   cJSON_Delete(root);
 
   if (ret == AGENT_OK)
@@ -571,8 +572,9 @@ int smart_home_asr_config_save(const smart_home_asr_config_t *config)
   return ret;
 }
 
-int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
-                             char *out_text, size_t out_size)
+int smart_home_asr_recognize_ex(const uint8_t *pcm, size_t bytes,
+                             char *out_text, size_t out_size,
+                             smart_home_voice_result_t *result)
 {
   smart_home_asr_config_t config;
   char api_key[ASR_KEY_MAX];
@@ -596,6 +598,11 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
   uint64_t deadline_ms;
   int ret;
 
+  smart_home_voice_result_t local_result = {AGENT_ERROR_INVALID, 0,
+                                            SMART_HOME_VOICE_CREDENTIAL};
+  if (result == NULL) result = &local_result;
+  *result = local_result;
+
   if (pcm == NULL || bytes == 0 || out_text == NULL || out_size == 0)
     {
       return AGENT_ERROR_INVALID;
@@ -605,14 +612,18 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
   smart_home_asr_config_load(&config);
   asr_config_fill_endpoint(&config);
 
-  ret = smart_home_secrets_get_model_api_key(config.backend_id,
+  ret = smart_home_secrets_get_api_key(SMART_HOME_SECRET_ASR, config.backend_id,
                                              api_key, sizeof(api_key));
   if (ret != AGENT_OK)
     {
-      fprintf(stderr, "asr: no api key for backend '%s' in secrets.json\n",
-              config.backend_id);
+      result->code = ret;
+      fprintf(stderr, "asr: credential backend=%s ret=%d: %s\n",
+              config.backend_id, ret, smart_home_secrets_error_text(ret));
       return ret;
     }
+
+  result->stage = SMART_HOME_VOICE_RESPONSE;
+  result->code = AGENT_ERROR_NOMEM;
 
   /* WAV 组装：44 字节头 + 原始 PCM。 */
   wav = smart_home_bulk_alloc(bytes + 44u);
@@ -660,11 +671,13 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
   sprintf(body + prefix_len + olen, ASR_BODY_SUFFIX "%s\"}}",
           config.language);
 
+  result->stage = SMART_HOME_VOICE_NETWORK;
   ret = asr_http_init();
   if (ret != AGENT_OK)
     {
       fprintf(stderr, "asr: http transport init failed: %d\n", ret);
       smart_home_bulk_free(body);
+      result->code = ret;
       return ret;
     }
 
@@ -725,6 +738,8 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
       goto out;
     }
 
+  result->http_status = sink.status;
+  result->stage = SMART_HOME_VOICE_HTTP;
   if (sink.status < 200 || sink.status >= 300)
     {
       fprintf(stderr, "asr: http status=%u body: %.200s\n",
@@ -740,6 +755,7 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
     }
 
   response_buf[sink.used] = '\0';
+  result->stage = SMART_HOME_VOICE_RESPONSE;
   ret = asr_parse_response((const char *)response_buf,
                            sink.used, out_text, out_size);
   if (ret != 0)
@@ -748,6 +764,21 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
     }
 
 out:
+  result->code = ret;
   smart_home_bulk_free(response_buf);
   return ret;
+}
+
+int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
+                             char *out_text, size_t out_size)
+{
+    return smart_home_asr_recognize_ex(pcm, bytes, out_text, out_size, NULL);
+}
+
+void smart_home_asr_config_reload(void)
+{
+    pthread_mutex_lock(&g_asr_config_mutex);
+    g_asr_config_loaded = 0;
+    pthread_mutex_unlock(&g_asr_config_mutex);
+    asr_config_ensure_loaded();
 }

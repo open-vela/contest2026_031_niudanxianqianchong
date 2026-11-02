@@ -113,6 +113,16 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui);
 int smart_home_lvgl_v9_select_room(int index);
 void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui);
 void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui);
+
+/* 语音服务独立面板（ASR/TTS 端点与独立密钥）。
+ * 只在 CONFIG_SMART_HOME_VOICE_ASR 或 CONFIG_SMART_HOME_VOICE_TTS 打开时编译。 */
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui,
+                                          lv_obj_t *panel,
+                                          lv_obj_t *keyboard);
+void smart_home_lvgl_voice_settings_poll(smart_home_lvgl_t *ui);
+void smart_home_lvgl_voice_settings_deinit(smart_home_lvgl_t *ui);
+#endif
 int smart_home_lvgl_v9_settings_category_count(void);
 int smart_home_lvgl_v9_settings_select_category(int index);
 void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui);
