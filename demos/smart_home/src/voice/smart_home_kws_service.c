@@ -550,6 +550,17 @@ int kws_service_start(kws_wake_cb_t cb, void *user_data)
 
   pthread_mutex_unlock(&g_kws.mutex);
 
+  /* 采集 worker 原先只在 PTT 录音时按需启动，常驻监听因此收不到任何帧：
+   * 冷启动后 kws_service 在跑，但环缓冲始终为空。这里显式拉起共享采集
+   * 服务，KWS 才真正开始收音频。voice_capture_start() 幂等，重复调用安全。 */
+  status = voice_capture_start();
+  if (status != 0)
+    {
+      fprintf(stderr, "kws: capture start failed: %d\n", status);
+      kws_service_stop();
+      return status;
+    }
+
   /* 注册为采集消费者（在锁外调用，避免与采集回调死锁）。 */
   if (voice_capture_listen(kws_capture_cb, &g_kws) != 0)
     {

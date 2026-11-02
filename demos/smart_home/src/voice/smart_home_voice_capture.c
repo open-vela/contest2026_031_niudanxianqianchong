@@ -556,6 +556,14 @@ static int capture_record_impl(int seconds, const volatile int *abort,
   *out_pcm = NULL;
   *out_bytes = 0;
 
+  /* 每次会话重新收敛噪声底并清空断句状态机。VAD 是进程级单例，
+   * 不复位会让上一次的 active/end_count 残留到下一次开头：
+   * voice_capture_speech_active() 立即为真，saw_speech 被置位，
+   * 于是静音 auto_stop_ms 后提前结束录音。 */
+#ifdef CONFIG_SMART_HOME_VAD
+  smart_home_vad_reset();
+#endif
+
   ret = voice_capture_start();
   if (ret != 0)
     {
