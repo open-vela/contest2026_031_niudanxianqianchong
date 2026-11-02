@@ -93,6 +93,11 @@ struct kws_state_s
   uint8_t vote_window;
   void *worker_stack_alloc;      /* bulk 原始指针（释放用） */
   void *worker_stack;            /* 16B 对齐后交给 pthread */
+
+  /* worker 在正式进入循环前汇报初始化结果；start() 等待它，
+   * 避免「返回 0 但模型没起来」以及 init 失败时的资源泄漏。 */
+  bool init_done;
+  int init_status;
 };
 
 /****************************************************************************
@@ -120,6 +125,9 @@ static void kws_capture_cb(const int16_t *samples, size_t sample_count,
   struct kws_state_s *state = user_data;
   size_t capacity = KWS_FRONTEND_PCM_SAMPLES;
 
+  /* ring_pos / ring_written 由 worker 在读、本回调在写，必须同一把锁。 */
+  pthread_mutex_lock(&state->mutex);
+
   while (sample_count > 0)
     {
       size_t chunk = capacity - state->ring_pos;
@@ -136,6 +144,8 @@ static void kws_capture_cb(const int16_t *samples, size_t sample_count,
       state->ring_pos = (state->ring_pos + chunk) % capacity;
       state->ring_written += chunk;
     }
+
+  pthread_mutex_unlock(&state->mutex);
 }
 
 static void *kws_worker_main(void *arg)
@@ -147,25 +157,39 @@ static void *kws_worker_main(void *arg)
   int quant_zp = 0;
   size_t capacity = KWS_FRONTEND_PCM_SAMPLES;
   size_t i;
+  int status;
+  unsigned int hit;
 
   (void)arg;
 
-  if (kws_infer_init(state->arena, CONFIG_SMART_HOME_KWS_ARENA_SIZE) != 0)
+  status = kws_infer_init(state->arena, CONFIG_SMART_HOME_KWS_ARENA_SIZE);
+  if (status != 0)
     {
-      fprintf(stderr, "kws: model init failed\n");
-      goto out_stopped;
+      fprintf(stderr, "kws: model init failed: %d\n", status);
+      goto out_init_failed;
     }
 
   kws_infer_input_params(&quant_scale, &quant_zp);
-  printf("[kws] resident service ready: arena_used=%u threshold=%d/1000\n",
-         (unsigned)kws_infer_arena_used(), CONFIG_SMART_HOME_KWS_THRESHOLD);
 
   window = smart_home_bulk_alloc(capacity * sizeof(int16_t));
   if (window == NULL)
     {
       fprintf(stderr, "kws: window alloc failed\n");
-      goto out_stopped;
+      status = -ENOMEM;
+      goto out_init_failed;
     }
+
+  printf("[kws] resident service ready: arena_used=%u backend=%s "
+         "threshold=%d/1000\n",
+         (unsigned)kws_infer_arena_used(),
+         kws_infer_backend() == KWS_INFER_BACKEND_ESPNN ? "esp-nn" : "reference",
+         CONFIG_SMART_HOME_KWS_THRESHOLD);
+
+  /* 初始化完全成功后才通知 start() 返回，避免调用方拿到假成功。 */
+  pthread_mutex_lock(&state->mutex);
+  state->init_status = 0;
+  state->init_done = true;
+  pthread_mutex_unlock(&state->mutex);
 
   while (true)
     {
@@ -184,20 +208,21 @@ static void *kws_worker_main(void *arg)
 
       usleep(CONFIG_SMART_HOME_KWS_INTERVAL_MS * 1000);
 
-      if (paused || state->cb == NULL)
+      if (paused)
         {
           continue;
         }
 
+      /* 取窗口快照与判断数据量必须在同一临界区：分开加锁会让
+       * ring_pos 在两次加锁之间被回调推进，读到未写完的区域。
+       */
       pthread_mutex_lock(&state->mutex);
-      bool enough = state->ring_written >= capacity;
-      pthread_mutex_unlock(&state->mutex);
-      if (!enough)
+      if (state->ring_written < capacity)
         {
+          pthread_mutex_unlock(&state->mutex);
           continue;
         }
 
-      /* 展开环形缓冲到线性窗口（拷贝两次避免读侧翻转判断）。 */
       {
         size_t head = state->ring_pos;
 
@@ -206,6 +231,8 @@ static void *kws_worker_main(void *arg)
             window[i] = state->ring[(head + i) % capacity];
           }
       }
+
+      pthread_mutex_unlock(&state->mutex);
 
       if (kws_frontend_compute(window, quant_scale, quant_zp,
                                state->features) != 0)
@@ -219,14 +246,16 @@ static void *kws_worker_main(void *arg)
         }
 
       now_ms = kws_monotonic_ms();
+      hit = scores[KWS_INFER_CLASS_WAKE] * 1000.0f >=
+            (float)CONFIG_SMART_HOME_KWS_THRESHOLD;
 
-      /* 2/3 多数投票 + 冷却。 */
-      state->vote_window <<= 1;
-      if (scores[KWS_INFER_CLASS_WAKE] * 1000.0f >=
-          (float)CONFIG_SMART_HOME_KWS_THRESHOLD)
-        {
-          state->vote_window |= 1u;
-        }
+      /* 2/3 多数投票 + 冷却。
+       * vote_window 只保留最近 KWS_TRIGGER_VOTE_TOTAL 次结果，先左移再
+       * 取低位，超出位宽的部分被掩码丢弃，不会无限增长。
+       */
+      state->vote_window =
+          ((state->vote_window << 1) | hit) &
+          ((1u << KWS_TRIGGER_VOTE_TOTAL) - 1u);
 
       {
         int votes = 0;
@@ -267,7 +296,21 @@ static void *kws_worker_main(void *arg)
 
   smart_home_bulk_free(window);
 
-out_stopped:
+  /* 解释器持有 arena 指针：退出前必须销毁，否则 stop() 释放 arena 后
+   * 下一次 start() 会命中残留实例（旧的「幂等」分支直接返回 0）。
+   */
+  (void)kws_infer_deinit(state->arena);
+  goto out_done;
+
+out_init_failed:
+  /* 让 start() 知道初始化失败，由 start() 统一回收资源。 */
+  (void)kws_infer_deinit(state->arena);
+  pthread_mutex_lock(&state->mutex);
+  state->init_status = status;
+  state->init_done = true;
+  pthread_mutex_unlock(&state->mutex);
+
+out_done:
   pthread_mutex_lock(&state->mutex);
   state->started = false;
   state->stop_requested = false;
@@ -375,6 +418,7 @@ int kws_service_start(kws_wake_cb_t cb, void *user_data)
 {
   pthread_attr_t attr;
   int attr_ready = 0;
+  int status;
   int ret;
 
   pthread_mutex_lock(&g_kws.mutex);
@@ -411,6 +455,8 @@ int kws_service_start(kws_wake_cb_t cb, void *user_data)
   g_kws.ring_pos = 0;
   g_kws.last_wake_ms = 0;
   g_kws.vote_window = 0;
+  g_kws.init_done = false;
+  g_kws.init_status = 0;
 
   /* RISC-V pthread 栈须 16B 对齐，bulk 堆不保证（同 voice_play）。 */
   g_kws.worker_stack_alloc = smart_home_bulk_alloc(
@@ -472,6 +518,34 @@ int kws_service_start(kws_wake_cb_t cb, void *user_data)
       g_kws.features = NULL;
       pthread_mutex_unlock(&g_kws.mutex);
       return -ret;
+    }
+
+  /* 等待 worker 完成模型初始化：模型失败时不能返回 0，
+   * 否则调用方认为服务已就绪，而 worker 已经退出、资源无人回收。
+   */
+  while (!g_kws.init_done)
+    {
+      pthread_mutex_unlock(&g_kws.mutex);
+      usleep(1000);
+      pthread_mutex_lock(&g_kws.mutex);
+    }
+
+  status = g_kws.init_status;
+  if (status != 0)
+    {
+      pthread_mutex_unlock(&g_kws.mutex);
+      /* worker 已因初始化失败退出，回收它没能自己释放的资源。 */
+      pthread_join(g_kws.worker, NULL);
+      smart_home_bulk_free(g_kws.worker_stack_alloc);
+      g_kws.worker_stack_alloc = NULL;
+      g_kws.worker_stack = NULL;
+      smart_home_bulk_free(g_kws.arena);
+      smart_home_bulk_free(g_kws.ring);
+      smart_home_bulk_free(g_kws.features);
+      g_kws.arena = NULL;
+      g_kws.ring = NULL;
+      g_kws.features = NULL;
+      return status;
     }
 
   pthread_mutex_unlock(&g_kws.mutex);

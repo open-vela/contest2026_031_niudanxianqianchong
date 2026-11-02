@@ -329,16 +329,29 @@ if SMART_HOME_KWS
 
 config SMART_HOME_KWS_ARENA_SIZE
     int "KWS tensor arena size"
-    default 196608
-    range 65536 524288
+    default 393216
+    range 65536 3145728
     help
       PSRAM buffer reserved for TFLite Micro tensors of wake_large.
       The service reports the actual arena use after AllocateTensors.
 
+      The model needs about 199 KB on the target (conv/depthwise output
+      tensors alone total ~516 KB across 4 conv + 3 dw nodes when the
+      arena is shared; the reference path allocates ~199 KB). The old
+      196608 default was below the real requirement, so the resident
+      service failed at AllocateTensors with -ENOMEM. 393216 leaves
+      headroom for the ESP-NN path, which additionally requests a
+      filter copy and scratch per node.
+
 config SMART_HOME_KWS_WORKER_STACKSIZE
     int "KWS inference worker stack size"
-    default 12288
-    range 8192 32768
+    default 32768
+    range 8192 131072
+    help
+      The worker runs the C++ TFLite Micro interpreter plus the feature
+      front-end on its own stack. 12 KB was too tight once ESP-NN and the
+      full front-end are enabled; 32 KB leaves room without depending on
+      unmeasured luck. Keep this independent from the smoke command stack.
 
 config SMART_HOME_KWS_INTERVAL_MS
     int "KWS inference interval in ms"
@@ -378,8 +391,8 @@ if SMART_HOME_KWS_SMOKE
 
 config SMART_HOME_KWS_SMOKE_ARENA_SIZE
     int "KWS smoke tensor arena size"
-    default 196608
-    range 65536 524288
+    default 393216
+    range 65536 3145728
 
 config SMART_HOME_KWS_SMOKE_STACKSIZE
     int "KWS smoke command stack size"

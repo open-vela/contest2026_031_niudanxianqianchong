@@ -188,14 +188,17 @@ extern "C" int main(int argc, char *argv[])
       return EXIT_FAILURE;
     }
 
-  printf("[kws_smoke] arena_reserved=%u address=%p backend=reference\n",
-         (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena);
+  printf("[kws_smoke] arena_reserved=%u address=%p backend=%s\n",
+         (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena,
+         kws_infer_backend() == KWS_INFER_BACKEND_ESPNN ? "esp-nn" :
+                                                          "reference");
 
   status = kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE);
   if (status != 0)
     {
-      /* -EINVAL：模型版本/算子注册/张量契约不符；-ENOMEM：arena 不足。
-       * AllocateTensors 失败时打印它自己算出的需求，便于一次调准。 */
+      /* -EINVAL：模型版本/算子注册/张量契约不符；-ENOMEM：arena 不足；
+       * -EBUSY：已有其他 arena 的解释器。init 失败时内部已干净退出，
+       * 这里只需释放自己分配的 arena。 */
       fprintf(stderr,
               "[kws_smoke] model init failed: %d (arena_reserved=%u, "
               "arena_used=%u)\n",
@@ -226,6 +229,7 @@ extern "C" int main(int argc, char *argv[])
       if (kws_infer_run(g_features, g_scores) != 0)
         {
           fprintf(stderr, "[kws_smoke] warmup invoke %u failed\n", run + 1);
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
@@ -243,6 +247,7 @@ extern "C" int main(int argc, char *argv[])
       if (kws_infer_run(g_features, g_scores) != 0)
         {
           fprintf(stderr, "[kws_smoke] timed invoke %u failed\n", run + 1);
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
@@ -251,6 +256,7 @@ extern "C" int main(int argc, char *argv[])
       if (start == 0 || end < start || end - start > UINT32_MAX)
         {
           fprintf(stderr, "[kws_smoke] monotonic timing unavailable\n");
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
@@ -275,6 +281,9 @@ extern "C" int main(int argc, char *argv[])
     }
 
   printf("\n");
+
+  /* 解释器持有 arena 指针，必须先销毁再释放内存。 */
+  (void)kws_infer_deinit(arena);
   smart_home_bulk_free(arena);
   return EXIT_SUCCESS;
 }
