@@ -34,6 +34,13 @@ list(APPEND SRCS esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c)
 list(APPEND SRCS esp_lowputc.c esp_serial.c)
 list(APPEND SRCS esp_systemreset.c)
 
+if(CONFIG_ESP32P4_DMA2D)
+  list(APPEND SRCS esp_dma2d.c esp_graphics_validate.c)
+endif()
+if(CONFIG_ESP32P4_PPA)
+  list(APPEND SRCS esp_ppa.c)
+endif()
+
 if(CONFIG_SMP)
   list(APPEND SRCS esp_smp.c esp_atomic64.c esp_cpu1_start.S)
 endif()

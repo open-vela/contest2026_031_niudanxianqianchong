@@ -41,6 +41,13 @@ CHIP_CSRCS += esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c
 CHIP_CSRCS += esp_lowputc.c esp_serial.c
 CHIP_CSRCS += esp_systemreset.c
 
+ifeq ($(CONFIG_ESP32P4_DMA2D),y)
+	CHIP_CSRCS += esp_dma2d.c esp_graphics_validate.c
+endif
+ifeq ($(CONFIG_ESP32P4_PPA),y)
+	CHIP_CSRCS += esp_ppa.c
+endif
+
 ifeq ($(CONFIG_SMP),y)
 	CHIP_CSRCS += esp_smp.c esp_atomic64.c
 	CHIP_ASRCS += esp_cpu1_start.S

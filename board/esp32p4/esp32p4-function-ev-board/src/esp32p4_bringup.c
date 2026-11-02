@@ -40,6 +40,10 @@
 
 #include <arch/board/board.h>
 
+#ifdef CONFIG_ESP32P4_DMA2D
+#  include <arch/chip/esp_graphics.h>
+#endif
+
 #include "esp_board_ledc.h"
 #include "esp_board_spiflash.h"
 #include "esp_board_i2c.h"
@@ -210,6 +214,15 @@ int esp_bringup(void)
   int ret = OK;
 
   esp_bringup_stack_report("entry");
+
+#ifdef CONFIG_ESP32P4_DMA2D
+  ret = esp_graphics_initialize();
+  if (ret < 0)
+    {
+      _err("Failed to initialize graphics DMA: %d\n", ret);
+      return ret;
+    }
+#endif
 
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
   ret = board_camera_initialize();

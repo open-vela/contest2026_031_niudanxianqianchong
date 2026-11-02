@@ -42,6 +42,22 @@ config ARCH_CHIP_ESP32P4
 
 if ARCH_CHIP_ESP32P4
 
+config ESP32P4_DMA2D
+	bool "Experimental 2D-DMA image copy"
+	depends on EXPERIMENTAL && BUILD_FLAT && !SMP && !PM
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Enable interrupt-driven RGB565 ROI copies with linked descriptors.
+		This port exclusively owns DMA2D; do not combine it with another
+		DMA2D channel allocator (including the IDF JPEG driver).
+
+config ESP32P4_PPA
+	bool "Experimental PPA image operations"
+	depends on ESP32P4_DMA2D
+	---help---
+		Enable fill, scale/rotate/mirror, blend and selected RGB/YUV
+		conversions using the same DMA2D owner and completion path.
+
 config ESP32P4_ESPRESSIF_TOOLCHAIN
 	bool "Build ESP32-P4 with the Espressif riscv32-esp-elf toolchain"
 	default n

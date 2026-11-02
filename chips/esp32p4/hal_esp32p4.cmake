@@ -567,6 +567,12 @@ if(CONFIG_ESP32P4_SMP)
        ${ESP_HAL_3RDPARTY_REPO}/components/esp_hw_support/lowpower/port/${CHIP_SERIES}/sleep_cpu.c)
 endif()
 
+if(CONFIG_ESP32P4_PPA)
+  target_include_directories(arch PRIVATE
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_ppa/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_ppa/esp32p4/include)
+endif()
+
 target_sources(arch PRIVATE ${HAL_SRCS})
 
 # ##############################################################################
