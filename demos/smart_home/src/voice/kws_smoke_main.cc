@@ -188,10 +188,22 @@ extern "C" int main(int argc, char *argv[])
       return EXIT_FAILURE;
     }
 
-  printf("[kws_smoke] arena_reserved=%u address=%p backend=%s\n",
+  /* backend 只反映编译进去的后端，不代表本次推理真的用了加速内核：
+   * ESP-NN 是否接管某个节点还取决于 tensor id 白名单（mask）。
+   * 把 mask 一起打印，避免「backend=esp-nn 但全走 reference」的误判。
+   */
+  printf("[kws_smoke] arena_reserved=%u address=%p backend=%s",
          (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena,
          kws_infer_backend() == KWS_INFER_BACKEND_ESPNN ? "esp-nn" :
                                                           "reference");
+#if defined(CONFIG_TFLITEMICRO_ESP_NN)
+  printf(" conv_mask=0x%08lx dw_mask=0x%08lx",
+         (unsigned long)CONFIG_TFLITEMICRO_ESP_NN_CONV2D_OUTPUT_TENSOR_MASK,
+         (unsigned long)
+             CONFIG_TFLITEMICRO_ESP_NN_DEPTHWISE_CONV2D_OUTPUT_TENSOR_MASK);
+#endif
+  printf("\n");
+
 
   status = kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE);
   if (status != 0)
