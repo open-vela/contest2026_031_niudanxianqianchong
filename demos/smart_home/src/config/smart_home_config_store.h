@@ -146,7 +146,7 @@ int smart_home_config_settings_load(cJSON **out_root,
 int smart_home_config_settings_save(const cJSON *root);
 
 /* state.json：本地设备状态 + 环境模拟值。
- * 默认工厂复用 smart_home_device_init() 的三设备默认；恢复策略 RECOVER_DEFAULT。 */
+ * 默认工厂复用 smart_home_device_init() 的单灯默认；恢复策略 RECOVER_DEFAULT。 */
 int smart_home_config_state_load(cJSON **out_root,
                                  char *error,
                                  size_t error_size);

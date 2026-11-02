@@ -217,8 +217,6 @@ devices[]:
 | 房间 | 设备 |
 |------|------|
 | `living_room` | `Living Light` |
-| `bedroom` | `Bedroom Light` |
-| `bedroom` | `Bedroom AC` |
 
 Panel 页支持：
 

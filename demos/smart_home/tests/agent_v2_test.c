@@ -139,6 +139,11 @@ agent_error_t agent_port_openvela_transport_init(agent_transport_t *out,
 void smart_home_cpu_debug_log(const char *role) { (void)role; }
 void smart_home_network_status_init(smart_home_network_status_t *s) { memset(s, 0, sizeof(*s)); }
 void smart_home_device_init(smart_home_state_t *s) { memset(s, 0, sizeof(*s)); }
+int smart_home_config_state_load(cJSON **root, char *error, size_t size)
+{ *root = NULL; (void)error; (void)size; return AGENT_ERROR_NOT_FOUND; }
+int smart_home_device_state_from_json(smart_home_state_t *s, const cJSON *root)
+{ (void)s; (void)root; return AGENT_ERROR_NOT_FOUND; }
+void smart_home_device_remove_legacy_demos(smart_home_state_t *s) { (void)s; }
 int smart_home_device_service_init(smart_home_device_service_t *s, smart_home_state_t *state)
 { memset(s, 0, sizeof(*s)); s->state = state; return AGENT_OK; }
 void smart_home_device_service_deinit(smart_home_device_service_t *s) { (void)s; }

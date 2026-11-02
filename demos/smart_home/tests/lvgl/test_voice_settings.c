@@ -36,6 +36,10 @@ static int fast_create(pthread_t *thread, const pthread_attr_t *attr,
 #define SMART_HOME_TEST_HAS_MILOCO_STUBS
 #include "test_settings_v9.c"
 #undef main
+#include "../../src/voice/smart_home_asr.h"
+#include "../../src/voice/smart_home_tts.h"
+#include "../../src/voice/smart_home_voice_play.h"
+#include "../../src/voice/smart_home_voice_player.h"
 #include "smart_home_lvgl_voice_settings.c"
 #undef pthread_create
 
@@ -123,15 +127,75 @@ int main(void)
     ui->app=&app;
     smart_home_lvgl_build_settings_screen_v9(ui);
     lv_screen_load(ui->screen_settings_v9);
-    assert(g_voice[0].keyboard==g_settings.keyboard && g_voice[0].keyboard);
-    assert(g_voice[1].keyboard==g_settings.keyboard);
-    lv_obj_send_event(g_voice[0].key,LV_EVENT_FOCUSED,NULL);
-    assert(lv_keyboard_get_textarea(g_settings.keyboard)==g_voice[0].key);
-    lv_obj_send_event(g_voice[1].model,LV_EVENT_FOCUSED,NULL);
-    assert(lv_keyboard_get_textarea(g_settings.keyboard)==g_voice[1].model);
+    lv_obj_send_event(g_settings.button[V9_CAT_VOICE], LV_EVENT_CLICKED, NULL);
+    lv_obj_update_layout(ui->screen_settings_v9);
+    assert(!lv_obj_has_flag(g_settings.panel[V9_CAT_VOICE], LV_OBJ_FLAG_SCROLLABLE));
+    for (int i = 0; i < 2; ++i) {
+        lv_obj_send_event(g_voice_page.tabs[i], LV_EVENT_CLICKED, NULL);
+        lv_obj_update_layout(ui->screen_settings_v9);
+        assert(g_voice_page.selected == i);
+        assert(!lv_obj_has_flag(g_voice_page.panel[i], LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_has_flag(g_voice_page.panel[1-i], LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_get_scroll_bottom(g_settings.panel[V9_CAT_VOICE]) <= 0);
+        assert(lv_obj_get_scroll_y(g_settings.panel[V9_CAT_VOICE]) == 0);
+        if (!g_voice[i].basic) {
+            assert(lv_obj_get_child_count(g_voice_page.panel[i]) == 2);
+            continue;
+        }
+        struct voice_controls_s *v = &g_voice[i];
+        assert(v->keyboard == g_settings.keyboard);
+        lv_textarea_set_text(v->model, i == 0 ? "asr-draft" : "tts-draft");
+        lv_obj_send_event(v->model, LV_EVENT_FOCUSED, NULL);
+        assert(lv_keyboard_get_textarea(g_settings.keyboard) == v->model);
+        lv_obj_send_event(g_settings.keyboard, LV_EVENT_READY, NULL);
+        lv_obj_t *connection_button = NULL;
+        for (uint32_t j = 0; j < lv_obj_get_child_count(v->basic); ++j) {
+            lv_obj_t *child = lv_obj_get_child(v->basic, j);
+            if (lv_obj_check_type(child, &lv_button_class) &&
+                !strcmp(lv_label_get_text(lv_obj_get_child(child, 0)), "连接设置")) connection_button = child;
+        }
+        assert(connection_button);
+        lv_obj_send_event(connection_button, LV_EVENT_CLICKED, NULL);
+        assert(lv_obj_has_flag(v->basic, LV_OBJ_FLAG_HIDDEN));
+        assert(!lv_obj_has_flag(v->connection, LV_OBJ_FLAG_HIDDEN));
+        lv_obj_send_event(lv_obj_get_child(v->connection, -1), LV_EVENT_CLICKED, NULL);
+        assert(!lv_obj_has_flag(v->basic, LV_OBJ_FLAG_HIDDEN));
+        assert(lv_obj_has_flag(v->connection, LV_OBJ_FLAG_HIDDEN));
+        assert(!strcmp(lv_textarea_get_text(v->model), i == 0 ? "asr-draft" : "tts-draft"));
+        lv_obj_update_layout(ui->screen_settings_v9);
+        lv_area_t body, field;
+        lv_obj_get_coords(g_settings.panel[V9_CAT_VOICE], &body);
+        lv_obj_get_coords(v->save, &field);
+        assert(field.y2 <= body.y2 && field.x2 <= body.x2);
+        lv_area_t title;
+        lv_obj_t *heading = lv_obj_get_child(g_settings.panel[V9_CAT_VOICE], 0);
+        lv_obj_get_coords(heading, &title);
+        assert(lv_obj_is_visible(heading) && title.y1 >= body.y1);
+        printf("VOICE %s: heading=(%d,%d)-(%d,%d), panel=(%d,%d)-(%d,%d), save bottom=%d\n",
+            i ? "TTS" : "ASR", title.x1, title.y1, title.x2, title.y2,
+            body.x1, body.y1, body.x2, body.y2, field.y2);
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+        if (i == 1) {
+            lv_area_t keyboard;
+            lv_obj_send_event(v->option, LV_EVENT_FOCUSED, NULL);
+            lv_obj_update_layout(ui->screen_settings_v9);
+            lv_obj_get_coords(v->option, &field);
+            lv_obj_get_coords(g_settings.keyboard, &keyboard);
+            assert(field.y2 < keyboard.y1);
+            lv_obj_send_event(g_settings.keyboard, LV_EVENT_READY, NULL);
+        }
+#endif
+        lv_obj_invalidate(ui->screen_settings_v9);
+        lv_tick_inc(32);
+        lv_timer_handler();
+        lv_refr_now(NULL);
+        snapshot(pixels, i == 0 ? "SMART_HOME_VOICE_ASR_CAPTURE" : "SMART_HOME_VOICE_TTS_CAPTURE");
+    }
+    puts("PASS: ASR/TTS click tabs, draft preservation, connection views and non-scrolling layout");
     puts("PASS: actual V9 voice fields share an initialized keyboard");
 
     finish_before_create_returns=1;
+#ifdef CONFIG_SMART_HOME_VOICE_ASR
     for (int i=0;i<30;i++) {
         lv_obj_add_state(g_voice[0].enabled,LV_STATE_CHECKED);
         press_voice(&g_voice[0],VOICE_SAVE);
@@ -143,7 +207,9 @@ int main(void)
     press_voice(&g_voice[0],VOICE_SAVE);
     assert(lv_obj_has_state(g_voice[0].enabled,LV_STATE_CHECKED));
     save_result=0;
+#endif
 
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
     tts_code=AGENT_ERROR_MODEL_FAILED;
     press_voice(&g_voice[1],VOICE_TEST);
     assert(strstr(lv_label_get_text(g_voice[1].status),"鉴权"));
@@ -154,6 +220,8 @@ int main(void)
     press_voice(&g_voice[1],VOICE_TEST);
     assert(strstr(lv_label_get_text(g_voice[1].status),"测试完成"));
     puts("PASS: TTS HTTP and playback failures remain distinct; retry succeeds");
+
+#endif
 
     lv_textarea_set_text(g_settings.model_key,"host-test-llm-key");
     lv_obj_t *button=lv_button_create(g_settings.screen);

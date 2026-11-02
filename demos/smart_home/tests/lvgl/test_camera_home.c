@@ -146,13 +146,13 @@ int main(void)
 
     gateway_online = false;
     smart_home_lvgl_v9_refresh_views(&ui);
-    assert(smart_home_lvgl_v9_visible_card_count() == 4);
+    assert(smart_home_lvgl_v9_visible_card_count() == 2);
     (void)camera_card(&ui);
     smart_home_lvgl_load_tab(&ui, SMART_HOME_TAB_HOME);
     assert(!smart_home_device_assign_room(&app.device_state, SMART_HOME_BOARD_CAMERA_KEY,
                                           "bedroom"));
     smart_home_lvgl_v9_refresh_views(&ui);
-    assert(smart_home_lvgl_v9_select_room(2) == 3); /* Bedroom light/AC + board camera. */
+    assert(smart_home_lvgl_v9_select_room(2) == 1); /* Only the real board camera. */
     assert(!lv_obj_has_flag(camera_card(&ui), LV_OBJ_FLAG_HIDDEN));
 
     lv_timer_delete(ui.home_time_timer);

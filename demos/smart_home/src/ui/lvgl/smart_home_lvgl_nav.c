@@ -43,6 +43,8 @@ void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
     if (!ui || tab < 0 || tab >= SMART_HOME_TAB_COUNT) {
         return;
     }
+    /* 兼容旧入口：设备已并入首页，不再打开旧版独立设备屏。 */
+    if (tab == SMART_HOME_TAB_DEVICES) tab = SMART_HOME_TAB_HOME;
     switch (tab) {
     case SMART_HOME_TAB_HOME:     screen = ui->screen_home; break;
     case SMART_HOME_TAB_CHAT:     screen = ui->screen_chat; break;

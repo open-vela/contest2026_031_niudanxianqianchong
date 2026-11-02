@@ -248,11 +248,6 @@ size_t smart_home_v9_demo_views(smart_home_v9_device_view_t *out,
         unsigned caps;
     } demo[] = {
         { "demo:light",  SMART_HOME_V9_KIND_LIGHT,  "吊灯",       "客厅", 1, 80, "%",  SMART_HOME_V9_CAP_POWER | SMART_HOME_V9_CAP_BRIGHTNESS },
-        { "demo:ac",     SMART_HOME_V9_KIND_AC,     "立式空调",   "客厅", 1, 24, "°C", SMART_HOME_V9_CAP_POWER | SMART_HOME_V9_CAP_TEMPERATURE },
-        { "demo:washer", SMART_HOME_V9_KIND_WASHER, "洗衣机",     "阳台", 1, 32, "分",  SMART_HOME_V9_CAP_POWER | SMART_HOME_V9_CAP_PAUSE },
-        { "demo:robot",  SMART_HOME_V9_KIND_ROBOT,  "扫地机器人", "客厅", 1, 75, "%",  SMART_HOME_V9_CAP_POWER | SMART_HOME_V9_CAP_PAUSE | SMART_HOME_V9_CAP_DOCK },
-        { "demo:camera", SMART_HOME_V9_KIND_CAMERA, "摄像头",     "客厅", 0, 0,  "",   SMART_HOME_V9_CAP_PREVIEW },
-        { "demo:fan",    SMART_HOME_V9_KIND_FAN,    "落地风扇",   "卧室", 1, 2,  "档",  SMART_HOME_V9_CAP_POWER | SMART_HOME_V9_CAP_FAN_SPEED },
     };
 
     size_t count = 0;

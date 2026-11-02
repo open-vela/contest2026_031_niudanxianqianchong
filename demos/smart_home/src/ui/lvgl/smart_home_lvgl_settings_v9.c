@@ -115,6 +115,7 @@ static void panel_show(int category)
     if (g_settings.keyboard) {
         lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(g_settings.keyboard, NULL);
+        lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
     }
     for (int i = 0; i < V9_SETTINGS_CATEGORIES; i++) {
         lv_obj_t *btn = g_settings.button[i];
@@ -669,6 +670,7 @@ static void model_focus_cb(lv_event_t *event)
         return;
     }
     lv_keyboard_set_textarea(g_settings.keyboard, textarea);
+    lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
     lv_obj_clear_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
     /* 键盘在构建期就挂在设置屏上，而服务配置弹窗的遮罩是运行期才建的，
      * 按子对象顺序永远排在键盘之后，会把键盘整个盖住——表现就是点输入框
@@ -2023,6 +2025,19 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
 #if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
     smart_home_lvgl_build_voice_settings(ui, g_settings.panel[V9_CAT_VOICE],
                                          g_settings.keyboard);
+#else
+    panel_title(g_settings.panel[V9_CAT_VOICE], "语音服务");
+    lv_obj_t *voice_hint = smart_home_lvgl_label_create(
+        g_settings.panel[V9_CAT_VOICE], "语音服务未开启",
+        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+    lv_obj_align(voice_hint, LV_ALIGN_TOP_MID, 0, 136);
+    voice_hint = smart_home_lvgl_label_create(g_settings.panel[V9_CAT_VOICE],
+        "当前固件未启用语音输入或语音播报。\n启用语音服务后，即可在这里配置 ASR 和 TTS。",
+        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
+    lv_obj_set_width(voice_hint, 640);
+    lv_obj_set_style_text_align(voice_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(voice_hint, LV_ALIGN_TOP_MID, 0, 180);
+    lv_obj_clear_flag(g_settings.panel[V9_CAT_VOICE], LV_OBJ_FLAG_SCROLLABLE);
 #endif
 
     if (ui->v9_network_timer) {

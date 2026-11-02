@@ -8,24 +8,6 @@
       "type": "light",
       "on": false,
       "brightness": 0
-    },
-    {
-      "id": 2,
-      "room": "bedroom",
-      "name": "Bedroom Light",
-      "type": "light",
-      "on": false,
-      "brightness": 0
-    },
-    {
-      "id": 3,
-      "room": "bedroom",
-      "name": "Bedroom AC",
-      "type": "ac",
-      "on": false,
-      "temperature": 26,
-      "mode": "cool",
-      "fan_speed": "auto"
     }
   ],
   "environment": {

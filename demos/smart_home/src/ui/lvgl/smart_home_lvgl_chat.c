@@ -911,7 +911,7 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
     button = lv_button_create(input_bar);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 48, 48);
-    lv_obj_set_pos(button, 8, 4);
+    lv_obj_align(button, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_set_style_radius(button, 12, 0);
     mic = smart_home_lvgl_icon_create(button, "asset:microphone", 32, 32);
     if (mic) lv_obj_center(mic);
@@ -928,16 +928,19 @@ void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui)
 
     ui->chat_input = lv_textarea_create(input_bar);
     lv_obj_set_size(ui->chat_input, content_w - 272, 48);
-    lv_obj_set_pos(ui->chat_input, 64, 0);
     lv_textarea_set_one_line(ui->chat_input, true);
     lv_textarea_set_placeholder_text(ui->chat_input, "说说你的想法，或输入指令…");
     smart_home_lvgl_style_input(ui->chat_input, 17);
+    lv_obj_align(ui->chat_input, LV_ALIGN_LEFT_MID, 64, 0);
+    /* 单行文本与占位文字按当前 MiSans 行高垂直居中。 */
+    lv_obj_set_style_pad_ver(ui->chat_input,
+        (48 - lv_font_get_line_height(smart_home_lvgl_font(17)) - 2) / 2, 0);
     lv_obj_add_event_cb(ui->chat_input, chat_input_event_cb, LV_EVENT_ALL, ui);
 
     ui->chat_send_btn = lv_button_create(input_bar);
     lv_obj_remove_style_all(ui->chat_send_btn);
     lv_obj_set_size(ui->chat_send_btn, 168, 40);
-    lv_obj_set_pos(ui->chat_send_btn, content_w - 188, 8);
+    lv_obj_align(ui->chat_send_btn, LV_ALIGN_RIGHT_MID, -20, 0);
     lv_obj_set_ext_click_area(ui->chat_send_btn, 4);
     smart_home_lvgl_set_bg(ui->chat_send_btn, SMART_HOME_UI_COLOR_PRIMARY_DARK);
     lv_obj_set_style_radius(ui->chat_send_btn, 12, 0);

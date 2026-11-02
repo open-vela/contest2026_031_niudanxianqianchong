@@ -354,7 +354,7 @@ static void test_home(smart_home_lvgl_t *ui)
     lv_obj_delete(ui->screen_home);
     ui->screen_home = NULL;
 
-    /* V9 merged home: six cards, room filter and final card art. */
+    /* Only one simulated light remains; real device kinds are tested below. */
     ui->topbar_clock_count = 0;
     ui->topbar_wifi_icon_count = 0;
     ui->topbar_camera_icon_count = 0;
@@ -375,7 +375,7 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_home != NULL);
     assert(ui->home_weather_condition_label != NULL);
-    assert(smart_home_lvgl_v9_visible_card_count() == 6);
+    assert(smart_home_lvgl_v9_visible_card_count() == 1);
     lv_obj_t *chandelier = find_v9_label(ui->screen_home, "吊灯");
     assert(chandelier);
     lv_obj_t *chandelier_image = card_image(lv_obj_get_parent(chandelier));
@@ -386,8 +386,10 @@ static void test_home(smart_home_lvgl_t *ui)
                                                   chandelier_src;
     assert(!strcmp(chandelier_basename, "light-on.png"));
     assert(smart_home_lvgl_v9_select_room(3) == 0); /* 书房: empty */
-    assert(smart_home_lvgl_v9_select_room(1) == 4); /* 客厅: light/ac/robot/camera */
-    assert(smart_home_lvgl_v9_select_room(0) == 6);
+    assert(smart_home_lvgl_v9_select_room(1) == 1); /* 客厅: demo light */
+    assert(smart_home_lvgl_v9_select_room(0) == 1);
+    assert(!find_v9_label(ui->screen_home, "本机与米家设备"));
+    assert(!find_v9_label(ui->screen_home, "演示数据"));
     capture_to(ui, "SMART_HOME_V9_CAPTURE");
     capture_v9_device_modals(ui);
     test_v9_cards(ui);
@@ -410,6 +412,17 @@ static void test_home(smart_home_lvgl_t *ui)
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     capture_v9_settings_categories(ui);
     capture_v9_mi_qr(ui);
+    /* A successful bind and all old device routes must enter the merged home. */
+    lv_screen_load(ui->screen_settings_v9);
+    smart_home_lvgl_open_miloco_bind(ui);
+    for (int i = 0; i < 4 && ui->bind_timer; ++i) {
+        lv_tick_inc(1001);
+        lv_timer_handler();
+    }
+    assert(!smart_home_lvgl_miloco_bind_is_open(ui));
+    assert(lv_screen_active() == ui->screen_home && ui->active_tab == SMART_HOME_TAB_HOME);
+    smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_DEVICES);
+    assert(lv_screen_active() == ui->screen_home && ui->active_tab == SMART_HOME_TAB_HOME);
     capture_v9_model_menu(ui);
     smart_home_lvgl_build_chat_screen(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
@@ -420,6 +433,13 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_finish_thinking(ui);
     smart_home_lvgl_append_msg_bubble(ui,
         "已将客厅空调设为制冷 24°C，\n风速已调整为自动。", 0);
+    lv_obj_update_layout(ui->screen_chat);
+    lv_area_t bar_bounds, input_bounds, text_bounds;
+    lv_obj_get_coords(ui->chat_input_bar, &bar_bounds);
+    lv_obj_get_coords(ui->chat_input, &input_bounds);
+    lv_obj_get_coords(lv_textarea_get_label(ui->chat_input), &text_bounds);
+    assert(abs((input_bounds.y1 + input_bounds.y2) - (bar_bounds.y1 + bar_bounds.y2)) <= 2);
+    assert(abs((text_bounds.y1 + text_bounds.y2) - (input_bounds.y1 + input_bounds.y2)) <= 2);
     capture_screen(ui->screen_chat, "SMART_HOME_V9_CHAT_CAPTURE");
     test_v9_shell(ui);
     test_screen_cycle(ui);   /* 首页与设置页都还在，才能做切换稳定性回归 */
@@ -821,18 +841,19 @@ static void test_v9_views(void)
     smart_home_device_init(&state);
     count = smart_home_v9_collect_views(&state, NULL, views,
                                         SMART_HOME_V9_MAX_VIEWS);
-    assert(count == 3);
+    assert(count == 1);
     assert(views[0].source == SMART_HOME_V9_SOURCE_LOCAL);
     assert(views[0].kind == SMART_HOME_V9_KIND_LIGHT);
     assert((views[0].capabilities & SMART_HOME_V9_CAP_BRIGHTNESS) != 0);
-    assert(views[2].kind == SMART_HOME_V9_KIND_AC);
-    assert((views[2].capabilities & SMART_HOME_V9_CAP_TEMPERATURE) != 0);
+    assert(smart_home_device_add(&state, "bedroom", "Test AC", SMART_HOME_DEVICE_AC, NULL) == AGENT_OK);
+    count = smart_home_v9_collect_views(&state, NULL, views, SMART_HOME_V9_MAX_VIEWS);
+    assert(count == 2 && views[1].kind == SMART_HOME_V9_KIND_AC);
+    assert((views[1].capabilities & SMART_HOME_V9_CAP_TEMPERATURE) != 0);
 
     count = smart_home_v9_demo_views(views, SMART_HOME_V9_MAX_VIEWS);
-    assert(count == 6);
+    assert(count == 1);
     assert(!strcmp(views[0].name, "吊灯"));
-    assert(views[3].kind == SMART_HOME_V9_KIND_ROBOT);
-    assert(views[3].source == SMART_HOME_V9_SOURCE_DEMO);
+    assert(views[0].source == SMART_HOME_V9_SOURCE_DEMO);
 
     memset(snapshot, 0, sizeof(snapshot));
     snapshot_count = 1;
@@ -1046,13 +1067,14 @@ static void capture_v9_device_modals(smart_home_lvgl_t *ui)
         if (++opened >= 6) break;
     }
 }
-/* 设置页六个分类各导一张，供 v6 设计稿逐页比对。 */
+/* 设置页七个分类各导一张，包含未启用语音时的提示。 */
 static void capture_v9_settings_categories(smart_home_lvgl_t *ui)
 {
-    static const char *const keys[6] = {
+    static const char *const keys[7] = {
         "SMART_HOME_V9_CAT_DISPLAY_CAPTURE",
         "SMART_HOME_V9_CAT_NETWORK_CAPTURE",
         "SMART_HOME_V9_CAT_MODEL_CAPTURE",
+        "SMART_HOME_V9_CAT_VOICE_CAPTURE",
         "SMART_HOME_V9_CAT_TOOLS_CAPTURE",
         "SMART_HOME_V9_CAT_SERVICES_CAPTURE",
         "SMART_HOME_V9_CAT_HEALTH_CAPTURE",
@@ -1060,7 +1082,7 @@ static void capture_v9_settings_categories(smart_home_lvgl_t *ui)
     int i;
 
     if (!getenv(keys[0])) return;
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 7; i++) {
         if (smart_home_lvgl_v9_settings_select_category(i) != i) return;
         lv_obj_update_layout(ui->screen_settings_v9);
         capture_screen(ui->screen_settings_v9, keys[i]);
@@ -1129,7 +1151,7 @@ static void capture_v9_mi_qr(smart_home_lvgl_t *ui)
     const char *path = getenv("SMART_HOME_V9_MI_QR_CAPTURE");
 
     if (!path || !ui || !ui->screen_settings_v9) return;
-    if (smart_home_lvgl_v9_settings_select_category(4) != 4) return;
+    if (smart_home_lvgl_v9_settings_select_category(5) != 5) return;
     lv_obj_update_layout(ui->screen_settings_v9);
     lv_screen_load(ui->screen_settings_v9);
     smart_home_lvgl_open_miloco_bind(ui);
@@ -1380,6 +1402,7 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
     lv_obj_t *right = lv_obj_get_parent(lv_obj_get_parent(key));
     assert(lv_obj_get_child_count(left) == 7);
     assert(lv_obj_get_child_count(right) == 7);
+    assert(find_v9_label(ui->screen_settings_v9, "语音服务未开启"));
     lv_screen_load(ui->screen_settings_v9);
     lv_obj_update_layout(ui->screen_settings_v9);
     lv_indev_t *input = lv_indev_create();
@@ -1391,7 +1414,7 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
             lv_obj_t *target = area < 2 ? lv_obj_get_child(button, area) : button;
             touch(input, target, LV_INDEV_STATE_PRESSED);
             touch(input, target, LV_INDEV_STATE_RELEASED);
-            for (int j = 0; j < 6; j++) {
+            for (int j = 0; j < 7; j++) {
                 assert(lv_obj_has_flag(lv_obj_get_child(right, j),
                                        LV_OBJ_FLAG_HIDDEN) == (j != i));
                 assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, j), 0) ==
@@ -1520,6 +1543,7 @@ static void test_v9_onboarding(smart_home_lvgl_t *ui)
     assert(ui->active_tab == SMART_HOME_TAB_SETTINGS);
 
     /* 再弹一次，点「稍后再说」后本次运行不再提示。 */
+    smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_HOME);
     smart_home_lvgl_onboarding_reset();
     smart_home_lvgl_onboarding_present(ui);
     assert(smart_home_lvgl_onboarding_visible());
@@ -1527,7 +1551,20 @@ static void test_v9_onboarding(smart_home_lvgl_t *ui)
     modal = lv_obj_get_child(ui->screen_home, -1);
     panel = lv_obj_get_child(modal, 0);
     lv_obj_t *later = lv_obj_get_child(panel, lv_obj_get_child_count(panel) - 1);
-    lv_obj_send_event(later, LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(panel, LV_OBJ_FLAG_SCROLLABLE));
+    lv_area_t before_press, after_press;
+    lv_obj_get_coords(panel, &before_press);
+    lv_indev_t *pointer = lv_indev_create();
+    lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(pointer, read_pointer);
+    touch(pointer, later, LV_INDEV_STATE_PRESSED);
+    lv_obj_update_layout(ui->screen_home);
+    lv_obj_get_coords(panel, &after_press);
+    assert(before_press.x1 == after_press.x1 && before_press.y1 == after_press.y1);
+    assert(lv_obj_get_scroll_x(panel) == 0 && lv_obj_get_scroll_y(panel) == 0);
+    assert(lv_obj_get_scroll_bottom(panel) <= 0);
+    touch(pointer, later, LV_INDEV_STATE_RELEASED);
+    lv_indev_delete(pointer);
     assert(!smart_home_lvgl_onboarding_visible());
     assert(!smart_home_lvgl_onboarding_should_present(ui));
 

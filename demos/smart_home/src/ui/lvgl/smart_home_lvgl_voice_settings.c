@@ -23,8 +23,13 @@ struct voice_controls_s {
     smart_home_lvgl_t *ui;
     lv_obj_t *keyboard, *backend, *model, *host, *path, *port, *option;
     lv_obj_t *key, *enabled, *status, *save;
+    lv_obj_t *basic, *connection;
 };
 static struct voice_controls_s g_voice[2];
+static struct {
+    lv_obj_t *tabs[2], *panel[2], *keyboard;
+    int selected;
+} g_voice_page;
 static pthread_mutex_t g_voice_job_mutex = PTHREAD_MUTEX_INITIALIZER;
 enum voice_job_action { VOICE_SAVE, VOICE_KEY, VOICE_TEST };
 struct voice_job_s {
@@ -324,6 +329,7 @@ void smart_home_lvgl_voice_settings_deinit(smart_home_lvgl_t *ui)
         memset(&g_voice_job, 0, sizeof(g_voice_job));
     }
     memset(g_voice, 0, sizeof(g_voice));
+    memset(&g_voice_page, 0, sizeof(g_voice_page));
 }
 
 static void voice_focus_cb(lv_event_t *event)
@@ -331,7 +337,10 @@ static void voice_focus_cb(lv_event_t *event)
     struct voice_controls_s *v = lv_event_get_user_data(event);
     if (!v || !v->keyboard) return;
     lv_keyboard_set_textarea(v->keyboard, lv_event_get_target(event));
+    /* 编辑时覆盖底栏，留出第三行音色输入的完整可视区域。 */
+    lv_obj_align(v->keyboard, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_clear_flag(v->keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(v->keyboard);
 }
 
 static lv_obj_t *voice_input(struct voice_controls_s *v, lv_obj_t *panel,
@@ -380,9 +389,75 @@ static void voice_select_cb(lv_event_t *event)
         smart_home_secrets_api_key_status(v->service, backend_id(v))));
 }
 
+static lv_obj_t *voice_container(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, 704, 320);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    return box;
+}
+
+static lv_obj_t *voice_button(lv_obj_t *parent, int x, int y, int width,
+                              const char *caption, bool primary)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_t *label;
+    lv_obj_remove_style_all(button);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_size(button, width, 44);
+    lv_obj_set_ext_click_area(button, 2);
+    smart_home_lvgl_set_bg(button, primary ? SMART_HOME_UI_COLOR_PRIMARY_DARK :
+                                                    SMART_HOME_UI_COLOR_SURFACE);
+    lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_border_width(button, primary ? 0 : 1, 0);
+    lv_obj_set_style_radius(button, 12, 0);
+    smart_home_lvgl_press_feedback(button);
+    label = smart_home_lvgl_label_create(button, caption,
+        primary ? SMART_HOME_UI_COLOR_SURFACE : SMART_HOME_UI_COLOR_TEXT_PRIMARY, 15);
+    lv_obj_center(label);
+    return button;
+}
+
+static void voice_hide_keyboard(void)
+{
+    if (g_voice_page.keyboard) {
+        lv_obj_add_flag(g_voice_page.keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(g_voice_page.keyboard, NULL);
+    }
+}
+
+static void voice_connection_cb(lv_event_t *event)
+{
+    struct voice_controls_s *v = lv_event_get_user_data(event);
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !v) return;
+    bool opening = lv_obj_has_flag(v->connection, LV_OBJ_FLAG_HIDDEN);
+    voice_hide_keyboard();
+    if (opening) {
+        lv_obj_add_flag(v->basic, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(v->connection, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(v->connection, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(v->basic, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void voice_tab_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    int selected = (int)(intptr_t)lv_event_get_user_data(event);
+    voice_hide_keyboard();
+    g_voice_page.selected = selected;
+    for (int i = 0; i < 2; ++i) {
+        if (i == selected) lv_obj_remove_flag(g_voice_page.panel[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_voice_page.panel[i], LV_OBJ_FLAG_HIDDEN);
+        smart_home_lvgl_set_bg(g_voice_page.tabs[i], i == selected ?
+            SMART_HOME_UI_COLOR_SURFACE_ON : SMART_HOME_UI_COLOR_SURFACE);
+    }
+}
+
 static void build_voice_panel(smart_home_lvgl_t *ui, lv_obj_t *panel,
-                              lv_obj_t *keyboard, smart_home_secret_service_t service,
-                              int y)
+                              lv_obj_t *keyboard, smart_home_secret_service_t service)
 {
     struct voice_controls_s *v = &g_voice[service == SMART_HOME_SECRET_ASR ? 0 : 1];
     const char *id = "mimo", *host = "", *path = "", *port = "443", *model = "";
@@ -410,14 +485,23 @@ static void build_voice_panel(smart_home_lvgl_t *ui, lv_obj_t *panel,
     }
 #endif
     v->service = service; v->ui = ui; v->keyboard = keyboard;
-    label = smart_home_lvgl_label_create(panel,
-        service == SMART_HOME_SECRET_ASR ? "语音输入 ASR（保存后生效）" : "自动播报 TTS（保存后生效）",
-        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 19);
-    lv_obj_set_pos(label, 0, y);
-    v->enabled = lv_switch_create(panel); lv_obj_set_pos(v->enabled, 640, y);
+    v->basic = voice_container(panel);
+    v->connection = voice_container(panel);
+    lv_obj_add_flag(v->connection, LV_OBJ_FLAG_HIDDEN);
+    panel = v->basic;
+    label = smart_home_lvgl_label_create(panel, "服务商", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(label, 0, 0);
+    label = smart_home_lvgl_label_create(panel, "启用服务", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
+    lv_obj_set_pos(label, 622, 0);
+    v->enabled = lv_switch_create(panel);
+    lv_obj_set_size(v->enabled, 54, 30);
+    lv_obj_set_pos(v->enabled, 640, 26);
+    lv_obj_set_style_bg_color(v->enabled, SMART_HOME_UI_COLOR_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(v->enabled, SMART_HOME_UI_COLOR_PRIMARY,
+                              LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (enabled) lv_obj_add_state(v->enabled, LV_STATE_CHECKED);
     v->backend = lv_dropdown_create(panel);
-    lv_obj_set_pos(v->backend, 0, y + 46); lv_obj_set_size(v->backend, 336, 44);
+    lv_obj_set_pos(v->backend, 0, 22); lv_obj_set_size(v->backend, 240, 44);
     for (size_t i = 0; i < count; i++) {
         const char *name = "", *candidate = "";
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
@@ -438,56 +522,85 @@ static void build_voice_panel(smart_home_lvgl_t *ui, lv_obj_t *panel,
     }
     lv_dropdown_set_options(v->backend, choices); lv_dropdown_set_selected(v->backend, selected);
     smart_home_lvgl_style_dropdown(v->backend, 16);
-    v->model = voice_input(v, panel, 360, y + 46, 344, "模型", model, 63);
-    v->host = voice_input(v, panel, 0, y + 118, 520, "服务域名", host, 127);
-    v->port = voice_input(v, panel, 544, y + 118, 160, "端口", port, 7);
-    v->path = voice_input(v, panel, 0, y + 190, 704, "API 路径", path, 127);
-    v->key = voice_input(v, panel, 0, y + 262, 704, "独立 API 密钥（留空保留）", "", 255);
+    v->model = voice_input(v, panel, 256, 22, 328, "模型标识", model, 63);
+    v->key = voice_input(v, panel, 0, 94, 704, "API 密钥", "", 255);
     lv_textarea_set_password_mode(v->key, true);
+    lv_textarea_set_placeholder_text(v->key, "手动输入；留空保留当前服务密钥");
     if (service == SMART_HOME_SECRET_ASR) {
         label = smart_home_lvgl_label_create(panel, "识别语言", SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
-        lv_obj_set_pos(label, 0, y + 310);
-        v->option = lv_dropdown_create(panel); lv_obj_set_pos(v->option, 0, y + 334);
+        lv_obj_set_pos(label, 0, 143);
+        v->option = lv_dropdown_create(panel); lv_obj_set_pos(v->option, 0, 166);
         lv_obj_set_size(v->option, 336, 44); lv_dropdown_set_options(v->option, "中文\nEnglish\n自动");
         lv_dropdown_set_selected(v->option, !strcmp(option, "en") ? 1 : !strcmp(option, "auto") ? 2 : 0);
         smart_home_lvgl_style_dropdown(v->option, 16);
-    } else v->option = voice_input(v, panel, 0, y + 334, 336, "音色", option, 63);
+    } else v->option = voice_input(v, panel, 0, 166, 336, "音色", option, 63);
+    lv_obj_t *button = voice_button(panel, 360, 166, 344, "连接设置", false);
+    lv_obj_add_event_cb(button, voice_connection_cb, LV_EVENT_CLICKED, v);
     v->status = smart_home_lvgl_label_create(panel, smart_home_secrets_error_text(
         smart_home_secrets_api_key_status(service, id)), SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
-    lv_obj_set_pos(v->status, 0, y + 386); lv_obj_set_width(v->status, 704);
+    lv_obj_set_pos(v->status, 0, 222); lv_obj_set_size(v->status, 704, 40);
     lv_label_set_long_mode(v->status, LV_LABEL_LONG_WRAP);
     for (int i = 0; i < 3; i++) {
-        const char *titles[] = {"保存配置", "清除本服务密钥", "测试已保存配置"};
-        lv_obj_t *button = lv_button_create(panel);
-        lv_obj_set_pos(button, i * 240, y + 442); lv_obj_set_size(button, 224, 42);
+        const char *titles[] = {"保存配置", "清除密钥", "测试已保存配置"};
+        button = voice_button(panel, i * 240, 274, 224, titles[i], i == VOICE_SAVE);
+        if (i == VOICE_SAVE) v->save = button;
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
         lv_obj_add_event_cb(button, voice_button_cb, LV_EVENT_CLICKED, v);
-        smart_home_lvgl_press_feedback(button);
-        label = smart_home_lvgl_label_create(button, titles[i], SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
-        lv_obj_center(label);
     }
+    v->host = voice_input(v, v->connection, 0, 22, 520, "服务域名", host, 127);
+    v->port = voice_input(v, v->connection, 544, 22, 160, "端口", port, 7);
+    v->path = voice_input(v, v->connection, 0, 94, 704, "API 路径", path, 127);
+    label = smart_home_lvgl_label_create(v->connection,
+        "连接参数随「保存配置」一并生效。\n返回后可继续填写密钥、选择模型与测试。",
+        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 15);
+    lv_obj_set_pos(label, 0, 166);
+    button = voice_button(v->connection, 0, 274, 224, "返回服务配置", false);
+    lv_obj_add_event_cb(button, voice_connection_cb, LV_EVENT_CLICKED, v);
     lv_obj_add_event_cb(v->backend, voice_select_cb, LV_EVENT_VALUE_CHANGED, v);
 }
 
 void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui, lv_obj_t *panel,
                                           lv_obj_t *keyboard)
 {
-    lv_obj_t *title;
-    int y = 56;
-
-    /* 两个面板共用一个纵向滚动区：v9 右栏只有 408 高，单个面板约 470，
-     * 所以整体滚动而不是压缩行距。 */
-    title = smart_home_lvgl_label_create(panel, "语音服务",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
-    lv_obj_set_pos(title, 0, 0);
-
+    lv_obj_t *label = smart_home_lvgl_label_create(panel, "语音服务",
+                                                 SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+    lv_obj_set_pos(label, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    g_voice_page.keyboard = keyboard;
+    for (int i = 0; i < 2; ++i) {
+        const char *names[] = {"语音输入 ASR", "语音播报 TTS"};
+        g_voice_page.tabs[i] = voice_button(panel, 352 + i * 180, 0, 172, names[i], false);
+        lv_obj_set_height(g_voice_page.tabs[i], 40);
+        lv_obj_add_event_cb(g_voice_page.tabs[i], voice_tab_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        g_voice_page.panel[i] = voice_container(panel);
+        lv_obj_set_pos(g_voice_page.panel[i], 0, 54);
+        bool available = false;
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
-    build_voice_panel(ui, panel, keyboard, SMART_HOME_SECRET_ASR, y);
-    y += 480;
+        if (i == 0) available = true;
 #endif
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
-    build_voice_panel(ui, panel, keyboard, SMART_HOME_SECRET_TTS, y);
+        if (i == 1) available = true;
 #endif
+        if (available) {
+            build_voice_panel(ui, g_voice_page.panel[i], keyboard,
+                               i == 0 ? SMART_HOME_SECRET_ASR : SMART_HOME_SECRET_TTS);
+        } else {
+            label = smart_home_lvgl_label_create(g_voice_page.panel[i],
+                i == 0 ? "语音输入未开启" : "语音播报未开启",
+                SMART_HOME_UI_COLOR_TEXT_PRIMARY, 22);
+            lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 100);
+            label = smart_home_lvgl_label_create(g_voice_page.panel[i],
+                "当前固件未启用此服务，可切换到另一项语音服务进行配置。",
+                SMART_HOME_UI_COLOR_TEXT_SECONDARY, 15);
+            lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 150);
+        }
+    }
+#ifdef CONFIG_SMART_HOME_VOICE_ASR
+    int selected = 0;
+#else
+    int selected = 1;
+#endif
+    lv_obj_send_event(g_voice_page.tabs[selected], LV_EVENT_CLICKED, NULL);
 }
 
 int smart_home_lvgl_voice_settings_busy(smart_home_lvgl_t *ui)

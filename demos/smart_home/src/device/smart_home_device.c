@@ -578,19 +578,25 @@ void smart_home_device_init(smart_home_state_t *state)
                           "Living Light",
                           SMART_HOME_DEVICE_LIGHT,
                           NULL);
-    smart_home_device_add(state,
-                          "bedroom",
-                          "Bedroom Light",
-                          SMART_HOME_DEVICE_LIGHT,
-                          NULL);
-    smart_home_device_add(state,
-                          "bedroom",
-                          "Bedroom AC",
-                          SMART_HOME_DEVICE_AC,
-                          NULL);
 #ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
     (void)smart_home_device_assign_room(state, SMART_HOME_BOARD_CAMERA_KEY, "living_room");
 #endif
+}
+
+void smart_home_device_remove_legacy_demos(smart_home_state_t *state)
+{
+    if (!state) return;
+    /* 只迁移旧工厂示例的固定 ID/名称，不删除用户另行创建的设备。 */
+    for (int id = 2; id <= 3; ++id) {
+        smart_home_device_t *device = smart_home_device_find_by_id(state, id);
+        if (device &&
+            ((id == 2 && device->type == SMART_HOME_DEVICE_LIGHT &&
+              !strcmp(device->name, "Bedroom Light")) ||
+             (id == 3 && device->type == SMART_HOME_DEVICE_AC &&
+              !strcmp(device->name, "Bedroom AC")))) {
+            (void)smart_home_device_remove(state, id);
+        }
+    }
 }
 
 int smart_home_device_set_light(smart_home_state_t *state,

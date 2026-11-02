@@ -110,12 +110,15 @@ int main(void) {
     smart_home_lvgl_device_dialog_close();
     assert(!g_dialog);
     view.kind = SMART_HOME_V9_KIND_AC;
-    snprintf(view.key, sizeof view.key, "local:3");
+    int ac_id;
+    assert(smart_home_device_service_add(&app.device_service, "bedroom",
+        "Test AC", SMART_HOME_DEVICE_AC, &ac_id) == AGENT_OK);
+    snprintf(view.key, sizeof view.key, "local:%d", ac_id);
     smart_home_lvgl_device_dialog_open(&ui, &view);
     assert(g_dialog->count == 4);
     lv_dropdown_set_selected(g_dialog->control[2].widget, 4);
     lv_obj_send_event(g_dialog->control[2].widget, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(smart_home_device_find_by_id(&app.device_state, 3)->ac_mode == 4);
+    assert(smart_home_device_find_by_id(&app.device_state, ac_id)->ac_mode == 4);
     smart_home_lvgl_device_dialog_close();
     puts("PASS: local dialogs address the selected device ID and preserve peer "
          "devices; AC automatic mode is selectable");

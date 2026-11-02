@@ -671,7 +671,7 @@ int smart_home_config_settings_save(const cJSON *root)
 
 /* ── state.json ── */
 
-/* 默认工厂：复用 smart_home_device_init() 的三设备默认（唯一默认来源） */
+/* 默认工厂：复用 smart_home_device_init() 的单灯默认（唯一默认来源） */
 static cJSON *state_make_default(void *user_data)
 {
     smart_home_state_t state;

@@ -202,7 +202,7 @@ static void test_state_default_from_device_init(void)
     assert(smart_home_config_state_load(&root, error,
                                         sizeof(error)) == AGENT_OK);
     assert(root != NULL);
-    assert(cJSON_GetArraySize(cJSON_GetObjectItem(root, "devices")) == 3);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItem(root, "devices")) == 1);
     cJSON_Delete(root);
 
     /* 与 device_init 一致：序列化往返应还原状态 */

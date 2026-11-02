@@ -28,12 +28,12 @@ typedef struct {
 } ob_item_t;
 
 /* 设置页分类顺序与 smart_home_lvgl_settings_v9.c 的 g_category_names 一致：
- * 0 显示与声音 / 1 网络连接 / 2 模型服务 / 3 工具权限 / 4 设备与服务 / 5 系统健康 */
+ * 0 显示与声音 / 1 网络连接 / 2 模型服务 / 3 语音服务 / 4 工具权限 / 5 设备与服务 / 6 系统健康 */
 static const ob_item_t g_ob_items[3] = {
     { "asset:wifi",     "家庭网络", "连接 2.4 GHz Wi-Fi，天气与在线服务依赖它",
       "未连接", "已连接", 1 },
     { "asset:MIJIA",    "米家网关", "绑定米家账号，接入家中真实设备",
-      "未绑定", "已绑定", 4 },
+      "未绑定", "已绑定", 5 },
     { "asset:sparkle-2", "模型服务", "配置大模型接口，聊天与语音对话依赖它",
       "未配置", "已配置", 2 },
 };
@@ -107,6 +107,7 @@ static void ob_stop_bubbling(lv_event_t *event)
 
 static void ob_dismiss_cb(lv_event_t *event)
 {
+    lv_event_stop_bubbling(event);
     smart_home_lvgl_onboarding_dismiss(
         (smart_home_lvgl_t *)lv_event_get_user_data(event), true);
 }
@@ -298,7 +299,9 @@ void smart_home_lvgl_onboarding_present(smart_home_lvgl_t *ui)
     lv_obj_set_pos(panel, OB_PANEL_X, OB_PANEL_Y);
     smart_home_lvgl_card_style(panel);
     lv_obj_set_style_radius(panel, 18, 0);
-    lv_obj_set_style_pad_all(panel, 32, 0);
+    /* 1px 边框计入内容区；固定布局不可因按钮聚焦而自动滚动。 */
+    lv_obj_set_style_pad_all(panel, 31, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(panel, ob_stop_bubbling, LV_EVENT_CLICKED, NULL);
 
@@ -340,6 +343,7 @@ void smart_home_lvgl_onboarding_present(smart_home_lvgl_t *ui)
     lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_SURFACE);
     lv_obj_set_ext_click_area(button, 4);
+    lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_obj_add_event_cb(button, ob_dismiss_cb, LV_EVENT_CLICKED, ui);
     smart_home_lvgl_press_feedback(button);
     label = smart_home_lvgl_label_create(button, "稍后再说",

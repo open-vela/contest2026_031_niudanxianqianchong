@@ -386,6 +386,7 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     if (smart_home_config_state_load(&saved_state, NULL, 0) == AGENT_OK)
         (void)smart_home_device_state_from_json(&app->device_state, saved_state);
     cJSON_Delete(saved_state);
+    smart_home_device_remove_legacy_demos(&app->device_state);
     smart_home_init_trace("device-state-ready", AGENT_OK);
 
     smart_home_init_trace("device-service-begin", AGENT_OK);

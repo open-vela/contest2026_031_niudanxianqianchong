@@ -44,6 +44,8 @@ typedef struct {
 } smart_home_state_t;
 
 void smart_home_device_init(smart_home_state_t *state);
+/** Remove only the two retired factory examples when loading older state. */
+void smart_home_device_remove_legacy_demos(smart_home_state_t *state);
 
 /* ── 序列化（state.json 持久化用） ── */
 

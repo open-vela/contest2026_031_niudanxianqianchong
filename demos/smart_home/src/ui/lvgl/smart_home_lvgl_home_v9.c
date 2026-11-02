@@ -151,7 +151,6 @@ typedef struct {
     lv_obj_t *screen;
     lv_obj_t *view;
     lv_obj_t *empty;
-    lv_obj_t *source_label;
     lv_obj_t *room_btn[V9_MAX_ROOMS + 1];
     lv_obj_t *room_strip;
     char rooms[V9_MAX_ROOMS][SMART_HOME_ROOM_NAME_SIZE];
@@ -616,26 +615,6 @@ static lv_obj_t *v9_text(lv_obj_t *parent, const char *text, int x, int y,
 
 /* ── 场景切换器 ──────────────────────────────────────────── */
 
-#ifdef CONFIG_SMART_HOME_ONBOARDING
-/* 数据来源标签点击：有待完成配置时重开引导，否则提示已全部就绪。 */
-static void v9_source_label_cb(lv_event_t *event)
-{
-    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
-    smart_home_onboarding_status_t status;
-
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
-        return;
-    }
-    smart_home_lvgl_onboarding_status(ui, &status);
-    if (status.pending > 0) {
-        smart_home_lvgl_onboarding_reset();
-        smart_home_lvgl_onboarding_present(ui);
-    } else {
-        v9_info_modal("配置已就绪", "家庭网络、米家网关与模型服务均已配置。");
-    }
-}
-#endif
-
 static void v9_scene_menu_close(void);
 
 static void v9_scene_apply_label(void)
@@ -1057,10 +1036,9 @@ static void v9_destroy_cards(void)
 static void v9_create_demo_cards(smart_home_lvgl_t *ui)
 {
     v9_destroy_cards();
-    for (int i = 0; i < V9_DEVICE_COUNT; i++) {
-        v9_make_card(ui, i);
-    }
-    g_v9.card_count = V9_DEVICE_COUNT;
+    /* 其余造型定义只用于真实设备映射，不再生成模拟设备卡片。 */
+    v9_make_card(ui, 0);
+    g_v9.card_count = 1;
 }
 
 static void v9_make_dynamic_card(smart_home_lvgl_t *ui, int index,
@@ -1222,14 +1200,6 @@ void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui)
         }
         views[valid++] = raw[i];
     }
-    int has_gateway = 0, has_local = 0;
-    for (size_t i = 0; i < valid; i++) {
-        if (views[i].source == SMART_HOME_V9_SOURCE_MILOCO) has_gateway = 1;
-        else has_local = 1;
-    }
-    if (g_v9.source_label) lv_label_set_text(g_v9.source_label,
-        valid ? (has_gateway ? (has_local ? "本机与米家设备" : "米家设备") : "本地设备") :
-        (have_local ? "暂无设备" : "演示数据"));
     if (valid == 0) {
         if (have_local) {
             if (g_v9.card_count) v9_destroy_cards();
@@ -1358,23 +1328,6 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
      */
     lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_center(icon);
-
-    /* 数据来源标签：与图标同宽居中，紧随图标下方（不压到房间栏）。
-     * 兼作配置入口——有待完成项时点它可重新打开配置引导。 */
-    label = smart_home_lvgl_label_create(screen, "演示数据",
-                                         SMART_HOME_UI_COLOR_TEXT_MUTED, 11);
-    lv_obj_set_pos(label, V9_WEATHER_ICON_X,
-                   V9_WEATHER_ICON_Y + V9_WEATHER_ICON_PX);
-    lv_obj_set_width(label, V9_WEATHER_ICON_PX);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-#ifdef CONFIG_SMART_HOME_ONBOARDING
-    /* 兼作配置入口：标签只有 14px 高，扩到 56px 才够触控下限。
-     * 关掉引导时不设 CLICKABLE，保持纯展示。 */
-    lv_obj_add_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(label, 21);
-    lv_obj_add_event_cb(label, v9_source_label_cb, LV_EVENT_CLICKED, ui);
-#endif
-    g_v9.source_label = label;
 
     g_v9.room_strip = lv_obj_create(screen);
     lv_obj_remove_style_all(g_v9.room_strip);

@@ -206,3 +206,19 @@ target_compile_definitions(voice_settings_check PRIVATE CONFIG_SMART_HOME_MCP_BR
   CONFIG_SMART_HOME_VOICE_ASR=1 CONFIG_SMART_HOME_VOICE_TTS=1)
 add_test(NAME voice_settings_check COMMAND voice_settings_check)
 set_tests_properties(voice_settings_check PROPERTIES TIMEOUT 20)
+
+# Also exercise each service compiled independently; the other tab shows a hint.
+foreach(service ASR TTS)
+  string(TOLOWER "${service}" service_name)
+  set(target "voice_${service_name}_settings_check")
+  add_executable(${target} test_voice_settings.c
+    "${UI}/smart_home_lvgl_style.c"
+    "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+  foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+    get_target_property(value panel_check ${property})
+    set_target_properties(${target} PROPERTIES ${property} "${value}")
+  endforeach()
+  target_compile_definitions(${target} PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1 CONFIG_SMART_HOME_VOICE_${service}=1)
+  add_test(NAME ${target} COMMAND ${target})
+  set_tests_properties(${target} PROPERTIES TIMEOUT 20)
+endforeach()

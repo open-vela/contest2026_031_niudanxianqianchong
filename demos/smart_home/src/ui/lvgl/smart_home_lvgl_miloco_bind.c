@@ -6,12 +6,12 @@
  *   - 改为 840x480 弹窗叠在当前页面上，关闭即回原页，不再占整屏；
  *   - 二维码内容为网关地址 http://host:port/，与固件 qrcodegen 同源；
  *   - 顶部显示网关连接状态，底部状态条显示已等待秒数；
- *   - 「检查绑定状态」作为兜底主按钮，绑定成功后仍自动跳设备页。
+ *   - 「检查绑定状态」作为兜底主按钮，绑定成功后自动返回合并后的首页。
  *
  * 状态机（UI 线程只读快照，网络 IO 全部在 service worker）：
  *   WAITING  网关可达且未绑定 —— 等待手机完成授权
  *   OFFLINE  网关不可达       —— 网关离线，请检查服务器
- *   BOUND    is_bound=true    —— 已绑定 N 台设备，2 秒后进设备页
+ *   BOUND    is_bound=true    —— 已绑定 N 台设备，2 秒后返回首页
  */
 
 #include "smart_home_lvgl_internal.h"
@@ -199,7 +199,7 @@ static void bind_timer_cb(lv_timer_t *timer)
             jump_countdown = BIND_JUMP_DELAY_TICKS;
         } else if (--jump_countdown == 0) {
             smart_home_lvgl_miloco_bind_close(ui);
-            smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_DEVICES);
+            smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_HOME);
         }
         return;
     }
