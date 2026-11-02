@@ -1,0 +1,29 @@
+# ESP32-P4X SmartHome: voice image with resident KWS wake-word service.
+#
+# KWS 需要 TFLite Micro 与 C++ 运行时，这两项会显著增大镜像并改变启动路径；
+# 因此单独成配置，保持 smart_home_voice 作为 ASR/TTS 的稳定验收镜像，
+# 出问题时可以二分定位是 KWS 引入还是语音基线。
+
+#include "../smart_home_voice/defconfig"
+
+# TFLite Micro 依赖链：flatbuffers + gemmlowp + kissfft + ruy。
+CONFIG_SYSTEM_FLATBUFFERS=y
+CONFIG_MATH_GEMMLOWP=y
+CONFIG_MATH_KISSFFT=y
+CONFIG_MATH_RUY=y
+CONFIG_TFLITEMICRO=y
+
+# C++ 运行时（libc++ 要求 TLS_NELEM > 0）。
+CONFIG_HAVE_CXX=y
+CONFIG_LIBCXX=y
+CONFIG_TLS_NELEM=4
+CONFIG_TLS_TASK_NELEM=4
+CONFIG_CXX_MINI_LOCALIZATION=y
+
+# 先只验模型与前端（不开音频、不起常驻服务），确认 Invoke 延迟与
+# arena 实际占用后再开 SMART_HOME_KWS。
+CONFIG_SMART_HOME_KWS_SMOKE=y
+
+# KWS 模型 arena：Kconfig 默认 192 KB 在 P4 的 TFLM reference 内核下不够，
+# 先按 384 KB 验证，确认实际占用后再收窄。
+CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE=393216

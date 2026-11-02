@@ -166,6 +166,7 @@ extern "C" int main(int argc, char *argv[])
   void *arena;
   float scale;
   int zp;
+  int status;
   int ret;
 
   ret = kws_smoke_parse_options(argc, argv, &warmup, &repeat);
@@ -190,17 +191,25 @@ extern "C" int main(int argc, char *argv[])
   printf("[kws_smoke] arena_reserved=%u address=%p backend=reference\n",
          (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena);
 
-  if (kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE) != 0)
+  status = kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE);
+  if (status != 0)
     {
-      fprintf(stderr, "[kws_smoke] model init failed\n");
+      /* -EINVAL：模型版本/算子注册/张量契约不符；-ENOMEM：arena 不足。
+       * AllocateTensors 失败时打印它自己算出的需求，便于一次调准。 */
+      fprintf(stderr,
+              "[kws_smoke] model init failed: %d (arena_reserved=%u, "
+              "arena_used=%u)\n",
+              status, (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE,
+              (unsigned)kws_infer_arena_used());
       smart_home_bulk_free(arena);
       return EXIT_FAILURE;
     }
 
+  fprintf(stderr, "[kws_smoke] stage=allocated arena_used=%u\n",
+          (unsigned)kws_infer_arena_used());
   kws_infer_input_params(&scale, &zp);
-  printf("[kws_smoke] tensors ok: input=int8[124*40*3] scale=%.9g zp=%d "
-         "arena_used=%u\n",
-         (double)scale, zp, (unsigned)kws_infer_arena_used());
+  fprintf(stderr, "[kws_smoke] stage=params scale=%d zp=%d\n",
+          (int)(scale * 1000000.0f), zp);
 
   for (run = 0; run < (unsigned)KWS_INFER_FEATURE_SIZE; run++)
     {
@@ -208,14 +217,22 @@ extern "C" int main(int argc, char *argv[])
                                   UINT32_C(19)) >> 1);
     }
 
+  fprintf(stderr, "[kws_smoke] stage=features ready\n");
   for (run = 0; run < warmup; run++)
     {
+      uint64_t wstart = kws_smoke_monotonic_us();
+      uint64_t wend;
+
       if (kws_infer_run(g_features, g_scores) != 0)
         {
           fprintf(stderr, "[kws_smoke] warmup invoke %u failed\n", run + 1);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
+
+      wend = kws_smoke_monotonic_us();
+      fprintf(stderr, "[kws_smoke] warmup %u took %llu us\n", run + 1,
+              (unsigned long long)(wend - wstart));
     }
 
   for (run = 0; run < repeat; run++)
