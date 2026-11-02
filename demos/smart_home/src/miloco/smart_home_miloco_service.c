@@ -14,6 +14,7 @@
 #include "smart_home_miloco.h"
 #include "smart_home_miloco_client.h"
 #include "smart_home_miloco_specscan.h"
+#include "smart_home_miloco_protocol.h"
 
 #include "../smart_home_memory.h"
 #include "../config/cjson_compat.h"
@@ -28,6 +29,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -287,7 +289,12 @@ int smart_home_miloco_submit_power(smart_home_miloco_t *service,
                                    const char *did,
                                    bool on)
 {
-    return smart_home_miloco_submit_control(service, did, "prop.2.1",
+    smart_home_miloco_device_t device;
+    int index;
+    if (!smart_home_miloco_copy_device(service, did, &device)) return AGENT_ERROR_NOT_FOUND;
+    index = smart_home_miloco_power_index(&device);
+    if (index < 0) return AGENT_ERROR_INVALID;
+    return smart_home_miloco_submit_control(service, did, device.controls[index].iid,
                                             "set", on ? 1 : 0);
 }
 
@@ -431,6 +438,7 @@ static int parse_device_list(smart_home_miloco_t *service, const char *body,
                 parsed[i].category = old->category;
                 parsed[i].controllable = old->controllable;
                 parsed[i].power_on = old->power_on;
+                parsed[i].power_valid = old->power_valid;
                 parsed[i].control_count = old->control_count;
                 memcpy(parsed[i].controls, old->controls,
                        sizeof(parsed[i].controls));
@@ -527,62 +535,22 @@ static int parse_device_spec(smart_home_miloco_t *service, const char *body)
     return AGENT_OK;
 }
 
-/* 解析 data: [{iid, value}, ...]，按设备 controls 的 prop 项回读。 */
+/* 新版 data.properties 和旧版 data 数组共用类型及错误码校验。 */
 static int refresh_device_status(smart_home_miloco_t *service,
-                                 const char *did_text,
-                                 char *body, size_t body_size)
+                                 const char *did_text, const char *body)
 {
-    cJSON *root;
-    cJSON *data;
-    cJSON *item;
-    size_t i;
-    uint8_t k;
-    bool changed = false;
-
-    root = cJSON_Parse(body);
-    if (!root) {
-        return AGENT_ERROR_PARSE;
-    }
-    data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    int ret = AGENT_ERROR_NOT_FOUND;
     lock_state(service);
-    for (i = 0; i < service->device_count; i++) {
+    for (size_t i = 0; i < service->device_count; i++) {
         smart_home_miloco_device_t *dev = &service->devices[i];
-
-        if (strcmp(dev->did, did_text) != 0) {
-            continue;
-        }
-        cJSON_ArrayForEach(item, data) {
-            const cJSON *iid = cJSON_GetObjectItemCaseSensitive(item,
-                                                                "iid");
-            const cJSON *value = cJSON_GetObjectItemCaseSensitive(item,
-                                                                  "value");
-            int32_t v;
-
-            if (!cJSON_IsString(iid) || !cJSON_IsNumber(value)) {
-                continue;
-            }
-            v = (int32_t)value->valueint;
-            for (k = 0; k < dev->control_count; k++) {
-                smart_home_miloco_control_t *ctrl = &dev->controls[k];
-
-                if (strcmp(ctrl->iid, iid->valuestring) == 0 &&
-                    ctrl->value != v) {
-                    ctrl->value = v;
-                    changed = true;
-                }
-                if (strcmp(ctrl->iid, "prop.2.1") == 0) {
-                    dev->power_on = v != 0;
-                }
-            }
-        }
+        bool changed = false;
+        if (strcmp(dev->did, did_text)) continue;
+        ret = smart_home_miloco_status_apply(dev, body, &changed);
+        if (changed) service->revision++;
         break;
     }
-    if (changed) {
-        service->revision++;
-    }
     unlock_state(service);
-    cJSON_Delete(root);
-    return AGENT_OK;
+    return ret;
 }
 
 /* 拉取设备全部 prop 控制项的当前值（一次合并请求）。 */
@@ -590,8 +558,8 @@ static int refresh_device_values(smart_home_miloco_t *service,
                                  const char *did,
                                  char *body, size_t body_size)
 {
-    char path[160];
-    char iids[96];
+    char path[80 + SMART_HOME_MILOCO_MAX_CONTROLS * 14];
+    char iids[SMART_HOME_MILOCO_MAX_CONTROLS * 14];
     size_t used = 0;
     int http_status = 0;
     int ret;
@@ -609,7 +577,7 @@ static int refresh_device_values(smart_home_miloco_t *service,
         for (k = 0; k < dev->control_count; k++) {
             const smart_home_miloco_control_t *ctrl = &dev->controls[k];
 
-            if (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION) {
+            if (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION || ctrl->write_only) {
                 continue;
             }
             if (used + strlen(ctrl->iid) + 2 >= sizeof(iids)) {
@@ -628,13 +596,11 @@ static int refresh_device_values(smart_home_miloco_t *service,
              did, iids);
     ret = smart_home_miloco_http_get(&service->client_config, path,
                                      body, body_size, &http_status);
-    if (ret < 0) {
-        return ret;
+    if (ret < 0 || http_status != 200) {
+        (void)refresh_device_status(service, did, NULL);
+        return ret < 0 ? ret : -EIO;
     }
-    if (http_status != 200) {
-        return -EIO;
-    }
-    return refresh_device_status(service, did, body, body_size);
+    return refresh_device_status(service, did, body);
 }
 
 /* ── worker ────────────────────────────────────────────────── */
@@ -1011,18 +977,15 @@ static int execute_control(smart_home_miloco_t *service,
                 const smart_home_miloco_control_t *ctrl = &dev->controls[k];
                 iid_allowed = dev->online &&
                     request->is_action == (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION);
-                if (ctrl->type == SMART_HOME_MILOCO_CTRL_BOOL)
-                    iid_allowed = iid_allowed && (request->value == 0 || request->value == 1);
-                if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM) {
-                    bool found = false;
-                    for (unsigned n = 0; n < ctrl->option_count && n < SMART_HOME_MILOCO_MAX_OPTIONS; n++)
-                        if (ctrl->options[n].value == request->value) found = true;
-                    iid_allowed = iid_allowed && found;
+                if (!request->is_action)
+                    iid_allowed = iid_allowed && smart_home_miloco_value_allowed(ctrl, request->value);
+                /* A previous cached value must not confirm this dispatch. */
+                if (iid_allowed && !request->is_action) {
+                    service->devices[i].controls[k].value_valid = false;
+                    if ((int)k == smart_home_miloco_power_index(dev))
+                        service->devices[i].power_valid = false;
+                    service->revision++;
                 }
-                if (ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE)
-                    iid_allowed = iid_allowed && ctrl->range.step > 0 &&
-                        request->value >= ctrl->range.minimum && request->value <= ctrl->range.maximum &&
-                        ((int64_t)request->value - ctrl->range.minimum) % ctrl->range.step == 0;
                 is_bool = dev->controls[k].type ==
                           SMART_HOME_MILOCO_CTRL_BOOL;
                 break;
@@ -1063,11 +1026,9 @@ static int execute_control(smart_home_miloco_t *service,
     if (http_status != 200) {
         return -EIO;
     }
-    cJSON *reply = cJSON_Parse(body);
-    const cJSON *code = reply ? cJSON_GetObjectItemCaseSensitive(reply, "code") : NULL;
-    bool accepted = cJSON_IsNumber(code) && code->valuedouble == 0;
-    cJSON_Delete(reply);
-    if (!accepted) return -EIO;
+    ret = smart_home_miloco_control_reply(body, request->did, request->iid,
+                                          request->is_action != 0);
+    if (ret != AGENT_OK) return ret;
     /* 控制成功后回读真实状态，失败也接受（下轮轮询会补）。 */
     (void)refresh_device_values(service, request->did, body, body_size);
     return AGENT_OK;

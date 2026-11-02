@@ -157,7 +157,7 @@ static agent_error_t miot_device_list_tool(void *user_data,
                     used < sizeof(output) - 192u; k++) {
             const smart_home_miloco_control_t *ctrl =
                 &devices[i].controls[k];
-            char desc[52];
+            char desc[100];
 
             json_escape_bounded(desc, sizeof(desc), ctrl->desc);
             used = append_count(

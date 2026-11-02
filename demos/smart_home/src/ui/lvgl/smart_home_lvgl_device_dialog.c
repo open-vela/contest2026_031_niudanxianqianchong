@@ -12,7 +12,7 @@
 #define LOCAL_VALUE 65
 #define LOCAL_MODE 66
 #define LOCAL_FAN 67
-#define DIALOG_CONTROL_MAX 9
+#define DIALOG_CONTROL_MAX (SMART_HOME_MILOCO_MAX_CONTROLS + 1)
 
 typedef struct device_dialog device_dialog_t;
 typedef struct {
@@ -24,6 +24,7 @@ typedef struct {
     int32_t confirmed;
     int32_t desired;
     uint32_t request_id;
+    uint32_t baseline_observation;
     uint32_t started;
     int pending;
 } dialog_control_t;
@@ -193,6 +194,8 @@ static void submit_cb(lv_event_t *event) {
             feedback(ctx, "设备当前离线或控制能力已变化", 1);
             return;
         }
+        const smart_home_miloco_control_t *before = find_control(&device, control->spec.iid);
+        control->baseline_observation = before->observation;
         int result = smart_home_miloco_submit_control_tracked(
             service, device.did, control->spec.iid, is_action ? "action" : "set", value,
             &control->request_id);
@@ -241,8 +244,9 @@ static void poll(lv_timer_t *timer) {
         const smart_home_miloco_control_t *actual =
             remote_ok ? find_control(&remote, c->spec.iid) : NULL;
         if (actual && actual->type == c->kind) {
-            available = 1;
-            current = actual->value;
+            available = actual->value_valid || actual->write_only ||
+                        actual->type == SMART_HOME_MILOCO_CTRL_ACTION;
+            if (actual->value_valid) current = actual->value;
         }
         if (c->pending) {
             int result = AGENT_ERROR_STATE;
@@ -250,12 +254,16 @@ static void poll(lv_timer_t *timer) {
                                       service, c->request_id, &result);
             if (done && result != AGENT_OK) {
                 c->pending = 0;
-                feedback(ctx, "设备执行失败，已恢复确认状态", 1);
+                feedback(ctx, "操作未获成功确认，请检查网关或设备状态", 1);
             } else if (done && (c->kind == SMART_HOME_MILOCO_CTRL_ACTION ||
-                                (actual && current == c->desired))) {
+                                (actual && actual->write_only) ||
+                                (actual && actual->value_valid &&
+                                 actual->observation != c->baseline_observation &&
+                                 current == c->desired))) {
                 c->pending = 0;
                 feedback(ctx, c->kind == SMART_HOME_MILOCO_CTRL_ACTION ?
-                        "网关已确认动作" : "设备已确认本次操作", 0);
+                        "网关已确认动作" : actual && actual->write_only ?
+                        "网关已接受写入，此属性不支持回读" : "设备已确认本次操作", 0);
             } else if ((uint32_t)(lv_tick_get() - c->started) >= 10000u) {
                 c->pending = 0;
                 feedback(ctx, "未收到设备确认，请检查连接后重试", 1);
@@ -287,6 +295,8 @@ static dialog_control_t *add_control(device_dialog_t *ctx, const char *name, int
     lv_obj_t *label = smart_home_lvgl_label_create(
         ctx->body, name, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 17);
     lv_obj_set_pos(label, 4, y + 2);
+    lv_obj_set_width(label, 380);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     if (kind == LOCAL_POWER || kind == SMART_HOME_MILOCO_CTRL_BOOL) {
         c->widget = lv_switch_create(ctx->body);
         lv_obj_set_size(c->widget, 54, 30);
@@ -307,7 +317,7 @@ static dialog_control_t *add_control(device_dialog_t *ctx, const char *name, int
         smart_home_lvgl_press_feedback(c->widget);
     } else if (kind == LOCAL_MODE || kind == LOCAL_FAN ||
                kind == SMART_HOME_MILOCO_CTRL_ENUM) {
-        char options[128] = "";
+        char options[SMART_HOME_MILOCO_MAX_OPTIONS * 25 + 1] = "";
         for (unsigned i = 0; i < c->spec.option_count; i++) {
             size_t n = strlen(options);
             snprintf(options + n, sizeof(options) - n, "%s%s", i ? "\n" : "",
@@ -527,7 +537,7 @@ void smart_home_lvgl_device_dialog_open(smart_home_lvgl_t *ui,
             }
         }
         feedback(ctx,
-                 ctx->count ? "米家设备 · 按设备实际能力显示"
+                 ctx->count ? "按设备规格显示，最多16项；灰色项等待有效回读"
                             : "设备未提供可控属性或动作",
                  0);
     }

@@ -18,7 +18,8 @@ with tempfile.TemporaryDirectory(prefix="smart-home-tools-") as temporary:
     for miloco in (False, True):
         sources = [app / "src/tools/smart_home_tools.c", app / "tests/tools_v2_test.c", cjson / "cJSON.c"]
         if miloco:
-            sources.append(app / "src/miloco/smart_home_miloco_tools.c")
+            sources += [app / "src/miloco/smart_home_miloco_tools.c",
+                        app / "src/smart_home_memory.c"]
         executable = work / ("tools-miloco" if miloco else "tools")
         command = [os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
                    "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie",

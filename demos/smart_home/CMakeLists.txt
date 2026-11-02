@@ -46,6 +46,7 @@ if(CONFIG_SMART_HOME_DEMO)
       src/miloco/smart_home_miloco_client.c
       src/miloco/smart_home_miloco_service.c
       src/miloco/smart_home_miloco_specscan.c
+      src/miloco/smart_home_miloco_protocol.c
       src/miloco/smart_home_miloco_scene.c
       src/miloco/smart_home_miloco_tools.c
       src/miloco/smart_home_miloco_qr.c

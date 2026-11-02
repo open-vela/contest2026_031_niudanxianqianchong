@@ -92,7 +92,7 @@ int main(void)
         snprintf(snapshot[i].name, sizeof snapshot[i].name, "米家灯-%zu", i);
         strcpy(snapshot[i].room, "living_room");
         snapshot[i].category = SMART_HOME_MILOCO_CATEGORY_LIGHT;
-        snapshot[i].online = snapshot[i].controllable = true;
+        snapshot[i].online = snapshot[i].controllable = snapshot[i].power_valid = true;
     }
     smart_home_lvgl_build_home_screen_v9(&ui);
     lv_obj_update_layout(ui.screen_home);

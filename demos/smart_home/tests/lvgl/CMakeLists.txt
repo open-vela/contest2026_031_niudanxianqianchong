@@ -144,6 +144,7 @@ add_executable(device_dialog_check test_device_dialog.c
   "${REPO}/demos/smart_home/src/device/smart_home_device.c"
   "${REPO}/demos/smart_home/src/device/smart_home_device_service.c"
   "${REPO}/demos/smart_home/src/miloco/smart_home_miloco_specscan.c"
+  "${REPO}/demos/smart_home/src/miloco/smart_home_miloco_protocol.c"
   "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON/cJSON.c"
   "${UI}/smart_home_lvgl_style.c" "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
 foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)

@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+#include <math.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -446,25 +448,34 @@ static void copy_bounded(char *dst, size_t cap, const char *src)
  * Public Functions
  ****************************************************************************/
 
-/* Integer ranges are kept exactly; unsupported fractional ranges stay hidden. */
+/* Accept JSON integers written as 1, 1.0 or 1e0, without truncation. */
+static const char *scan_integer(const char *p, int32_t *out)
+{
+    char *end;
+    double value;
+    if (!p) return NULL;
+    p = scan_ws(p);
+    errno = 0;
+    value = strtod(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(value) ||
+        value < INT32_MIN || value > INT32_MAX || trunc(value) != value) return NULL;
+    end = (char *)scan_ws(end);
+    if (*end != ',' && *end != ']' && *end != '}') return NULL;
+    *out = (int32_t)value;
+    return end;
+}
+
 static bool scan_integer_range(const char *p, smart_home_miloco_control_t *ctrl)
 {
     int32_t values[3];
-    char *end;
     if (!p || *p != '[') return false;
     p++;
     for (int i = 0; i < 3; i++) {
-        long value;
-        p = scan_ws(p);
-        errno = 0;
-        value = strtol(p, &end, 10);
-        if (errno == ERANGE || end == p || value < -2147483647L ||
-            value > 2147483647L) return false;
-        values[i] = (int32_t)value;
-        p = scan_ws(end);
-        if (*p != (i == 2 ? ']' : ',')) return false;
+        p = scan_integer(p, &values[i]);
+        if (!p || *p != (i == 2 ? ']' : ',')) return false;
         p++;
     }
+    /* LVGL uses an int32 slider and int32 value arithmetic. */
     if (values[0] >= values[1] || values[2] <= 0 ||
         (int64_t)values[1] - values[0] > 32767) return false;
     ctrl->type = SMART_HOME_MILOCO_CTRL_RANGE;
@@ -472,6 +483,38 @@ static bool scan_integer_range(const char *p, smart_home_miloco_control_t *ctrl)
     ctrl->range.maximum = values[1];
     ctrl->range.step = values[2];
     return true;
+}
+
+static bool scan_integer_options(const char *p, smart_home_miloco_control_t *ctrl)
+{
+    bool found;
+    uint8_t count = 0;
+    if (!p || *p != '[') return false;
+    p = scan_ws(p + 1);
+    while (*p != ']') {
+        const char *v;
+        char name[64];
+        int32_t value;
+        if (*p != '{' || count == SMART_HOME_MILOCO_MAX_OPTIONS) return false;
+        v = scan_find_member(p + 1, "name", &found);
+        if (!found || !v || !scan_string(v, name, sizeof(name)) || !name[0] ||
+            strchr(name, '\n') || strchr(name, '\r')) return false;
+        v = scan_find_member(p + 1, "value", &found);
+        if (!found || !scan_integer(v, &value)) return false;
+        for (unsigned i = 0; i < count; i++)
+            if (ctrl->options[i].value == value) return false;
+        ctrl->options[count].value = value;
+        copy_bounded(ctrl->options[count].name, sizeof(ctrl->options[count].name), name);
+        count++;
+        p = scan_skip_value(p, 0);
+        if (!p) return false;
+        p = scan_ws(p);
+        if (*p == ',') p = scan_ws(p + 1);
+        else if (*p != ']') return false;
+    }
+    ctrl->option_count = count;
+    ctrl->type = SMART_HOME_MILOCO_CTRL_ENUM;
+    return count != 0;
 }
 
 int smart_home_miloco_specscan(const char *body,
@@ -489,10 +532,15 @@ int smart_home_miloco_specscan(const char *body,
     uint8_t count = 0;
     bool power_ctrl = false;
 
+    if (!body || !did_out || !did_size || !category_out || !controls ||
+        !count_out || !power_ctrl_out) return -1;
     *count_out = 0;
     *power_ctrl_out = false;
     *category_out = SMART_HOME_MILOCO_CATEGORY_UNKNOWN;
     did_out[0] = '\0';
+
+    p = scan_skip_value(body, 0);
+    if (!p || *scan_ws(p)) return -1;
 
     /* root.data */
     p = scan_ws(body);
@@ -501,6 +549,11 @@ int smart_home_miloco_specscan(const char *body,
         return -1;
       }
 
+    v = scan_find_member(p + 1, "code", &found);
+    {
+        int32_t code;
+        if (!found || !scan_integer(v, &code) || code != 0) return -1;
+    }
     v = scan_find_member(p + 1, "data", &found);
     if (v == NULL || !found || *v != '{')
       {
@@ -518,7 +571,7 @@ int smart_home_miloco_specscan(const char *body,
         char probe[32];
         const char *after = scan_string(v, probe, sizeof(probe));
 
-        if (after == NULL || strlen(probe) >= did_size)
+        if (after == NULL || !probe[0] || strlen(probe) >= did_size)
           {
             return -1;
           }
@@ -663,7 +716,10 @@ int smart_home_miloco_specscan(const char *body,
             goto next_member;
           }
 
-        if (count >= max_controls)
+        for (unsigned i = 0; i < count; i++)
+            if (!strcmp(controls[i].iid, iid)) return -1;
+
+        if (count >= max_controls || strlen(iid) >= sizeof(controls[0].iid))
           {
             p = scan_skip_value(item, 0);
             if (p == NULL)
@@ -677,12 +733,9 @@ int smart_home_miloco_specscan(const char *body,
         ctrl = &controls[count];
         memset(ctrl, 0, sizeof(*ctrl));
 
-        /* iid 截 13 字符（同旧实现 %.13s）。 */
-        copy_bounded(ctrl->iid, 14, iid);
-        if (strlen(iid) > 13)
-          {
-            ctrl->iid[13] = '\0';
-          }
+        copy_bounded(ctrl->iid, sizeof(ctrl->iid), iid);
+        member = scan_find_member(item + 1, "readable", &found);
+        ctrl->write_only = found && member && !strncmp(scan_ws(member), "false", 5);
 
         member = scan_find_member(item + 1, "description", &found);
         desc[0] = '\0';
@@ -700,8 +753,13 @@ int smart_home_miloco_specscan(const char *body,
 
         if (strncmp(iid, "action.", 7) == 0)
           {
-            ctrl->type = SMART_HOME_MILOCO_CTRL_ACTION;
-            count++;
+            /* Parameterized actions need an input form, not an empty call. */
+            member = scan_find_member(item + 1, "in_params", &found);
+            if (!found) member = scan_find_member(item + 1, "in", &found);
+            if (!found || (member && *member == '[' && *scan_ws(member + 1) == ']')) {
+                ctrl->type = SMART_HOME_MILOCO_CTRL_ACTION;
+                count++;
+            }
           }
         else
           {
@@ -715,7 +773,7 @@ int smart_home_miloco_specscan(const char *body,
             if (strcmp(fmt, "bool") == 0)
               {
                 ctrl->type = SMART_HOME_MILOCO_CTRL_BOOL;
-                if (strcmp(iid, "prop.2.1") == 0)
+                if (!strcmp(type_name, "on") && !ctrl->write_only)
                   {
                     power_ctrl = true;
                   }
@@ -724,81 +782,13 @@ int smart_home_miloco_specscan(const char *body,
               }
             else
               {
-                /* value_list → ENUM（最多 4 档，value 为整型）。 */
                 member = scan_find_member(item + 1, "value_list", &found);
-                if (member != NULL && found && *member == '[')
-                  {
-                    const char *opt = scan_ws(member + 1);
-                    uint8_t opts = 0;
-
-                    ctrl->type = SMART_HOME_MILOCO_CTRL_ENUM;
-                    if (*opt != ']')
-                      {
-                        while (true)
-                          {
-                            const char *ov;
-                            const char *elem;
-                            char oname[24];
-
-                            if (*opt != '{')
-                              {
-                                break;
-                              }
-
-                            ov = scan_find_member(opt + 1, "name", &found);
-                            oname[0] = '\0';
-                            if (ov != NULL && found && *ov == '"' &&
-                                opts < SMART_HOME_MILOCO_MAX_OPTIONS)
-                              {
-                                scan_string(ov, oname, sizeof(oname));
-                              }
-
-                            elem = scan_find_member(opt + 1, "value",
-                                                    &found);
-                            if (ov != NULL && found && elem != NULL &&
-                                found && oname[0] != '\0' &&
-                                opts < SMART_HOME_MILOCO_MAX_OPTIONS)
-                              {
-                                ctrl->options[opts].value =
-                                    (int32_t)strtol(elem, NULL, 10);
-                                copy_bounded(
-                                    ctrl->options[opts].name,
-                                    sizeof(ctrl->options[opts].name),
-                                    oname);
-                                opts++;
-                              }
-
-                            opt = scan_skip_value(opt, 0);
-                            if (opt == NULL)
-                              {
-                                return -1;
-                              }
-
-                            opt = scan_ws(opt);
-                            if (*opt == ',')
-                              {
-                                opt = scan_ws(opt + 1);
-                                continue;
-                              }
-
-                            break;
-                          }
-                      }
-
-                    ctrl->option_count = opts;
-                    if (opts > 0)
-                      {
-                        count++;
-                      }
-                  }
-                else
-                  {
+                if (found) {
+                    if (scan_integer_options(member, ctrl)) count++;
+                } else {
                     member = scan_find_member(item + 1, "value_range", &found);
-                    if (member && found && scan_integer_range(scan_ws(member), ctrl))
-                      {
-                        count++;
-                      }
-                  }
+                    if (found && scan_integer_range(member, ctrl)) count++;
+                }
               }
           }
 
@@ -824,6 +814,13 @@ next_member:
         return -1;
       }
 
+    {
+        unsigned candidates = 0;
+        for (unsigned i = 0; i < count; i++)
+            if (controls[i].type == SMART_HOME_MILOCO_CTRL_BOOL &&
+                !controls[i].write_only && !strcmp(controls[i].type_name, "on")) candidates++;
+        power_ctrl = candidates == 1;
+    }
     *count_out = count;
     *power_ctrl_out = power_ctrl;
     return 0;

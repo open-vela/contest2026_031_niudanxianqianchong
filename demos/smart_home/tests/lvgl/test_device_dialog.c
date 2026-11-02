@@ -1,6 +1,7 @@
 #include "smart_home_lvgl_device_dialog.c"
 #include "../../src/miloco/smart_home_miloco_specscan.h"
 #include <assert.h>
+#include "../../src/miloco/smart_home_miloco_protocol.h"
 void smart_home_lvgl_room_assign_open(smart_home_lvgl_t *ui, const smart_home_v9_device_view_t *view)
 { (void)ui; (void)view; }
 const char *smart_home_lvgl_room_display(const char *room) { return room; }
@@ -133,6 +134,8 @@ int main(void) {
     remote.controls[0].range.maximum = 100;
     remote.controls[0].range.step = 5;
     remote.controls[0].value = 20;
+    remote.controls[0].value_valid = true;
+    remote.controls[0].observation = 1;
     view.source = SMART_HOME_V9_SOURCE_MILOCO;
     view.kind = SMART_HOME_V9_KIND_LIGHT;
     strcpy(view.key, "milo:test");
@@ -146,6 +149,7 @@ int main(void) {
     poll(g_dialog->timer);
     assert(c->pending);
     remote.controls[0].value = 50;
+    remote.controls[0].observation++;
     poll(g_dialog->timer);
     assert(!c->pending && c->confirmed == 50);
     completed = 0;
@@ -200,9 +204,46 @@ int main(void) {
     lv_obj_send_event(c->widget, LV_EVENT_VALUE_CHANGED, NULL);
     assert(submitted_value == 20 && c->pending);
     remote.controls[0].value = 20;
+    remote.controls[0].observation++;
     completed = 1;
     poll(g_dialog->timer);
     assert(!c->pending);
+    smart_home_lvgl_device_dialog_close();
+    remote.controls[0].type = SMART_HOME_MILOCO_CTRL_BOOL;
+    strcpy(remote.controls[0].iid, "prop.2.6");
+    strcpy(remote.controls[0].desc, "宽动态范围模式");
+    remote.controls[0].value = 0;
+    remote.controls[0].value_valid = true;
+    completed = 0;
+    smart_home_lvgl_device_dialog_open(&ui, &view);
+    c = &g_dialog->control[0];
+    lv_obj_add_state(c->widget, LV_STATE_CHECKED);
+    lv_obj_send_event(c->widget, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(c->pending && submitted_value == 1);
+    completed = 1;
+    remote.controls[0].value = 1; /* Cached desired value alone is insufficient. */
+    poll(g_dialog->timer);
+    assert(c->pending);
+    bool changed;
+    assert(!smart_home_miloco_status_apply(&remote,
+        "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":true,\"code\":0}]}}", &changed));
+    poll(g_dialog->timer);
+    assert(!c->pending && c->confirmed == 1);
+    assert(strstr(lv_label_get_text(g_dialog->status), "设备已确认"));
+    completed = 0;
+    lv_obj_remove_state(c->widget, LV_STATE_CHECKED);
+    lv_obj_send_event(c->widget, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(c->pending && submitted_value == 0);
+    completed = 1;
+    assert(!smart_home_miloco_status_apply(&remote,
+        "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":false,\"code\":0}]}}", &changed));
+    poll(g_dialog->timer);
+    assert(!c->pending && c->confirmed == 0);
+    /* Per-property read errors disable controls without inventing a value. */
+    assert(!smart_home_miloco_status_apply(&remote,
+        "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":true,\"code\":-1}]}}", &changed));
+    poll(g_dialog->timer);
+    assert(lv_obj_has_state(c->widget, LV_STATE_DISABLED) && c->confirmed == 0);
     lv_obj_delete(ui.screen_home);
     assert(!g_dialog);
     smart_home_device_service_deinit(&app.device_service);

@@ -2028,6 +2028,7 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
          SMART_HOME_MILOCO_MAX_CONTROLS; k++) {
         const smart_home_miloco_control_t *ctrl = &dev->controls[k];
         miloco_sheet_req_t *req = &context->requests[req_slot++];
+        int row_height = 40;
 
         req->ui = ui;
         req->confirmed_value = ctrl->value;
@@ -2060,6 +2061,9 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
         } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM &&
                    ctrl->option_count > 0) {
             uint8_t j;
+            row_height = 28 + ((ctrl->option_count + 3) / 4) * 36;
+            lv_obj_set_height(row, row_height);
+            lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
             for (j = 0; j < ctrl->option_count &&
                  j < SMART_HOME_MILOCO_MAX_OPTIONS; j++) {
@@ -2073,14 +2077,16 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
                 oreq->value = ctrl->options[j].value;
                 opt = lv_btn_create(row);
                 oreq->widget = opt;
-                lv_obj_set_size(opt, 56, 30);
-                lv_obj_align(opt, LV_ALIGN_RIGHT_MID,
-                             -(int)(j * 62), 0);
+                lv_obj_set_size(opt, 74, 30);
+                lv_obj_align(opt, LV_ALIGN_TOP_RIGHT,
+                             -(int)((j % 4) * 80), 28 + (j / 4) * 36);
                 label = smart_home_lvgl_label_create(
                     opt, ctrl->options[j].name,
                     ctrl->value == ctrl->options[j].value ?
                         lv_color_white() :
                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 11);
+                lv_obj_set_width(label, 68);
+                lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
                 lv_obj_center(label);
                 if (ctrl->value == ctrl->options[j].value) {
                     smart_home_lvgl_set_bg(opt, SMART_HOME_UI_COLOR_PRIMARY);
@@ -2114,7 +2120,7 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
             lv_obj_add_event_cb(btn, miloco_sheet_action_cb,
                                 LV_EVENT_CLICKED, req);
         }
-        y += 48;
+        y += row_height + 8;
     }
     context->request_count = req_slot;
 }

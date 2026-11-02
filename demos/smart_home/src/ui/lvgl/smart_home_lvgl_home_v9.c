@@ -394,6 +394,10 @@ static int card_index_for_kind(smart_home_v9_kind_t kind)
 
 static const char *view_status(const smart_home_v9_device_view_t *view)
 {
+    if (view->source == SMART_HOME_V9_SOURCE_MILOCO) {
+        if (!view->online) return "离线";
+        if (!(view->capabilities & SMART_HOME_V9_CAP_POWER)) return "在线";
+    }
     if (!view->state_valid) return "状态待获取";
     if (view->source == SMART_HOME_V9_SOURCE_BOARD) {
         switch (view->activity) {
@@ -410,7 +414,8 @@ static const char *view_status(const smart_home_v9_device_view_t *view)
     case SMART_HOME_V9_KIND_ROBOT:
         return view->on ? "清扫中" : "待机";
     case SMART_HOME_V9_KIND_CAMERA:
-        return view->on ? "预览中" : "预览关闭";
+        return view->source == SMART_HOME_V9_SOURCE_MILOCO ?
+            (view->on ? "已开启" : "已关闭") : (view->on ? "预览中" : "预览关闭");
     default:
         return view->on ? "已开启" : "已关闭";
     }

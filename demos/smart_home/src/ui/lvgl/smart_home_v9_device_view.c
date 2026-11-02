@@ -215,18 +215,12 @@ size_t smart_home_v9_collect_views(const smart_home_state_t *local,
             copy_text(view->room_id, sizeof(view->room_id), device->room);
             copy_text(view->room_label, sizeof(view->room_label), device->room);
             view->online = device->online;
-            view->state_valid = device->online;
+            view->state_valid = device->online && device->power_valid;
             view->on = device->power_on;
             view->activity = view->on ? 1 : 0;
             view->capabilities = device->controllable ?
                                  SMART_HOME_V9_CAP_POWER : 0;
-            if (view->kind == SMART_HOME_V9_KIND_CAMERA) {
-                view->capabilities |= SMART_HOME_V9_CAP_PREVIEW;
-            }
-            if (view->kind == SMART_HOME_V9_KIND_WASHER ||
-                view->kind == SMART_HOME_V9_KIND_ROBOT) {
-                view->capabilities |= SMART_HOME_V9_CAP_PAUSE;
-            }
+            /* Remote category does not imply preview/pause capabilities. */
         }
         smart_home_bulk_free(devices);
     }

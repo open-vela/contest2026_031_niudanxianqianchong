@@ -469,6 +469,7 @@ static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
     snapshot[0].online = true;
     snapshot[0].controllable = true;
     snapshot[0].power_on = true;
+    snapshot[0].power_valid = true;
     ui->screen_panel = screen;
     ui->panel_feedback_label = lv_label_create(screen);
     lv_obj_t *sw = lv_switch_create(screen);
@@ -479,6 +480,7 @@ static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
     assert(lv_obj_has_state(sw, LV_STATE_CHECKED)); /* failed OFF restores ON */
     assert(strstr(lv_label_get_text(ui->panel_feedback_label), "未能提交"));
     snapshot[0].power_on = false;
+    snapshot[0].power_valid = true;
     lv_obj_add_state(sw, LV_STATE_CHECKED);
     lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
     assert(!lv_obj_has_state(sw, LV_STATE_CHECKED)); /* failed ON restores OFF */
@@ -582,6 +584,7 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
     assert(grid_scroll == 80);
     strcpy(snapshot[0].name, "更新的设备名");
     snapshot[0].power_on = true;
+    snapshot[0].power_valid = true;
     rebuild_device_cards(ui);
     assert(deleted_objects == 0 && ui->miloco_cards[0].card == card);
     assert(ui->miloco_cards[0].power == power && lv_obj_has_state(power, LV_STATE_CHECKED));
@@ -641,6 +644,22 @@ static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
     smart_home_lvgl_miloco_sheet_refresh(ui);
     assert(ui->miloco_sheet == sheet && context->requests[3].widget == option);
     assert(lv_color_eq(lv_obj_get_style_bg_color(option, 0), SMART_HOME_UI_COLOR_PRIMARY));
+    snapshot[1].controls[1].option_count = SMART_HOME_MILOCO_MAX_OPTIONS;
+    for (unsigned i = 0; i < SMART_HOME_MILOCO_MAX_OPTIONS; i++) {
+        snapshot[1].controls[1].options[i].value = (int)i * 3;
+        snprintf(snapshot[1].controls[1].options[i].name,
+                 sizeof(snapshot[1].controls[1].options[i].name), "mode-%u", i);
+    }
+    smart_home_lvgl_miloco_sheet_refresh(ui);
+    context = ui->miloco_sheet_context;
+    lv_obj_update_layout(ui->miloco_sheet);
+    for (unsigned i = 0; i < SMART_HOME_MILOCO_MAX_OPTIONS; i++) {
+        lv_obj_t *widget = context->requests[2 + i].widget;
+        assert(widget && lv_obj_get_x(widget) >= 0);
+        assert(lv_obj_get_y(widget) + lv_obj_get_height(widget) <=
+               lv_obj_get_height(lv_obj_get_parent(widget)));
+    }
+
     snapshot_count = 0;
     smart_home_lvgl_miloco_sheet_refresh(ui);
     rebuild_device_cards(ui);
@@ -860,6 +879,7 @@ static void test_v9_views(void)
     snapshot[0].category = SMART_HOME_MILOCO_CATEGORY_OTHER;
     snapshot[0].online = true;
     snapshot[0].power_on = true;
+    snapshot[0].power_valid = true;
     snapshot[0].control_count = 1;
     strcpy(snapshot[0].controls[0].type_name, "wash-mode");
     strcpy(snapshot[0].controls[0].desc, "洗涤模式");
@@ -1274,6 +1294,7 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
         snapshot[i].online = true;
         snapshot[i].controllable = true;
         snapshot[i].power_on = true;
+        snapshot[i].power_valid = true;
     }
     smart_home_lvgl_v9_refresh_views(ui);
     lv_obj_update_layout(ui->screen_home);
@@ -1307,6 +1328,7 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
     assert(submissions == submitted + 1);
     assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), "等待确认"));
     snapshot[11].power_on = false;
+    snapshot[11].power_valid = true;
     smart_home_lvgl_v9_refresh_views(ui);
     assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), "已关闭"));
     snapshot_count = 0;

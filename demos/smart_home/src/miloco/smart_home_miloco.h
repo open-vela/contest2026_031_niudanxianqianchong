@@ -20,8 +20,8 @@ extern "C" {
 #define SMART_HOME_MILOCO_HOST_SIZE 64
 #define SMART_HOME_MILOCO_TOKEN_SIZE 64
 #define SMART_HOME_MILOCO_MAX_DEVICES 16
-#define SMART_HOME_MILOCO_MAX_CONTROLS 8
-#define SMART_HOME_MILOCO_MAX_OPTIONS 4
+#define SMART_HOME_MILOCO_MAX_CONTROLS 16
+#define SMART_HOME_MILOCO_MAX_OPTIONS 8
 #define SMART_HOME_MILOCO_POLL_INTERVAL_SEC 5
 
 /* Miloco 默认监听端口（backend settings server.port）。 */
@@ -49,12 +49,15 @@ typedef enum {
  * 是统一控制工具与通用控制抽屉的共同数据源。 */
 typedef struct {
     char iid[14];                        /* 如 "prop.2.3" / "action.2.1" */
-    char desc[24];                       /* spec 中文描述 */
-    char type_name[24];                  /* spec 语义锚点，如 "night-shot"
+    char desc[48];                       /* spec 中文描述 */
+    char type_name[32];                  /* spec 语义锚点，如 "night-shot"
                                           * （场景模式按此匹配，跨型号稳定） */
     uint8_t type;                        /* smart_home_miloco_ctrl_type_t */
     int32_t value;                       /* BOOL:0/1 ENUM:当前值 ACTION:无效 */
     uint8_t option_count;
+    bool write_only;                     /* spec 明确不可读，不伪造状态确认 */
+    bool value_valid;
+    uint32_t observation;                /* 每次成功回读递增，值未变也递增 */
     union {
         struct {
             int32_t minimum;
@@ -62,7 +65,7 @@ typedef struct {
             int32_t step;
         } range;
         struct {
-            char name[12];
+            char name[24];
             int32_t value;
         } options[SMART_HOME_MILOCO_MAX_OPTIONS];
     };
@@ -74,8 +77,9 @@ typedef struct {
     char room[24];
     smart_home_miloco_category_t category;
     bool online;
-    bool controllable;                   /* 存在 prop.2.1 控制项 */
+    bool controllable;                   /* 存在唯一、可读的 on 布尔控制项 */
     bool power_on;
+    bool power_valid;
     smart_home_miloco_control_t controls[SMART_HOME_MILOCO_MAX_CONTROLS];
     uint8_t control_count;
 } smart_home_miloco_device_t;
