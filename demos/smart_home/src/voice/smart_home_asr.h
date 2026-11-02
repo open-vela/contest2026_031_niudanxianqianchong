@@ -66,9 +66,6 @@ const smart_home_asr_preset_t *smart_home_asr_preset_by_id(const char *id);
  * 旧版文件（仅 enabled/language，无端点字段）按 mimo 预设回填端点。 */
 void smart_home_asr_config_load(smart_home_asr_config_t *config);
 
-/* Explicit reload for external provisioning; does not rewrite old v2 files. */
-void smart_home_asr_config_reload(void);
-
 /* 保存 asr.json（原子写）。仅设置页调用。 */
 int smart_home_asr_config_save(const smart_home_asr_config_t *config);
 

@@ -774,11 +774,3 @@ int smart_home_asr_recognize(const uint8_t *pcm, size_t bytes,
 {
     return smart_home_asr_recognize_ex(pcm, bytes, out_text, out_size, NULL);
 }
-
-void smart_home_asr_config_reload(void)
-{
-    pthread_mutex_lock(&g_asr_config_mutex);
-    g_asr_config_loaded = 0;
-    pthread_mutex_unlock(&g_asr_config_mutex);
-    asr_config_ensure_loaded();
-}

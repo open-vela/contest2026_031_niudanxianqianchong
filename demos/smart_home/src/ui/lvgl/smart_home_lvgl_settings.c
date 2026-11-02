@@ -1614,7 +1614,7 @@ static void create_voice_announce_card(lv_obj_t *content,
 
         label = smart_home_lvgl_label_create(
             body,
-            "端点与密钥在 /data/smart_home/voice.json 与 secrets.json 中配置；"
+            "端点在 voice.json、密钥在 secrets.json 的 tts_api_keys（设置 → 语音服务）；"
             "用于播报智能管家的文字回复",
             SMART_HOME_UI_COLOR_TEXT_MUTED,
             10);
@@ -1695,7 +1695,7 @@ static void create_voice_announce_card(lv_obj_t *content,
         label = smart_home_lvgl_label_create(
             body,
             "端点在 /data/smart_home/asr.json 配置；密钥按 backend_id "
-            "在 secrets.json 的 model_api_keys 中配置",
+            "在 secrets.json 的 asr_api_keys 中配置（设置 → 语音服务）",
             SMART_HOME_UI_COLOR_TEXT_MUTED,
             10);
         lv_obj_set_width(label, lv_pct(100));
