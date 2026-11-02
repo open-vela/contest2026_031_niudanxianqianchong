@@ -54,6 +54,14 @@ if(CONFIG_SMART_HOME_DEMO)
     )
   endif()
 
+  if(CONFIG_SMART_HOME_VOICE_TTS)
+    list(APPEND SMART_HOME_SRCS
+      src/voice/smart_home_tts.c
+      src/voice/smart_home_voice_resample.c
+      src/voice/smart_home_voice_play.c
+      src/voice/smart_home_voice_player.c)
+  endif()
+
   if(CONFIG_SMART_HOME_DEMO_UI_LVGL)
     if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
       list(APPEND SMART_HOME_SRCS src/ui/lvgl/smart_home_lvgl_camera_dialog.c)

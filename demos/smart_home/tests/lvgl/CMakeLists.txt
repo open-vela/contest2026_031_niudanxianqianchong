@@ -193,3 +193,16 @@ endforeach()
 target_compile_definitions(camera_home_check PRIVATE CONFIG_SMART_HOME_CAMERA_PREVIEW=1)
 add_test(NAME camera_home_check COMMAND camera_home_check)
 set_tests_properties(camera_home_check PROPERTIES TIMEOUT 15)
+
+# Compile the actual product voice widgets; legacy suites leave these features off.
+add_executable(voice_settings_check test_voice_settings.c
+  "${UI}/smart_home_lvgl_style.c"
+  "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(voice_settings_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(voice_settings_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1
+  CONFIG_SMART_HOME_VOICE_ASR=1 CONFIG_SMART_HOME_VOICE_TTS=1)
+add_test(NAME voice_settings_check COMMAND voice_settings_check)
+set_tests_properties(voice_settings_check PROPERTIES TIMEOUT 20)

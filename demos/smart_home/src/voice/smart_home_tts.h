@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "smart_home_voice_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,7 +92,7 @@ int smart_home_tts_config_set(const smart_home_tts_config_t *config);
  * text:     UTF-8 文本
  * out_pcm:  成功时输出堆缓冲（smart_home_bulk_alloc 分配，调用者
  *           smart_home_bulk_free 释放），内容为 WAV 去壳后的
- *           PCM16 little-endian 单声道数据
+ *           PCM16 little-endian 单声道数据（24 kHz 响应会抗混叠重采样到 16 kHz）
  * out_bytes/out_rate: PCM 字节数与采样率
  *
  * 返回 0 成功；-ENOKEY 之类不另造码，统一 AGENT_ERROR_* 或 errno 风格
@@ -100,6 +101,11 @@ int smart_home_tts_config_set(const smart_home_tts_config_t *config);
 int smart_home_tts_synth(const char *text,
                          uint8_t **out_pcm, size_t *out_bytes,
                          uint32_t *out_rate);
+
+/* Same ownership as synth(), with stage/status for UI and diagnostics. */
+int smart_home_tts_synth_ex(const char *text, uint8_t **out_pcm,
+                           size_t *out_bytes, uint32_t *out_rate,
+                           smart_home_voice_result_t *result);
 
 #ifdef __cplusplus
 }

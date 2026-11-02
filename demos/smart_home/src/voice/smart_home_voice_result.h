@@ -8,7 +8,9 @@ typedef enum {
     SMART_HOME_VOICE_CREDENTIAL,
     SMART_HOME_VOICE_NETWORK,
     SMART_HOME_VOICE_HTTP,
-    SMART_HOME_VOICE_RESPONSE
+    SMART_HOME_VOICE_RESPONSE,
+    SMART_HOME_VOICE_RESOURCE,
+    SMART_HOME_VOICE_PLAYBACK
 } smart_home_voice_stage_t;
 
 typedef struct {
@@ -23,6 +25,13 @@ static inline const char *smart_home_voice_result_text(
     if (!result) return "语音处理失败";
     if (result->stage == SMART_HOME_VOICE_CREDENTIAL)
         return smart_home_secrets_error_text(result->code);
+    if (result->stage == SMART_HOME_VOICE_PLAYBACK)
+        return "扬声器打开、音频配置或播放失败，请查看播放器日志";
+    if (result->stage == SMART_HOME_VOICE_RESOURCE) {
+        if (result->code == AGENT_ERROR_BUSY) return "语音服务忙，请稍后重试";
+        if (result->code == AGENT_ERROR_NOMEM) return "语音处理内存不足";
+        return "语音参数或本地缓冲不满足要求";
+    }
     if (result->stage == SMART_HOME_VOICE_CAPTURE) return "录音失败或没有有效语音";
     if (result->stage == SMART_HOME_VOICE_NETWORK) {
         /* 传输层容量不足与真实网络故障都报在 NETWORK 阶段，但两者修法

@@ -20,6 +20,7 @@
  */
 
 #pragma once
+#include "smart_home_voice_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,9 @@ voice_play_state_t voice_play_state(void);
 
 /* 自动播报开关（voice.json enabled 的运行期快照）。 */
 int voice_play_announce_enabled(void);
+
+/* Consume the last unreported synthesis/playback error on the UI thread. */
+int voice_play_take_error(smart_home_voice_result_t *result);
 
 #ifdef __cplusplus
 }

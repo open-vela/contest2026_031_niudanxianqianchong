@@ -68,6 +68,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   ifneq ($(CONFIG_SMART_HOME_VOICE_TTS),)
     CSRCS   += src/voice/smart_home_voice_player.c
     CSRCS   += src/voice/smart_home_tts.c
+    CSRCS   += src/voice/smart_home_voice_resample.c
     CSRCS   += src/voice/smart_home_voice_play.c
   endif
   # 采集服务由 ASR / KWS / VAD 共用（未定义的开关在本条中为空）

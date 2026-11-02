@@ -104,6 +104,7 @@ static void *voice_settings_worker(void *argument)
         if (job->service == SMART_HOME_SECRET_ASR) {
             result.stage = SMART_HOME_VOICE_CAPTURE;
             ret = voice_capture_record(4, NULL, &pcm, &bytes);
+            result.code = ret;
             if (ret == AGENT_OK)
                 ret = smart_home_asr_recognize_ex(pcm, bytes, message,
                                                   sizeof(message), &result);
@@ -115,9 +116,13 @@ static void *voice_settings_worker(void *argument)
 #endif
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
         if (job->service == SMART_HOME_SECRET_TTS) {
-            ret = smart_home_tts_synth("你好，这是语音播报测试", &pcm, &bytes, &rate);
-            if (ret == AGENT_OK)
+            ret = smart_home_tts_synth_ex("你好，这是语音播报测试", &pcm, &bytes,
+                                           &rate, &result);
+            if (ret == AGENT_OK) {
+                result.stage = SMART_HOME_VOICE_PLAYBACK;
                 ret = smart_home_voice_player_play_mem(pcm, bytes, rate, NULL);
+                result.code = ret;
+            }
         }
 #endif
         smart_home_bulk_free(pcm);
@@ -156,7 +161,12 @@ static int start_job(struct voice_job_s *job, struct voice_controls_s *v,
     size_t stack_size;
     pthread_attr_t attr;
     int ret;
-    if (g_voice_job.active || job->ui->asr_active || job->ui->request_inflight) {
+    const int testing = job->action == VOICE_TEST;
+    int busy = g_voice_job.active || job->ui->request_inflight;
+#ifdef CONFIG_SMART_HOME_VOICE_ASR
+    busy = busy || job->ui->asr_active;
+#endif
+    if (busy) {
         lv_label_set_text(status, "请等待当前请求结束后重试");
         clear_key((char *)job, sizeof(*job));
         free(job);
@@ -204,7 +214,7 @@ static int start_job(struct voice_job_s *job, struct voice_controls_s *v,
         return AGENT_ERROR;
     }
     g_voice_job.active = 1;
-    lv_label_set_text(status, job->action == VOICE_TEST ?
+    lv_label_set_text(status, testing ?
         "正在测试；ASR 请连续说话约四秒" : "正在保存…");
     return AGENT_OK;
 }
@@ -319,6 +329,7 @@ void smart_home_lvgl_voice_settings_deinit(smart_home_lvgl_t *ui)
 static void voice_focus_cb(lv_event_t *event)
 {
     struct voice_controls_s *v = lv_event_get_user_data(event);
+    if (!v || !v->keyboard) return;
     lv_keyboard_set_textarea(v->keyboard, lv_event_get_target(event));
     lv_obj_clear_flag(v->keyboard, LV_OBJ_FLAG_HIDDEN);
 }
@@ -477,4 +488,9 @@ void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui, lv_obj_t *panel
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
     build_voice_panel(ui, panel, keyboard, SMART_HOME_SECRET_TTS, y);
 #endif
+}
+
+int smart_home_lvgl_voice_settings_busy(smart_home_lvgl_t *ui)
+{
+    return g_voice_job.active && g_voice_job.owner == ui;
 }

@@ -215,6 +215,14 @@ void smart_home_lvgl_chat_asr_begin(smart_home_lvgl_t *ui)
         return;
     }
 
+    if (smart_home_lvgl_voice_settings_busy(ui)) {
+        if (ui->chat_status) {
+            lv_label_set_text(ui->chat_status, "语音设置任务进行中，请稍后重试");
+            lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
     smart_home_asr_config_load(&config);
     if (!config.enabled) {
         if (ui->chat_status) {

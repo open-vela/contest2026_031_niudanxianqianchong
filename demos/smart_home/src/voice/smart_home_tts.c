@@ -12,6 +12,7 @@
  ****************************************************************************/
 
 #include "smart_home_tts.h"
+#include "smart_home_voice_resample.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -276,6 +277,7 @@ static int tts_parse_wav(const uint8_t *data, size_t size,
                    ((uint32_t)data[offset + 6] << 16) |
                    ((uint32_t)data[offset + 7] << 24);
 
+      if (chunk_size > size - offset - 8u) return -EINVAL;
       if (memcmp(data + offset, "fmt ", 4) == 0 && chunk_size >= 16)
         {
           uint16_t format;
@@ -306,11 +308,6 @@ static int tts_parse_wav(const uint8_t *data, size_t size,
 
           *data_offset = offset + 8;
           *data_len = chunk_size;
-          if (*data_offset + *data_len > size)
-            {
-              *data_len = size - *data_offset;
-            }
-
           return 0;
         }
 
@@ -685,9 +682,10 @@ static agent_error_t tts_sink_body(void *context, const void *data,
   return AGENT_OK;
 }
 
-int smart_home_tts_synth(const char *text,
+static int tts_synth_impl(const char *text,
                          uint8_t **out_pcm, size_t *out_bytes,
-                         uint32_t *out_rate)
+                         uint32_t *out_rate,
+                         smart_home_voice_result_t *result)
 {
   smart_home_tts_config_t config;
   const smart_home_tts_preset_t *preset;
@@ -709,14 +707,17 @@ int smart_home_tts_synth(const char *text,
   uint32_t rate;
   int ret;
 
+  *result = (smart_home_voice_result_t){AGENT_ERROR_INVALID, 0,
+                                       SMART_HOME_VOICE_RESOURCE};
+  if (out_pcm) *out_pcm = NULL;
+  if (out_bytes) *out_bytes = 0;
+  if (out_rate) *out_rate = 0;
+
   if (text == NULL || text[0] == '\0' || out_pcm == NULL ||
       out_bytes == NULL || out_rate == NULL)
     {
       return AGENT_ERROR_INVALID;
     }
-
-  *out_pcm = NULL;
-  *out_bytes = 0;
 
   smart_home_tts_config_load(&config);
   printf("[tts] synth: text_len=%zu backend=%s model=%s voice=%s "
@@ -734,28 +735,34 @@ int smart_home_tts_synth(const char *text,
   api_style = preset != NULL ? preset->api_style
                              : SMART_HOME_TTS_API_SPEECH;
 
+  result->stage = SMART_HOME_VOICE_CREDENTIAL;
   ret = smart_home_secrets_get_api_key(SMART_HOME_SECRET_TTS, config.backend_id,
                                              api_key, sizeof(api_key));
   if (ret != AGENT_OK)
     {
       fprintf(stderr, "tts: credential backend=%s ret=%d: %s\n",
               config.backend_id, ret, smart_home_secrets_error_text(ret));
+      result->code = ret;
       return ret;
     }
 
+  result->stage = SMART_HOME_VOICE_RESOURCE;
   body = tts_build_request(&config, api_style, text);
   if (body == NULL)
     {
-      return AGENT_ERROR_NOMEM;
+      result->code = AGENT_ERROR_NOMEM;
+      return result->code;
     }
 
   audio = smart_home_bulk_alloc(CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES);
   if (audio == NULL)
     {
       free(body);
-      return AGENT_ERROR_NOMEM;
+      result->code = AGENT_ERROR_NOMEM;
+      return result->code;
     }
 
+  result->stage = SMART_HOME_VOICE_NETWORK;
   ret = tts_http_init();
   if (ret != AGENT_OK)
     {
@@ -763,7 +770,8 @@ int smart_home_tts_synth(const char *text,
       fprintf(stderr, "tts: http transport init failed: %d\n", ret);
       free(body);
       smart_home_bulk_free(audio);
-      return AGENT_ERROR_NOT_SUPPORTED;
+      result->code = ret;
+      return result->code;
     }
 
   url_len = (size_t)snprintf(url, sizeof(url), "https://%s:%s%s",
@@ -773,7 +781,9 @@ int smart_home_tts_synth(const char *text,
       fprintf(stderr, "tts: endpoint url too long\n");
       free(body);
       smart_home_bulk_free(audio);
-      return AGENT_ERROR_LIMIT;
+      result->stage = SMART_HOME_VOICE_RESOURCE;
+      result->code = AGENT_ERROR_LIMIT;
+      return result->code;
     }
 
   snprintf(auth_value, sizeof(auth_value), "Bearer %s", api_key);
@@ -822,16 +832,19 @@ int smart_home_tts_synth(const char *text,
       goto out;
     }
 
+  result->http_status = sink.status;
+  result->stage = SMART_HOME_VOICE_HTTP;
   if (sink.status < 200 || sink.status >= 300)
     {
       /* 错误响应是 JSON 文本；截断打印辅助排障。 */
-      fprintf(stderr, "tts: synth http status=%u body: %.200s\n",
-              sink.status,
+      fprintf(stderr, "tts: synth http status=%u body: %.*s\n",
+              sink.status, (int)(response_len < 200 ? response_len : 200),
               response_len > 0 ? (const char *)audio : "(empty)");
       ret = AGENT_ERROR_MODEL_FAILED;
       goto out;
     }
 
+  result->stage = SMART_HOME_VOICE_RESPONSE;
   if (api_style == SMART_HOME_TTS_API_CHAT_COMPLETIONS)
     {
       size_t decoded_len = 0;
@@ -874,10 +887,34 @@ int smart_home_tts_synth(const char *text,
   printf("[tts] wav: rate=%lu data_offset=%zu data_len=%zu\n",
          (unsigned long)rate, data_offset, data_len);
 
-  if (data_len == 0)
+  if (data_len < 2 || (data_len & 1u))
     {
       ret = AGENT_ERROR_PARSE;
       goto out;
+    }
+
+  if (rate == 24000u)
+    {
+      size_t converted_bytes = smart_home_voice_resample_bytes(data_len);
+      uint8_t *converted;
+      result->stage = SMART_HOME_VOICE_RESOURCE;
+      converted = smart_home_bulk_alloc(converted_bytes);
+      if (converted == NULL) { ret = AGENT_ERROR_NOMEM; goto out; }
+      ret = smart_home_voice_resample_24k_16k(audio + data_offset, data_len,
+                    converted, converted_bytes, &converted_bytes);
+      if (ret != 0)
+        {
+          smart_home_bulk_free(converted);
+          ret = AGENT_ERROR_INVALID;
+          goto out;
+        }
+      printf("[tts] resample: 24000->16000 bytes=%zu->%zu\n",
+             data_len, converted_bytes);
+      smart_home_bulk_free(audio);
+      audio = converted;
+      data_offset = 0;
+      data_len = converted_bytes;
+      rate = 16000;
     }
 
   /* 原地搬移去掉 WAV 头，缓冲仍由 bulk 堆分配，语义与声明一致。 */
@@ -885,9 +922,40 @@ int smart_home_tts_synth(const char *text,
   *out_pcm = audio;
   *out_bytes = data_len;
   *out_rate = rate;
+  result->code = AGENT_OK;
   return AGENT_OK;
 
 out:
+  result->code = ret;
   smart_home_bulk_free(audio);
   return ret;
+}
+
+/* All callers share the static HTTP exchange buffers. Do not let a settings
+ * test race the automatic announcement worker or a smoke command.
+ */
+static pthread_mutex_t g_tts_request_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int smart_home_tts_synth_ex(const char *text, uint8_t **out_pcm,
+                           size_t *out_bytes, uint32_t *out_rate,
+                           smart_home_voice_result_t *result)
+{
+  smart_home_voice_result_t local;
+  int ret;
+  if (result == NULL) result = &local;
+  *result = (smart_home_voice_result_t){AGENT_ERROR_BUSY, 0,
+                                       SMART_HOME_VOICE_RESOURCE};
+  if (out_pcm) *out_pcm = NULL;
+  if (out_bytes) *out_bytes = 0;
+  if (out_rate) *out_rate = 0;
+  if (pthread_mutex_trylock(&g_tts_request_mutex) != 0) return AGENT_ERROR_BUSY;
+  ret = tts_synth_impl(text, out_pcm, out_bytes, out_rate, result);
+  pthread_mutex_unlock(&g_tts_request_mutex);
+  return ret;
+}
+
+int smart_home_tts_synth(const char *text, uint8_t **out_pcm,
+                         size_t *out_bytes, uint32_t *out_rate)
+{
+  return smart_home_tts_synth_ex(text, out_pcm, out_bytes, out_rate, NULL);
 }

@@ -709,6 +709,12 @@ static void model_apply_cb(lv_event_t *event)
         return;
     }
     if (g_model.active) return;
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    if (smart_home_lvgl_voice_settings_busy(ui)) {
+        lv_label_set_text(g_settings.model_status, "请等待密钥或语音配置任务结束后重试");
+        return;
+    }
+#endif
     index = (int)lv_dropdown_get_selected(g_settings.model_dd);
     preset = smart_home_llm_backend_get((size_t)index);
     if (!preset) {
@@ -765,6 +771,20 @@ static void model_apply_cb(lv_event_t *event)
         lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+static void model_save_key_cb(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    const smart_home_llm_backend_preset_t *preset;
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui || g_model.active) return;
+    preset = smart_home_llm_backend_get(lv_dropdown_get_selected(g_settings.model_dd));
+    if (!preset) return;
+    smart_home_lvgl_save_llm_key(ui, preset->id,
+        lv_textarea_get_text(g_settings.model_key), g_settings.model_status,
+        g_settings.model_key);
+}
+#endif
 
 static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
 {
@@ -832,6 +852,20 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
                                              SMART_HOME_UI_COLOR_SURFACE, 17);
         lv_obj_center(label);
     }
+
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    {
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_t *label;
+        lv_obj_set_pos(button, 312, 312);
+        lv_obj_set_size(button, 200, 40);
+        lv_obj_add_event_cb(button, model_save_key_cb, LV_EVENT_CLICKED, ui);
+        smart_home_lvgl_press_feedback(button);
+        label = smart_home_lvgl_label_create(button, "保存 LLM 密钥",
+                                             SMART_HOME_UI_COLOR_TEXT_PRIMARY, 16);
+        lv_obj_center(label);
+    }
+#endif
 
     if (ui && ui->app) {
         initial = smart_home_llm_backend_index_for_config(
@@ -1857,9 +1891,6 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     build_display_panel(g_settings.panel[0], ui->screen_settings);
     build_network_panel(ui, g_settings.panel[1]);
     build_model_panel(ui, g_settings.panel[2]);
-#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
-    smart_home_lvgl_build_voice_settings(ui, g_settings.panel[3], NULL);
-#endif
     build_tools_panel(ui, g_settings.panel[4]);
     build_services_panel(ui, g_settings.panel[5]);
     build_health_panel(ui, g_settings.panel[6]);
@@ -1876,6 +1907,11 @@ void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_add_event_cb(g_settings.keyboard, model_keyboard_cb, LV_EVENT_ALL,
                         NULL);
     lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+    smart_home_lvgl_build_voice_settings(ui, g_settings.panel[V9_CAT_VOICE],
+                                         g_settings.keyboard);
+#endif
 
     if (ui->v9_network_timer) {
         lv_timer_delete(ui->v9_network_timer);

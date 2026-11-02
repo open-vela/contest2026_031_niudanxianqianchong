@@ -629,6 +629,14 @@ void smart_home_lvgl_process_pending(smart_home_lvgl_t *ui)
         return;
     }
 
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+    {
+        smart_home_voice_result_t result;
+        if (voice_play_take_error(&result))
+            smart_home_lvgl_append_error_bubble(ui, smart_home_voice_result_text(&result));
+    }
+#endif
+
     for (;;) {
         if (pthread_mutex_lock(&ui->pending_mutex) != 0) {
             return;

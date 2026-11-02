@@ -120,7 +120,11 @@ void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui,
                                           lv_obj_t *panel,
                                           lv_obj_t *keyboard);
+int smart_home_lvgl_save_llm_key(smart_home_lvgl_t *ui, const char *backend,
+                                 const char *key, lv_obj_t *status,
+                                 lv_obj_t *input);
 void smart_home_lvgl_voice_settings_poll(smart_home_lvgl_t *ui);
+int smart_home_lvgl_voice_settings_busy(smart_home_lvgl_t *ui);
 void smart_home_lvgl_voice_settings_deinit(smart_home_lvgl_t *ui);
 #endif
 int smart_home_lvgl_v9_settings_category_count(void);
