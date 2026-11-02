@@ -215,7 +215,8 @@ int esp_bringup(void)
 
   esp_bringup_stack_report("entry");
 
-#ifdef CONFIG_ESP32P4_DMA2D
+#if defined(CONFIG_ESP32P4_DMA2D) && \
+    !defined(CONFIG_ESP32P4_SMP_GRAPHICS_CPU0)
   ret = esp_graphics_initialize();
   if (ret < 0)
     {

@@ -8,7 +8,7 @@
 - `ppa`：复制、填充、缩放/旋转/镜像、混合及部分格式转换。
 - 首轮仅验证 P4 revision 3.x、FLAT、内部 SRAM、单核、无 PM。
 - 两个配置不启用 SmartHome、显示或摄像头；屏幕没有测试画面，结果由串口给出。
-- 原 SmartHome/SMP 配置不启用图形加速。本次接入不代表 SMP 或 LVGL 已使用 PPA。
+- `smart_home` 显式启用 CPU0 图形探针共存，其余 SMP 配置保持关闭；本次不改 UI/摄像头算法。
 
 ## 2. 构建
 
@@ -88,3 +88,41 @@ nsh> graphics_probe convert
 像素不匹配信息。Host 检查通过不作为板端通过证据。
 
 接口、缓冲约束与历史构建记录见[驱动说明](../../app/graphics_probe/README.md)。
+
+## 6. SmartHome 固件共存测试
+
+独立单核测试已由用户反馈五项 PASS；SmartHome 的 SMP/PSRAM 组合尚待板测。
+使用同一探针链接，改为构建现有 SmartHome 配置：
+
+```sh
+./build.sh contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/smart_home -j4
+```
+
+本配置的图形开关如下，构建后同时核对 SMP 和 PSRAM 用户堆仍启用：
+
+```text
+CONFIG_ESP32P4_SMP_GRAPHICS_CPU0=y
+CONFIG_ESP32P4_DMA2D=y
+CONFIG_ESP32P4_PPA=y
+CONFIG_LVX_USE_DEMO_CONTEST2026_031_GRAPHICS_PROBE=y
+```
+
+按第 3 节核对镜像和烧录参数后烧录固件，保留原 LittleFS 资源。进入 NSH 后：
+
+```text
+nsh> taskset 1 smart_home &
+nsh> graphics_probe all
+nsh> free
+nsh> graphics_probe all 100
+nsh> free
+nsh> ps
+```
+
+若 SmartHome 已启动，跳过启动命令。探针将自身固定在 CPU0，首行应打印 `cpu=0`、
+缓冲地址和轮次；PSRAM 地址窗口为 `0x48000000` 至 `0x4c000000`。
+单轮预热后再统计堆余量，排除驱动首次初始化常驻内存的影响。
+
+验收要求：每轮五项 PASS，UI 持续响应且无花屏、无复位、堆余量不持续下降；
+分别记录基础网络、摄像头预览和音频启用时的结果，不将未启动的外设计为共存通过。
+探针只访问自己的缓冲，当前未用 PPA 加速 SmartHome 页面或摄像头预览。
+跨核图形缓冲、Flash 擦写并发和性能收益仍需后续专项验证。

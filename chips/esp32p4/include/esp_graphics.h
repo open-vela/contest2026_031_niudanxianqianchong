@@ -93,6 +93,10 @@ struct esp_graphics_job_s
  * no CPU or other DMA access is allowed in that interval.  Inputs may alias
  * each other, but destination must not overlap either input.  Completion is
  * interrupt driven.  A successful submit always needs wait or cancel.
+ * SMP coexistence requires callers pinned to CPU0 for every API (-EXDEV
+ * otherwise).  Keep buffer producers/consumers on CPU0, and do not change
+ * their affinity or share buffers with CPU1 while a job is outstanding.
+ * Interrupt context is rejected with -EPERM.
  */
 
 int esp_graphics_initialize(void);

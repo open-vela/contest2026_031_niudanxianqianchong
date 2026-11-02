@@ -18,7 +18,8 @@
 
 PPA 与二维复制共用一个 DMA2D 管理层，当前一次只允许一个未回收任务。
 DMA2D 完成中断通知写回结果，PPA 参数错误中断返回 `-EIO`。
-暂不接入 LVGL、摄像头业务、JPEG、SMP 或 PM。
+暂不接入 LVGL、摄像头业务、JPEG 或 PM。
+`smart_home` 另行启用实验性 SMP 共存模式，图形操作限定在 CPU0，待组合板测。
 
 ## 构建
 
@@ -60,6 +61,30 @@ nsh> graphics_probe convert
 每项应输出 `graphics <操作>: PASS (0)`。先单项通过，再重复全套 100 次，记录复位、
 超时、堆余量和数据校验结果；未完成板端验证前不宣称吞吐提升。
 
+## SmartHome 共存验证
+
+`configs/smart_home` 显式启用 `ESP32P4_SMP_GRAPHICS_CPU0`、DMA2D、PPA 和本探针。
+该实验开关全局默认关闭；其他 SMP 配置仍不能直接启用图形驱动。
+共存模式由探针延迟初始化图形中断，不进入 SmartHome 启动路径。
+
+```text
+nsh> taskset 1 smart_home &
+nsh> graphics_probe all
+nsh> free
+nsh> graphics_probe all 100
+nsh> free
+nsh> ps
+```
+
+SmartHome 已在运行时不重复启动。探针在分配和填充缓冲之前固定到 CPU0，打印
+`cpu=0`、轮次和三个缓冲地址；`0x48000000` 至 `0x4c000000` 的窗口为 PSRAM。
+缓冲只供探针使用，不访问 framebuffer 或摄像头缓冲。
+先单轮预热再比较堆余量，因为首次初始化会常驻分配驱动实例和描述符。
+
+此阶段验证 UI 与独立图形探针共存。UI、摄像头仍走原有 CPU 处理路径。
+先观察页面切换、触摸和基础网络，再单独加入摄像头或音频，逐项保留日志。
+文件擦写并发、跨核共享图形缓冲和性能收益不在本轮已验证范围内。
+
 ## 接口与约束
 
 接口位于 `arch/chip/esp_graphics.h`：初始化后 `submit()` 返回任务号，随后必须
@@ -67,7 +92,9 @@ nsh> graphics_probe convert
 均先停止硬件，再恢复 CPU 对目标缓冲的访问。AXI 无法在 100 ms 内安全停止时触发
 PANIC，防止向调用者归还仍可能被 DMA 写入的内存。
 
-- 当前仅支持 P4 revision 3.x、FLAT、单核、无 PM。
+- 支持 P4 revision 3.x、FLAT、无 PM；独立配置为单核，SMP 共存须显式启用 CPU0 开关。
+- SMP 下所有图形 API 要求调用线程的亲和性恰为 CPU0，且实际运行在 CPU0，否则返回
+  `-EXDEV`；中断上下文返回 `-EPERM`。缓冲生产和消费也须留在 CPU0，任务期间不改变亲和性。
 - 缓冲首地址和完整分配长度须按 64 字节对齐，stride 单位为字节，必须能整除像素大小。
 - stride、ROI 起始字节偏移和行内数据长度须按 4 字节对齐；图像维度受 14 位字段限制。
   SRM 输出至少 2×2；不满足条件返回错误，由上层选择软件回退。
@@ -81,10 +108,11 @@ PANIC，防止向调用者归还仍可能被 DMA 写入的内存。
 
 ```sh
 python3 tests/esp32p4/test_graphics_bounds.py
+python3 tests/esp32p4/test_graphics_context.py
 ```
 
-该检查直接编译生产用几何校验代码，覆盖 stride、像素对齐、边界、地址溢出及描述符
-字段上限；不模拟 DMA，也不能替代板端像素和中断验收。
+检查直接编译生产用几何校验代码与上下文限制，覆盖 stride、像素对齐、边界、地址溢出、
+描述符字段上限、CPU0 亲和性及中断拒绝；不模拟 DMA，不能替代板端像素和中断验收。
 
 ## 历史验证状态（2026-10-28，初始实现）
 

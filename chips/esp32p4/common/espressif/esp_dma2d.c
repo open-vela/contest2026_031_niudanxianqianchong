@@ -22,6 +22,7 @@
 #include <arch/barriers.h>
 
 #include "esp_graphics_priv.h"
+#include "esp_graphics_context.h"
 #include "esp_irq.h"
 #include "esp_cache.h"
 #include "esp_intr_alloc.h"
@@ -236,9 +237,10 @@ int esp_graphics_initialize(void)
   int installed = 0;
   int ret;
 
-  if (up_interrupt_context())
+  ret = esp_graphics_check_context();
+  if (ret < 0)
     {
-      return -EPERM;
+      return ret;
     }
 
   ret = nxmutex_lock(&g_initialize_lock);
@@ -416,12 +418,18 @@ int esp_graphics_submit(FAR const struct esp_graphics_job_s *job,
   irqstate_t flags;
   int ret;
 
+  ret = esp_graphics_check_context();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   if (priv == NULL)
     {
       return -ENODEV;
     }
 
-  if (job == NULL || ticket == NULL || up_interrupt_context())
+  if (job == NULL || ticket == NULL)
     {
       return -EINVAL;
     }
@@ -564,7 +572,13 @@ static int esp_graphics_finish(uint32_t ticket, unsigned int timeout_ms,
   int result;
   int ret;
 
-  if (priv == NULL || up_interrupt_context())
+  ret = esp_graphics_check_context();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if (priv == NULL)
     {
       return -ENODEV;
     }

@@ -13,6 +13,7 @@
 #include <arch/chip/esp_graphics.h>
 #include <errno.h>
 #include <malloc.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,7 @@
 #define PROBE_ROWS 192
 #define PROBE_BYTES (256 * PROBE_ROWS)
 #define PROBE_TIMEOUT 1000
+#define PROBE_MAX_ROUNDS 1000
 
 /****************************************************************************
  * Private Types
@@ -491,6 +493,15 @@ static int probe_convert(struct probe_s *probe)
 }
 #endif
 
+static void probe_usage(void)
+{
+  printf("Usage: graphics_probe all | copy"
+#ifdef CONFIG_ESP32P4_PPA
+         " | fill | srm | blend | convert"
+#endif
+         " [rounds:1..1000]\n");
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -510,11 +521,57 @@ int main(int argc, FAR char *argv[])
 
   struct probe_s probe;
   const char *command = argc > 1 ? argv[1] : "all";
+  char *end;
+  unsigned long rounds = 1;
+  unsigned long round;
   unsigned int i;
   bool matched = false;
   int ret;
+#ifdef CONFIG_SMP
+  cpu_set_t cpu0;
+#endif
 
   memset(&probe, 0, sizeof(probe));
+  if (argc > 3)
+    {
+      probe_usage();
+      return EXIT_FAILURE;
+    }
+
+  if (argc > 2)
+    {
+      errno = 0;
+      rounds = strtoul(argv[2], &end, 10);
+      if (errno != 0 || end == argv[2] || *end != '\0' ||
+          rounds == 0 || rounds > PROBE_MAX_ROUNDS)
+        {
+          probe_usage();
+          return EXIT_FAILURE;
+        }
+    }
+
+  for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+    {
+      matched |= strcmp(command, "all") == 0 ||
+                 strcmp(command, tests[i].name) == 0;
+    }
+
+  if (!matched)
+    {
+      probe_usage();
+      return EXIT_FAILURE;
+    }
+
+#ifdef CONFIG_SMP
+  CPU_ZERO(&cpu0);
+  CPU_SET(0, &cpu0);
+  if (sched_setaffinity(0, sizeof(cpu0), &cpu0) < 0)
+    {
+      perror("graphics: pin CPU0");
+      return EXIT_FAILURE;
+    }
+#endif
+
   probe.source = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
   probe.foreground = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
   probe.destination = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
@@ -522,38 +579,42 @@ int main(int argc, FAR char *argv[])
   if (probe.source == NULL || probe.foreground == NULL ||
       probe.destination == NULL)
     {
+      printf("graphics: allocation failed: %d\n", ret);
       goto out;
     }
 
   ret = esp_graphics_initialize();
   if (ret < 0)
     {
+      printf("graphics: initialize failed: %d\n", ret);
       goto out;
     }
 
-  for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+  printf("graphics: cpu=%d rounds=%lu bytes=%u src=%p fg=%p dst=%p\n",
+         sched_getcpu(), rounds, PROBE_BYTES,
+         probe.source, probe.foreground, probe.destination);
+
+  for (round = 0; round < rounds; round++)
     {
-      if (strcmp(command, "all") == 0 || strcmp(command, tests[i].name) == 0)
+      if (rounds > 1)
         {
-          matched = true;
-          ret = tests[i].run(&probe);
-          printf("graphics %s: %s (%d)\n", tests[i].name,
-                 ret == 0 ? "PASS" : "FAIL", ret);
-          if (ret < 0)
+          printf("graphics round %lu/%lu\n", round + 1, rounds);
+        }
+
+      for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+        {
+          if (strcmp(command, "all") == 0 ||
+              strcmp(command, tests[i].name) == 0)
             {
-              break;
+              ret = tests[i].run(&probe);
+              printf("graphics %s: %s (%d)\n", tests[i].name,
+                     ret == 0 ? "PASS" : "FAIL", ret);
+              if (ret < 0)
+                {
+                  goto out;
+                }
             }
         }
-    }
-
-  if (!matched)
-    {
-      printf("Usage: graphics_probe all | copy"
-#ifdef CONFIG_ESP32P4_PPA
-             " | fill | srm | blend | convert"
-#endif
-             "\n");
-      ret = -EINVAL;
     }
 
 out:

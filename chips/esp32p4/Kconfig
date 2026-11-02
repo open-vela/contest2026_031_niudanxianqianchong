@@ -44,7 +44,8 @@ if ARCH_CHIP_ESP32P4
 
 config ESP32P4_DMA2D
 	bool "Experimental 2D-DMA image copy"
-	depends on EXPERIMENTAL && BUILD_FLAT && !SMP && !PM
+	depends on EXPERIMENTAL && BUILD_FLAT && !PM
+	depends on !SMP || ESP32P4_SMP_GRAPHICS_CPU0
 	depends on !ESP32P4_SELECTS_REV_LESS_V3
 	---help---
 		Enable interrupt-driven RGB565 ROI copies with linked descriptors.
@@ -105,6 +106,17 @@ config ESP32P4_SMP_SPIFLASH
 		Allow the SPI Flash MTD and LittleFS stack to be used while both HP
 		CPUs are running.  Flash operations serialize through the HAL cache
 		and IPC locks; use the smp_fs profile for concurrent validation.
+
+config ESP32P4_SMP_GRAPHICS_CPU0
+	bool "Experimental DMA2D/PPA coexistence on CPU0"
+	depends on ESP32P4_SMP
+	default n
+	---help---
+		Allow DMA2D/PPA probes alongside the SMP SmartHome firmware.
+		Initialize and use graphics only from threads pinned to CPU0.
+		Buffers must remain private to CPU0 until the job is reclaimed.
+		This does not enable cross-core graphics or accelerate the UI.
+		Graphics initialization is deferred until the probe runs.
 
 config ARCH_CUSTOM_SMP
 	bool
