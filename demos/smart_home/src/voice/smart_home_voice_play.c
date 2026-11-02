@@ -111,7 +111,11 @@ static void *voice_worker_main(void *arg)
 
       pcm = NULL;
       bytes = 0;
+      rate = 0;
+      printf("[voice] job: text_len=%zu\n", strlen(job->text));
       ret = smart_home_tts_synth(job->text, &pcm, &bytes, &rate);
+      printf("[voice] synth: ret=%d pcm=%p bytes=%zu rate=%lu\n",
+             ret, (void *)pcm, bytes, (unsigned long)rate);
       if (ret == 0)
         {
           pthread_mutex_lock(&g_voice_mutex);
@@ -121,8 +125,13 @@ static void *voice_worker_main(void *arg)
 
           if (!cancelled)
             {
-              smart_home_voice_player_play_mem(pcm, bytes, rate,
-                                               &g_voice_abort);
+              int play_ret = smart_home_voice_player_play_mem(
+                  pcm, bytes, rate, &g_voice_abort);
+              printf("[voice] play: ret=%d\n", play_ret);
+            }
+          else
+            {
+              printf("[voice] play: skipped (cancelled)\n");
             }
 
           smart_home_bulk_free(pcm);

@@ -553,6 +553,28 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
 #define TTS_HTTP_RESPONSE_HEADERS  16
 #define TTS_HTTP_RESP_HEADER_BUF   2048
 
+/* TLS 层内部握手/收发失败时只回调这个函数，之前没有接入，导致
+ * mbedTLS 的 ssl_setup/ssl_read/ssl_write 错误码全部丢失，上层只能拿到
+ * transport 兜底的 AGENT_ERROR_IO(-12)。接入后可直接看到 -0x%04x。 */
+static void tts_tls_log(void *context, agent_log_level_t level,
+                        agent_string_view_t message)
+{
+  const char *tag = "?";
+
+  (void)context;
+  switch (level)
+    {
+      case AGENT_LOG_ERROR:   tag = "err";  break;
+      case AGENT_LOG_WARNING: tag = "warn"; break;
+      case AGENT_LOG_INFO:    tag = "info"; break;
+      case AGENT_LOG_DEBUG:   tag = "dbg";  break;
+      default:                              break;
+    }
+
+  printf("[tts][tls][%s] %.*s\n", tag, (int)message.size,
+         message.data != NULL ? message.data : "");
+}
+
 static struct
 {
   bool ready;
@@ -586,6 +608,8 @@ static int tts_http_init(void)
     }
 
   tls_config.io_timeout_ms = TTS_TIMEOUT_MS;
+  tls_config.log = tts_tls_log;
+  tls_config.log_context = NULL;
   ret = agent_port_openvela_tls_init(&g_tts_http.tls, &tls_config);
   if (ret != AGENT_OK)
     {
@@ -695,6 +719,10 @@ int smart_home_tts_synth(const char *text,
   *out_bytes = 0;
 
   smart_home_tts_config_load(&config);
+  printf("[tts] synth: text_len=%zu backend=%s model=%s voice=%s "
+         "host=%s:%s%s enabled=%d\n",
+         strlen(text), config.backend_id, config.model, config.voice,
+         config.host, config.port, config.path, config.enabled);
   if (config.host[0] == '\0' || config.model[0] == '\0')
     {
       fprintf(stderr, "tts: backend not configured (voice.json)\n");
@@ -777,10 +805,16 @@ int smart_home_tts_synth(const char *text,
   sink.used = 0;
   sink.status = 0;
 
+  printf("[tts] http: POST %s body=%zu deadline=%llums\n",
+         url, strlen(body),
+         (unsigned long long)(deadline_ms -
+           g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context)));
   ret = g_tts_http.transport.ops->request(g_tts_http.transport.context,
                                           &request, &http_sink);
   free(body);
   response_len = sink.used;
+  printf("[tts] http: ret=%d status=%u body_len=%zu\n",
+         ret, sink.status, response_len);
 
   if (ret != AGENT_OK)
     {
@@ -807,10 +841,13 @@ int smart_home_tts_synth(const char *text,
           response_len, &decoded_len);
       if (ret != 0)
         {
+          printf("[tts] decode: failed ret=%d\n", ret);
           ret = AGENT_ERROR_PARSE;
           goto out;
         }
 
+      printf("[tts] decode: json=%zu base64_decoded=%zu\n",
+             response_len, decoded_len);
       response_len = decoded_len;
     }
 
@@ -818,11 +855,24 @@ int smart_home_tts_synth(const char *text,
                       &data_offset, &data_len, &rate);
   if (ret != 0)
     {
+      /* 打印前 32 字节，能直接看出是 WAV/MP3/JSON/空数据。 */
+      size_t i;
+      printf("[tts] wav: parse failed len=%zu head=", response_len);
+      for (i = 0; i < 32u && i < response_len; i++)
+        {
+          printf("%02x", audio[i]);
+        }
+      printf("\n");
       fprintf(stderr, "tts: response is not PCM16 mono wav "
               "(len=%zu)\n", response_len);
       ret = AGENT_ERROR_PARSE;
       goto out;
     }
+
+  /* 采样率是播放端 CONFIGURE 是否成功的关键：ES8311 的 MCLK/rate 系数表
+   * 在开机默认 4096000 下只有 8k/16k/32k/64k，云端给 24k 时会直接失败。 */
+  printf("[tts] wav: rate=%lu data_offset=%zu data_len=%zu\n",
+         (unsigned long)rate, data_offset, data_len);
 
   if (data_len == 0)
     {

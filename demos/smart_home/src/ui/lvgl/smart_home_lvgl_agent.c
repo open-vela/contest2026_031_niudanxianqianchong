@@ -246,10 +246,16 @@ static void agent_done_apply(agent_done_t *done)
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
             /* 语音播报在独立 worker 中合成与播放；开关关闭或服务
              * 未就绪时静默跳过，不影响气泡展示路径。 */
-            if (done->ret == AGENT_OK && voice_play_announce_enabled()) {
-                if (voice_play_text(done->output) != 0) {
-                    printf("[voice] announce enqueue failed\n");
-                }
+            if (done->ret != AGENT_OK) {
+                printf("[voice] announce skipped (ret=%d)\n", done->ret);
+            } else if (!voice_play_announce_enabled()) {
+                /* 开关关闭时此前完全静默，排查时无从判断是"没触发"还是
+                 * "触发了但无声"。这里必须留一行。 */
+                printf("[voice] announce skipped (voice.json enabled=0)\n");
+            } else {
+                int enq = voice_play_text(done->output);
+                printf("[voice] announce enqueue ret=%d text_len=%zu\n",
+                       enq, strlen(done->output));
             }
 #endif
         } else {
