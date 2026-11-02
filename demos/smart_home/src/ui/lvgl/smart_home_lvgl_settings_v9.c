@@ -565,14 +565,116 @@ static void build_network_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     lv_obj_center(label);
 }
 
+/* 弹窗的原始尺寸。键盘弹出时面板要缩到键盘上方的可用区里，收起时再还原，
+ * 两个方向都从这里取值，避免尺寸漂移。 */
+#define CONFIG_MODAL_W 680
+#define CONFIG_MODAL_H 420
+/* 面板与键盘、屏幕顶端之间至少留出的缝隙。 */
+#define CONFIG_MODAL_GAP 8
+
+static void config_modal_restore_panel(void)
+{
+    lv_obj_t *panel;
+
+    if (!g_settings.config_modal) {
+        return;
+    }
+    panel = lv_obj_get_child(g_settings.config_modal, 0);
+    if (!panel) {
+        return;
+    }
+    lv_obj_set_size(panel, CONFIG_MODAL_W, CONFIG_MODAL_H);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_pad_bottom(panel, 24, 0);
+    lv_obj_set_scroll_dir(panel, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_scroll_to(panel, 0, 0, LV_ANIM_OFF);
+}
+
+/* 键盘浮在屏幕底部、弹窗居中，靠下的输入框和弹窗底部按钮都会落到键盘
+ * 后面。聚焦时把面板缩进键盘上方的可用区，让输入框和按钮同时可见。 */
+static void config_modal_reveal_input(lv_obj_t *textarea)
+{
+    lv_obj_t *panel;
+    lv_area_t input_area;
+    lv_area_t keyboard_area;
+
+    if (!g_settings.config_modal || !g_settings.keyboard || !textarea) {
+        return;
+    }
+    /* 只处理弹窗内的输入框；设置面板自身的输入框没有遮罩，不需要位移。 */
+    {
+        lv_obj_t *walk = lv_obj_get_parent(textarea);
+
+        while (walk && walk != g_settings.config_modal) {
+            walk = lv_obj_get_parent(walk);
+        }
+        if (!walk) {
+            return;
+        }
+    }
+    panel = lv_obj_get_child(g_settings.config_modal, 0);
+    if (!panel) {
+        return;
+    }
+    /* 键盘收起时面板回到原始尺寸并居中。 */
+    if (lv_obj_has_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+        config_modal_restore_panel();
+        return;
+    }
+    /* 600 高的屏上键盘上沿约 348，扣掉缝隙后可用高度只有 340，装不下 420
+     * 的面板。把面板缩到可用区并允许内部滚动，否则面板底部的「保存 /
+     * 返回」按钮会一直藏在键盘后面，无法点击。 */
+    lv_obj_get_coords(g_settings.keyboard, &keyboard_area);
+    {
+        int32_t avail_top = CONFIG_MODAL_GAP;
+        int32_t avail_bottom = keyboard_area.y1 - CONFIG_MODAL_GAP;
+        int32_t avail_h = avail_bottom - avail_top;
+        int32_t panel_h = CONFIG_MODAL_H;
+
+        if (panel_h > avail_h) {
+            panel_h = avail_h;
+        }
+        if (panel_h < 120) {
+            panel_h = 120;   /* 键盘异常大时至少留出可操作的高度 */
+        }
+        lv_obj_set_height(panel, panel_h);
+        lv_obj_set_style_pad_bottom(panel, 8, 0);
+        lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, avail_top);
+        /* 面板比原尺寸矮时内容会溢出，允许在面板内部纵向滚动，否则靠下的
+         * 输入框会被裁掉且无法滚到。 */
+        if (panel_h < CONFIG_MODAL_H) {
+            lv_obj_set_scroll_dir(panel, LV_DIR_VER);
+            lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_AUTO);
+        } else {
+            lv_obj_set_scroll_dir(panel, LV_DIR_NONE);
+            lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+        }
+        lv_obj_update_layout(panel);
+    }
+    /* 面板变矮后靠下的输入框会落到滚动区外，把它滚进可见范围。 */
+    lv_obj_get_coords(textarea, &input_area);
+    lv_obj_get_coords(g_settings.keyboard, &keyboard_area);
+    if (input_area.y2 + CONFIG_MODAL_GAP > keyboard_area.y1) {
+        lv_obj_scroll_to_view(textarea, LV_ANIM_OFF);
+        lv_obj_update_layout(panel);
+    }
+}
+
 static void model_focus_cb(lv_event_t *event)
 {
     lv_obj_t *textarea = lv_event_get_target(event);
 
-    if (g_settings.keyboard) {
-        lv_keyboard_set_textarea(g_settings.keyboard, textarea);
-        lv_obj_clear_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    if (!g_settings.keyboard) {
+        return;
     }
+    lv_keyboard_set_textarea(g_settings.keyboard, textarea);
+    lv_obj_clear_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    /* 键盘在构建期就挂在设置屏上，而服务配置弹窗的遮罩是运行期才建的，
+     * 按子对象顺序永远排在键盘之后，会把键盘整个盖住——表现就是点输入框
+     * 之后看不见键盘、也打不进字。聚焦时把键盘提到最前，弹窗只盖内容。 */
+    lv_obj_move_foreground(g_settings.keyboard);
+    config_modal_reveal_input(textarea);
 }
 
 static void model_keyboard_cb(lv_event_t *event)
@@ -950,6 +1052,13 @@ static void miloco_config_open(smart_home_lvgl_t *ui);
 
 static void config_modal_close(void)
 {
+    /* 弹窗里的输入框是遮罩的子对象，随遮罩一起销毁；键盘只存裸指针，
+     * LVGL 不会在 textarea 删除时自动解绑。不在删除前先解绑，之后任何
+     * 按键都会写已释放内存。 */
+    if (g_settings.keyboard) {
+        lv_keyboard_set_textarea(g_settings.keyboard, NULL);
+        lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
     if (g_settings.config_modal) {
         lv_obj_delete(g_settings.config_modal);
         g_settings.config_modal = NULL;
@@ -980,7 +1089,7 @@ static lv_obj_t *config_modal_begin(const char *title)
 
     panel = lv_obj_create(mask);
     lv_obj_remove_style_all(panel);
-    lv_obj_set_size(panel, 680, 420);
+    lv_obj_set_size(panel, CONFIG_MODAL_W, CONFIG_MODAL_H);
     lv_obj_center(panel);
     smart_home_lvgl_card_style(panel);
     lv_obj_set_style_radius(panel, 18, 0);
@@ -1105,16 +1214,19 @@ static void miloco_config_open(smart_home_lvgl_t *ui)
     lv_textarea_set_text(g_settings.miloco_token, current.token);
     memset(&current, 0, sizeof(current));
 
+    /* 状态行贴在按钮上方：面板被键盘压矮时若用绝对 y，会和底部按钮叠在一起。 */
     g_settings.miloco_modal_status = smart_home_lvgl_label_create(
         panel, "配置会写入 secrets.json，重启后保留",
         SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
-    lv_obj_set_pos(g_settings.miloco_modal_status, 0, 216);
+    lv_obj_align(g_settings.miloco_modal_status, LV_ALIGN_BOTTOM_LEFT, 0, -76);
 
-    /* 次：仅扫码（地址已配置过时跳过填写）。 */
+    /* 次：仅扫码（地址已配置过时跳过填写）。
+     * 底部对齐而非绝对 y：键盘弹出时面板会被压矮（config_modal_reveal_input），
+     * 绝对坐标的按钮会跟着落到面板外，看不见也点不到。 */
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 168, 40);
-    lv_obj_set_pos(button, 0, 300);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, -24);
     lv_obj_set_style_radius(button, 10, 0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_border_color(button, SMART_HOME_UI_COLOR_BORDER, 0);
@@ -1125,11 +1237,11 @@ static void miloco_config_open(smart_home_lvgl_t *ui)
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY, 14);
     lv_obj_center(label);
 
-    /* 主：保存并连接。 */
+    /* 主：保存并连接。对齐方式同上。 */
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 200, 40);
-    lv_obj_set_pos(button, 186, 300);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 186, -24);
     lv_obj_set_style_radius(button, 10, 0);
     smart_home_lvgl_set_bg(button, SMART_HOME_UI_COLOR_PRIMARY_DARK);
     smart_home_lvgl_press_feedback(button);
@@ -1209,7 +1321,7 @@ static void mcp_config_open(smart_home_lvgl_t *ui)
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 160, 36);
-    lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_pos(button, 0, 336);
     lv_obj_set_style_radius(button, 8, 0);
     lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);

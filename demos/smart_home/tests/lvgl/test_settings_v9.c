@@ -129,6 +129,18 @@ int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,
 
 void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
 { (void)ui; }
+
+/* 米家弹窗只用来验证键盘层级，保存路径不在本用例范围内。
+ * test_voice_settings.c 会直接 include 本文件并自带这三个桩，因此用宏把
+ * 定义关掉，避免重复定义；单独构建本测试时由这里提供。 */
+#ifndef SMART_HOME_TEST_HAS_MILOCO_STUBS
+bool smart_home_miloco_config_valid(const smart_home_miloco_config_t *config)
+{ return config && config->host[0] != '\0' && config->port != 0; }
+int smart_home_miloco_request_save(smart_home_miloco_t *service,
+                                   const smart_home_miloco_config_t *config)
+{ (void)service; (void)config; return AGENT_ERROR; }
+void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui) { (void)ui; }
+#endif
 int smart_home_mcp_bridge_reconfigure(smart_home_mcp_bridge_t *bridge,
                                      const smart_home_mcp_runtime_config_t *config)
 {
@@ -140,6 +152,29 @@ int smart_home_mcp_bridge_reconfigure(smart_home_mcp_bridge_t *bridge,
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 { (void)area; (void)pixels; lv_display_flush_ready(display); }
+
+/* 可选：显示缓冲是 DIRECT 模式的 RGB565，直接转存成 PPM 便于人工核对。
+ * 只在设置了环境变量时写文件，不参与断言。 */
+static void snapshot(const uint16_t *fb, const char *var)
+{
+    const char *path = getenv(var);
+    FILE *out;
+
+    if (!path) return;
+    out = fopen(path, "wb");
+    if (!out) return;
+    fprintf(out, "P6\n1024 600\n255\n");
+    for (int i = 0; i < 1024 * 600; i++) {
+        uint16_t v = fb[i];
+        uint8_t rgb[3];
+
+        rgb[0] = (uint8_t)(((v >> 11) & 0x1F) * 255 / 31);
+        rgb[1] = (uint8_t)(((v >> 5) & 0x3F) * 255 / 63);
+        rgb[2] = (uint8_t)((v & 0x1F) * 255 / 31);
+        fwrite(rgb, 1, 3, out);
+    }
+    fclose(out);
+}
 static void heartbeat(lv_timer_t *timer)
 { (*(unsigned *)lv_timer_get_user_data(timer))++; }
 
@@ -184,6 +219,12 @@ static smart_home_lvgl_t *setup(smart_home_agent_app_t *app)
     build_model_panel(ui, g_settings.screen);
     build_network_panel(ui, g_settings.screen);
     g_settings.keyboard = lv_keyboard_create(g_settings.screen);
+    /* 复现生产布局：构建期就在屏上，贴底浮在导航栏上方。层级和遮挡判断
+     * 都依赖这套几何，缺了它测试就成了在同尺寸对象之间比坐标。 */
+    smart_home_lvgl_style_keyboard(g_settings.keyboard);
+    lv_obj_set_size(g_settings.keyboard, smart_home_lvgl_content_w(),
+                    smart_home_lvgl_keyboard_h());
+    lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
     lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_textarea_set_text(g_settings.net_ssid, "test-ssid");
     lv_textarea_set_text(g_settings.net_password, "test-password");
@@ -243,6 +284,8 @@ int main(void)
     lv_obj_t *apply = lv_button_create(screen);
     click(apply, mcp_apply_cb, ui);
     assert(mcp_calls == 1 && applied_mcp.use_tls && applied_mcp.port == 443);
+    lv_refr_now(NULL);
+    snapshot(pixels, "SMART_HOME_MCP_SHOT");
     lv_dropdown_set_selected(g_settings.mcp_protocol, 1);
     lv_textarea_set_text(g_settings.mcp_port, "80");
     lv_obj_send_event(apply, LV_EVENT_CLICKED, NULL);
@@ -254,6 +297,100 @@ int main(void)
         assert(mcp_calls == 2);
     }
     puts("PASS: explicit MCP TLS, HTTP, port validation and masked credentials");
+
+    /* 弹窗遮罩运行期才建，永远排在构建期就存在的键盘之后。输入框聚焦时必须
+     * 把键盘提到最前，否则键盘被遮罩盖住，界面上像没弹键盘、也打不进字。 */
+    assert(lv_obj_get_index(g_settings.keyboard) !=
+           (int32_t)lv_obj_get_child_count(screen) - 1);
+    lv_obj_send_event(g_settings.mcp_server, LV_EVENT_FOCUSED, NULL);
+    assert(lv_obj_get_index(g_settings.keyboard) ==
+           (int32_t)lv_obj_get_child_count(screen) - 1);
+    assert(!lv_obj_has_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_keyboard_get_textarea(g_settings.keyboard) == g_settings.mcp_server);
+    /* 弹窗居中 + 键盘贴底，靠下的输入框会落进键盘区域。聚焦时必须把面板
+     * 上移到输入框整体位于键盘上沿之上，否则看得见键盘却看不见输入框。 */
+    {
+        lv_obj_t *panel = lv_obj_get_child(g_settings.config_modal, 0);
+        lv_obj_t *inputs[] = {g_settings.mcp_server, g_settings.mcp_host,
+                              g_settings.mcp_port, g_settings.mcp_path,
+                              g_settings.mcp_auth};
+
+        for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); i++) {
+            lv_area_t input_area;
+            lv_area_t keyboard_area;
+
+            lv_obj_send_event(inputs[i], LV_EVENT_FOCUSED, NULL);
+            /* lv_obj_align 只标脏，坐标要等布局刷新后才更新。 */
+            lv_obj_update_layout(screen);
+            lv_obj_get_coords(inputs[i], &input_area);
+            lv_obj_get_coords(g_settings.keyboard, &keyboard_area);
+            assert(input_area.y2 <= keyboard_area.y1);
+            /* 面板不能顶出屏幕顶端，底部按钮也不能被键盘压住。 */
+            assert(lv_obj_get_y(panel) >= 0);
+            assert(lv_obj_get_y(panel) + lv_obj_get_height(panel) <=
+                   keyboard_area.y1);
+        }
+        /* 内容比压缩后的面板高时必须可滚动，否则底部按钮永远够不到。 */
+        if (lv_obj_get_height(panel) < 420) {
+            assert(lv_obj_get_scroll_bottom(panel) > 0);
+        }
+        lv_refr_now(NULL);
+        snapshot(pixels, "SMART_HOME_MCP_KB_SHOT");
+        /* 幂等：回到第一个输入框，面板应回到同一位置，不累积偏移。 */
+        {
+            int32_t after_last = lv_obj_get_y(panel);
+
+            lv_obj_send_event(g_settings.mcp_server, LV_EVENT_FOCUSED, NULL);
+            lv_obj_update_layout(screen);
+            assert(lv_obj_get_y(panel) == after_last);
+            /* 键盘弹出时面板在键盘上方的可用区内居中，必然更靠上。 */
+            assert(lv_obj_get_y(panel) < (600 - lv_obj_get_height(panel)) / 2);
+        }
+    }
+    puts("PASS: keyboard raised above the settings modal on focus");
+
+    /* 米家网关弹窗是影响用户的那一例，单独覆盖：三行输入框，位置比 MCP 更低。 */
+    {
+        lv_obj_t *panel;
+        lv_area_t input_area;
+        lv_area_t keyboard_area;
+
+        miloco_config_open(ui);
+        panel = lv_obj_get_child(g_settings.config_modal, 0);
+        assert(panel);
+        lv_obj_send_event(g_settings.miloco_host, LV_EVENT_FOCUSED, NULL);
+        lv_obj_update_layout(screen);
+        assert(lv_obj_get_index(g_settings.keyboard) ==
+               (int32_t)lv_obj_get_child_count(screen) - 1);
+        assert(lv_keyboard_get_textarea(g_settings.keyboard) ==
+               g_settings.miloco_host);
+        lv_obj_get_coords(g_settings.miloco_host, &input_area);
+        lv_obj_get_coords(g_settings.keyboard, &keyboard_area);
+        assert(input_area.y2 <= keyboard_area.y1);
+        assert(lv_obj_get_y(panel) >= 0);
+
+        /* 最下面一行的令牌框也必须露出来。 */
+        lv_obj_send_event(g_settings.miloco_token, LV_EVENT_FOCUSED, NULL);
+        lv_obj_update_layout(screen);
+        lv_obj_get_coords(g_settings.miloco_token, &input_area);
+        lv_obj_get_coords(g_settings.keyboard, &keyboard_area);
+        assert(input_area.y2 <= keyboard_area.y1);
+        assert(lv_obj_get_y(panel) >= 0);
+
+        /* 面板底部的「直接扫码绑定 / 保存并扫码授权」必须也在键盘上方，
+         * 否则键盘一弹出来就点不到，等于无法继续。 */
+        lv_obj_get_coords(panel, &input_area);
+        assert(input_area.y2 <= keyboard_area.y1);
+        lv_refr_now(NULL);
+        snapshot(pixels, "SMART_HOME_MILOCO_SHOT");
+        puts("PASS: miloco gateway inputs stay above the keyboard");
+    }
+
+    /* 关窗先解绑：输入框是遮罩的子对象，会随遮罩一起销毁，键盘只存裸指针。 */
+    config_modal_close();
+    assert(!lv_keyboard_get_textarea(g_settings.keyboard));
+    assert(lv_obj_has_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN));
+    puts("PASS: closing the modal unbinds the keyboard textarea");
 
     /* A held Agent lock must not block the UI callback or LVGL timers. */
     pthread_mutex_lock(&app.agent_mutex);

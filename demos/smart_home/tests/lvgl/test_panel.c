@@ -17,6 +17,7 @@ static void test_v9_cards(smart_home_lvgl_t *ui);
 static void test_v9_scene_switcher(smart_home_lvgl_t *ui);
 static void test_v9_room_catalog(smart_home_lvgl_t *ui);
 static int local_state_enabled;
+static uint32_t local_revision;
 static void capture_v9_device_modals(smart_home_lvgl_t *ui);
 static void capture_v9_settings_categories(smart_home_lvgl_t *ui);
 static void capture_v9_model_menu(smart_home_lvgl_t *ui);
@@ -396,7 +397,8 @@ static void test_home(smart_home_lvgl_t *ui)
     smart_home_lvgl_build_settings_screen_v9(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_settings_v9 != NULL);
-    assert(smart_home_lvgl_v9_settings_category_count() == 6);
+    /* 分类数随「语音服务」入口增到 7（ef99272），旧断言停在 6。 */
+    assert(smart_home_lvgl_v9_settings_category_count() == 7);
     test_v9_settings_clicks(ui);
     assert(smart_home_lvgl_v9_settings_select_category(1) == 1);
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_NETWORK_CAPTURE");
@@ -890,6 +892,10 @@ int smart_home_device_service_get_device(smart_home_device_service_t *service,
 int smart_home_device_service_copy_state(smart_home_device_service_t *s, smart_home_state_t *out)
 { if (!local_state_enabled || !s->state) return AGENT_ERROR_INVALID;
   *out = *s->state; return AGENT_OK; }
+/* home_v9 的视图刷新按 revision 门控（96d9dc4）。harness 用递增计数模拟
+ * 变化，让每条用例都能走到真实刷新路径。 */
+uint32_t smart_home_device_service_revision(smart_home_device_service_t *s)
+{ (void)s; return ++local_revision; }
 int smart_home_device_service_add_room(smart_home_device_service_t *s, const char *room)
 { (void)s; (void)room; return AGENT_ERROR_INVALID; }
 int smart_home_device_service_delete_room(smart_home_device_service_t *s, const char *a, const char *b)
@@ -1372,15 +1378,15 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
     assert(caption && key);
     lv_obj_t *left = lv_obj_get_parent(lv_obj_get_parent(caption));
     lv_obj_t *right = lv_obj_get_parent(lv_obj_get_parent(key));
-    assert(lv_obj_get_child_count(left) == 6);
-    assert(lv_obj_get_child_count(right) == 6);
+    assert(lv_obj_get_child_count(left) == 7);
+    assert(lv_obj_get_child_count(right) == 7);
     lv_screen_load(ui->screen_settings_v9);
     lv_obj_update_layout(ui->screen_settings_v9);
     lv_indev_t *input = lv_indev_create();
     lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(input, read_pointer);
     for (int area = 0; area < 3; area++) {
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             lv_obj_t *button = lv_obj_get_child(left, i);
             lv_obj_t *target = area < 2 ? lv_obj_get_child(button, area) : button;
             touch(input, target, LV_INDEV_STATE_PRESSED);
@@ -1409,8 +1415,10 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
     lv_obj_t *details = find_v9_label(ui->screen_settings_v9, "服务详情");
     assert(details);
     lv_obj_send_event(lv_obj_get_parent(details), LV_EVENT_CLICKED, NULL);
-    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 4), 0) == LV_OPA_COVER);
-    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 5), 0) == LV_OPA_TRANSP);
+    /* 「语音服务」插在第 3 位后，工具权限后移到 4、设备与服务到 5。
+     * 「服务详情」跳的是 V9_CAT_SERVICES（设备与服务），所以高亮在 5。 */
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 5), 0) == LV_OPA_COVER);
+    assert(lv_obj_get_style_bg_opa(lv_obj_get_child(left, 6), 0) == LV_OPA_TRANSP);
     assert(smart_home_lvgl_v9_settings_select_category(5) == 5);
 
     lv_obj_t *refresh_label = find_v9_label(ui->screen_settings_v9, "刷新状态");
