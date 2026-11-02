@@ -1,0 +1,40 @@
+Subject: [PATCH] audio: propagate ES8311 stream channels to I2S
+
+A mono stream must configure the controller channel layout as well as the
+codec sample rate and bit width. Otherwise stereo DMA consumes output at
+twice the requested rate and captures an empty slot between mono samples.
+Apply after 0009-es8311-demote-bringup-diagnostics.patch.
+
+--- a/drivers/audio/es8311.c
++++ b/drivers/audio/es8311.c
+@@ -1068,6 +1068,15 @@
+         es8311_reset(priv);
+         syslog(LOG_DEBUG, "DEBUG: ES8311 configure output: mode/reset done\n");
+
++        /* Match the I2S DMA layout to the requested channel count. */
++
++        ret = I2S_TXCHANNELS(priv->i2s, caps->ac_channels);
++        if (ret != caps->ac_channels)
++          {
++            ret = ret < 0 ? ret : -EINVAL;
++            break;
++          }
++
+         /* Save the current stream configuration */
+
+         priv->samprate  = caps->ac_controls.hw[0];
+@@ -1129,5 +1138,14 @@
+
+         es8311_audio_input(priv);
+         es8311_reset(priv);
++
++        /* Match the I2S DMA layout to the requested channel count. */
++
++        ret = I2S_RXCHANNELS(priv->i2s, caps->ac_channels);
++        if (ret != caps->ac_channels)
++          {
++            ret = ret < 0 ? ret : -EINVAL;
++            break;
++          }
+
+         /* Save the current stream configuration */

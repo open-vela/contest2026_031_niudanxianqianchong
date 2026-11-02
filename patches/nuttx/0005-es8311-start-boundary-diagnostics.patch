@@ -8,36 +8,55 @@ logs at those transitions.
 These are temporary bring-up diagnostics. Apply after
 0004-es8311-audio-smoke-diagnostics.patch.
 
-diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
 --- a/drivers/audio/es8311.c
 +++ b/drivers/audio/es8311.c
-@@ -361,0 +369,3 @@ static int es8311_writereg(FAR struct es8311_dev_s *priv,
-+          syslog(LOG_INFO,
-+                 "INFO: ES8311 I2C write done: reg=0x%02x ret=%d\n",
-+                 (unsigned int)regaddr, ret);
-@@ -1417,0 +1473,2 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+@@ -1470,6 +1470,8 @@
+   uint8_t adc_iface;
+
+   audinfo("ES8311 Start\n");
 +  syslog(LOG_INFO, "INFO: ES8311 start: begin mode=%d\n",
 +         priv->audio_mode);
-@@ -1451,0 +1509,2 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+
+   if (priv->audio_mode == ES_MODULE_LINE)
+     {
+@@ -1504,6 +1506,8 @@
+   /* Set internal reference signal (ADCL + DACR) */
+
+   ret |= es8311_writereg(priv, ES8311_GPIO_REG44, 0x50);
 +  syslog(LOG_INFO, "INFO: ES8311 start: control registers complete ret=%d\n",
 +         ret);
-@@ -1472,0 +1532 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+
+   if (ret < 0)
+     {
+@@ -1525,6 +1529,7 @@
+   attr.mq_curmsgs = 0;
+   attr.mq_flags   = 0;
+
 +  syslog(LOG_INFO, "INFO: ES8311 start: worker mq create begin\n");
-@@ -1484,0 +1545 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+   ret = file_mq_open(&priv->mq, priv->mqname,
+                      O_RDWR | O_CREAT, 0644, &attr);
+   if (ret < 0)
+@@ -1537,6 +1542,7 @@
+
+   /* Join any old worker thread we had created to prevent a memory leak */
+
 +  syslog(LOG_INFO, "INFO: ES8311 start: worker mq create OK\n");
-@@ -1498,0 +1560 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+   if (priv->threadid != 0)
+     {
+       audinfo("Joining old thread\n");
+@@ -1551,6 +1557,7 @@
+   pthread_attr_setstacksize(&tattr, CONFIG_ES8311_WORKER_STACKSIZE);
+
+   audinfo("Starting worker thread\n");
 +  syslog(LOG_INFO, "INFO: ES8311 start: worker create begin\n");
-@@ -1508,0 +1571 @@ static int es8311_start(FAR struct audio_lowerhalf_s *dev)
+   ret = pthread_create(&priv->threadid, &tattr, es8311_workerthread,
+                        (pthread_addr_t)priv);
+   if (ret != OK)
+@@ -1561,6 +1568,7 @@
+     {
+       pthread_setname_np(priv->threadid, "es8311");
+       audinfo("Created worker thread\n");
 +      syslog(LOG_INFO, "INFO: ES8311 start: worker create OK\n");
-diff --git a/demos/smart_home/src/audio/audio_smoke_main.c b/demos/smart_home/src/audio/audio_smoke_main.c
---- a/demos/smart_home/src/audio/audio_smoke_main.c
-+++ b/demos/smart_home/src/audio/audio_smoke_main.c
-@@ -406,0 +407 @@ static int audio_smoke_run(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] start begin\n");
-@@ -411,0 +413 @@ static int audio_smoke_run(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] start OK\n");
-@@ -420,0 +423 @@ static int audio_smoke_run(FAR struct audio_smoke_state_s *state,
-+      printf("[audio_smoke] enqueue initial buffer %u begin\n", index);
-@@ -425,0 +429,2 @@ static int audio_smoke_run(FAR struct audio_smoke_state_s *state,
-+
-+      printf("[audio_smoke] enqueue initial buffer %u OK\n", index);
+     }
+
+   return ret;

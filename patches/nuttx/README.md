@@ -37,7 +37,8 @@ git apply --unidiff-zero ../contest2026_031_niudanxianqianchong/patches/nuttx/00
 
 当前配置未启用 `CONFIG_LIBC_SEM_MUTEX_NOINLINE`，`nxmutex_init/lock/unlock` 是头文件中的内联实现。缺少该头文件时，编译器按隐式外部函数处理，随后链接失败；不需要新增互斥锁库或更改同步实现。
 
-本机 NuttX 工作区已经按上述顺序应用九个音频补丁，不要重复执行。固件编译及板端录放音仍需验证。
+本机已有的补丁不要重复应用。新增单声道补丁和本轮板端验证见本文末尾，以及
+[录放修复记录](../../docs/开发日志/ESP32-P4X-SMP-ES8311录放修复记录_20261102.md)。
 
 ## RISC-V 自定义 SMP
 
@@ -75,3 +76,24 @@ git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0012-espressif-ri
 git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
 git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0013-usrsock-guard-net-only-inline.patch
 ```
+
+
+## ES8311 单声道配置
+
+14. `0014-es8311-configure-i2s-channels.patch`：将应用申请的声道数传给
+    `I2S_TXCHANNELS` / `I2S_RXCHANNELS`，检查实际返回的声道数。
+    结合本项目 P4 RX 单声道槽选择，修复单声道录音夹入空槽、录放耗时减半的问题。
+
+```sh
+git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0014-es8311-configure-i2s-channels.patch
+git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0014-es8311-configure-i2s-channels.patch
+```
+
+`0004`、`0005`、`0006` 已改用上下文补丁；`0004`、`0005` 不再混入比赛应用
+的修改，应用诊断直接保存在本仓源码中。14 个补丁在 NuttX
+`106bf012365ed035c6d6c717e73448e76089d721` 的干净文件上按序检查、应用通过，
+重放后的 ES8311 文件与板端验证所编译的源码逐字节一致。
+
+当前 `smart_home` 使用 4032 字节、2 个 codec 缓冲。P4 RX 超过单帧上限的请求
+返回 `-EFBIG`，暂不支持一个接收请求跨多个 EOF。使用 `GETBUFFERINFO` 返回的
+大小分配缓冲，避免硬编码 4096 字节。

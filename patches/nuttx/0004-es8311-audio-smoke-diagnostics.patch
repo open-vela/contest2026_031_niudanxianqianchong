@@ -8,92 +8,143 @@ the final I2C register operation entered before a bus transfer stalls.
 These are temporary bring-up diagnostics. Apply after
 0003-es8311-propagate-configure-errors.patch.
 
-diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
 --- a/drivers/audio/es8311.c
 +++ b/drivers/audio/es8311.c
-@@ -43,0 +44 @@
+@@ -41,6 +41,7 @@
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <string.h>
 +#include <syslog.h>
-@@ -256,0 +259,2 @@ uint8_t es8311_readreg(FAR struct es8311_dev_s *priv, uint8_t regaddr)
+
+ #include <nuttx/audio/audio.h>
+ #include <nuttx/audio/es8311.h>
+@@ -255,6 +256,8 @@
+        * completed.
+        */
+
 +      syslog(LOG_INFO, "INFO: ES8311 I2C read begin: reg=0x%02x try=%d\n",
 +             (unsigned int)regaddr, retries + 1);
-@@ -337,0 +342,3 @@ static int es8311_writereg(FAR struct es8311_dev_s *priv,
+       ret = I2C_TRANSFER(priv->i2c, msg, 2);
+       if (ret < 0)
+         {
+@@ -336,6 +339,9 @@
+        * completed.
+        */
+
 +      syslog(LOG_INFO,
 +             "INFO: ES8311 I2C write begin: reg=0x%02x val=0x%02x try=%d\n",
 +             (unsigned int)regaddr, (unsigned int)regval, retries + 1);
-@@ -598,0 +607,3 @@ static int es8311_setbitspersample(FAR struct es8311_dev_s *priv)
+       ret = i2c_write(priv->i2c, &config, data, 2);
+       if (ret < 0)
+         {
+@@ -360,6 +366,9 @@
+            * return.
+            */
+
++          syslog(LOG_INFO,
++                 "INFO: ES8311 I2C write done: reg=0x%02x ret=%d\n",
++                 (unsigned int)regaddr, ret);
+           audinfo("Write: %02x <- %02x\n", regaddr, regval);
+           return OK;
+         }
+@@ -598,6 +607,9 @@
+
+   DEBUGASSERT(priv && priv->lower);
+
 +  syslog(LOG_INFO, "INFO: ES8311 width: begin bps=%d mode=%d\n",
 +         priv->bpsamp, priv->audio_mode);
 +
-@@ -624,0 +636 @@ static int es8311_setbitspersample(FAR struct es8311_dev_s *priv)
+   switch (priv->bpsamp)
+     {
+       case 16:
+@@ -624,6 +636,7 @@
+       return ret;
+     }
+
 +  syslog(LOG_INFO, "INFO: ES8311 width: I2S RX configured\n");
-@@ -631,0 +644 @@ static int es8311_setbitspersample(FAR struct es8311_dev_s *priv)
+   ret = I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
+   if (ret < 0)
+     {
+@@ -631,6 +644,7 @@
+       return ret;
+     }
+
 +  syslog(LOG_INFO, "INFO: ES8311 width: I2S TX configured\n");
-@@ -685,0 +699,4 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
+   ret = 0;
+   if (priv->audio_mode == ES_MODULE_ADC ||
+       priv->audio_mode == ES_MODULE_ADC_DAC)
+@@ -685,6 +699,10 @@
+
+   priv->mclk = I2S_GETMCLKFREQUENCY(priv->i2s);
+   coeff_index = es8311_getcoeff(priv, priv->samprate);
 +  syslog(LOG_INFO,
 +         "INFO: ES8311 samplerate: begin rate=%" PRIu32
 +         " mclk=%" PRIu32 " coeff=%d\n",
 +         priv->samprate, priv->mclk, coeff_index);
-@@ -699,0 +717 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
+
+   if (coeff_index < 0)
+     {
+@@ -699,6 +717,7 @@
+       return ret;
+     }
+
 +  syslog(LOG_INFO, "INFO: ES8311 samplerate: I2S RX configured\n");
-@@ -706,0 +725,2 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
+   ret = I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
+   if (ret < 0)
+     {
+@@ -706,6 +725,8 @@
+       return ret;
+     }
+
 +  syslog(LOG_INFO, "INFO: ES8311 samplerate: I2S TX configured\n");
 +  syslog(LOG_INFO, "INFO: ES8311 samplerate: codec clocks begin\n");
-@@ -771,0 +792,2 @@ static int es8311_setsamplerate(FAR struct es8311_dev_s *priv)
+   ret = 0;
+   regconfig = es8311_readreg(priv, ES8311_CLK_MANAGER_REG02) & 0x07;
+   regconfig |= (es8311_coeff_div[coeff_index].pre_div - 1) << 5;
+@@ -771,6 +792,8 @@
+
+   ret |= es8311_writereg(priv, ES8311_CLK_MANAGER_REG06, regconfig);
+
 +  syslog(LOG_INFO, "INFO: ES8311 samplerate: codec clocks complete\n");
 +
-@@ -1036,0 +1059,5 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
+   if (ret < 0)
+     {
+       auderr("Failed to set sample rate.\n");
+@@ -1036,14 +1059,22 @@
+             break;
+           }
+
 +        syslog(LOG_INFO,
 +               "INFO: ES8311 configure output: mode/reset begin"
 +               " rate=%" PRIu32 " bps=%u\n",
 +               caps->ac_controls.hw[0],
 +               (unsigned int)caps->ac_controls.b[2]);
-@@ -1038,0 +1066 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
+         es8311_audio_output(priv);
+         es8311_reset(priv);
 +        syslog(LOG_INFO, "INFO: ES8311 configure output: mode/reset done\n");
-@@ -1045,0 +1073,2 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
+
+         /* Save the current stream configuration */
+
+         priv->samprate  = caps->ac_controls.hw[0];
+         priv->bpsamp    = caps->ac_controls.b[2];
+
 +        syslog(LOG_INFO,
 +               "INFO: ES8311 configure output: samplerate begin\n");
-@@ -1051,0 +1085 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
+         ret = es8311_setsamplerate(priv);
+         if (ret == -ENOTTY)
+           {
+@@ -1055,10 +1086,14 @@
+             break;
+           }
+
 +        syslog(LOG_INFO, "INFO: ES8311 configure output: width begin\n");
-@@ -1051,0 +1092,2 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
+         ret = es8311_setbitspersample(priv);
+         if (ret == -ENOTTY)
+           {
+             ret = OK;
+           }
++
 +        syslog(LOG_INFO, "INFO: ES8311 configure output: complete ret=%d\n",
 +               ret);
-diff --git a/demos/smart_home/src/audio/audio_smoke_main.c b/demos/smart_home/src/audio/audio_smoke_main.c
---- a/demos/smart_home/src/audio/audio_smoke_main.c
-+++ b/demos/smart_home/src/audio/audio_smoke_main.c
-@@ -114,0 +115,3 @@ static int audio_smoke_configure(int fd, uint8_t type)
-+  printf("[audio_smoke] configure begin: type=%u rate=%u bps=%u\n",
-+         (unsigned int)type, (unsigned int)AUDIO_SMOKE_SAMPLE_RATE,
-+         (unsigned int)caps.caps.ac_controls.b[2]);
-@@ -119,0 +123 @@ static int audio_smoke_configure(int fd, uint8_t type)
-+  printf("[audio_smoke] configure OK\n");
-@@ -127,0 +132,3 @@ static int audio_smoke_allocate_buffers(FAR struct audio_smoke_state_s *state)
-+  printf("[audio_smoke] allocate buffers: count=%u size=%u\n",
-+         (unsigned int)state->buffer_info.nbuffers,
-+         (unsigned int)state->buffer_info.buffer_size);
-@@ -144,0 +152,2 @@ static int audio_smoke_allocate_buffers(FAR struct audio_smoke_state_s *state)
-+
-+      printf("[audio_smoke] allocate buffer %u OK\n", index);
-@@ -211,0 +221 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] prepare: open %s\n", device);
-@@ -217,0 +228,2 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] prepare: open OK fd=%d\n", state->audio_fd);
-+  printf("[audio_smoke] reserve begin\n");
-@@ -222,0 +235 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] reserve OK\n");
-@@ -238,0 +252,9 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+      printf("[audio_smoke] buffer info fallback: count=%u size=%u\n",
-+             (unsigned int)state->buffer_info.nbuffers,
-+             (unsigned int)state->buffer_info.buffer_size);
-+    }
-+  else
-+    {
-+      printf("[audio_smoke] buffer info: count=%u size=%u\n",
-+             (unsigned int)state->buffer_info.nbuffers,
-+             (unsigned int)state->buffer_info.buffer_size);
-@@ -250,0 +273 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] mq open: %s\n", state->mq_name);
-@@ -256,0 +280,2 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] mq open OK\n");
-+  printf("[audio_smoke] register mq begin\n");
-@@ -262,0 +288 @@ static int audio_smoke_prepare(FAR struct audio_smoke_state_s *state,
-+  printf("[audio_smoke] register mq OK\n");
+       }
+       break;
