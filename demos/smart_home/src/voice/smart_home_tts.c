@@ -538,8 +538,8 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
 }
 
 /* ── HTTP 通路（cAGENT V2 openvela port：runtime + mbedTLS + webclient）──
- * 与 smart_home_agent_backend 的组合方式一致。合成只被播报 worker 线程
- * 串行调用，静态上下文不需要加锁。 */
+ * 与 smart_home_agent_backend 的组合方式一致。静态上下文及请求诊断由
+ * smart_home_tts_synth_ex() 的互斥锁保护，设置测试与播报不能同时调用。 */
 
 #define TTS_HTTP_URL_MAX           288
 #define TTS_HTTP_HEADER_BUFFER     512
@@ -549,6 +549,10 @@ int smart_home_tts_config_save(const smart_home_tts_config_t *config)
  * transport 报 AGENT_ERROR_CAPACITY(-16)。对齐 LLM 后端的 16/2048。 */
 #define TTS_HTTP_RESPONSE_HEADERS  16
 #define TTS_HTTP_RESP_HEADER_BUF   2048
+
+/* Relative timestamps use the same monotonic clock as the request deadline. */
+static uint64_t g_tts_request_started_ms;
+static uint64_t tts_http_elapsed_ms(void);
 
 /* TLS 层内部握手/收发失败时只回调这个函数，之前没有接入，导致
  * mbedTLS 的 ssl_setup/ssl_read/ssl_write 错误码全部丢失，上层只能拿到
@@ -568,8 +572,9 @@ static void tts_tls_log(void *context, agent_log_level_t level,
       default:                              break;
     }
 
-  printf("[tts][tls][%s] %.*s\n", tag, (int)message.size,
-         message.data != NULL ? message.data : "");
+  printf("[tts][tls][%s] %.*s elapsed_ms=%llu\n", tag, (int)message.size,
+         message.data != NULL ? message.data : "",
+         (unsigned long long)tts_http_elapsed_ms());
 }
 
 static struct
@@ -586,6 +591,14 @@ static struct
   agent_http_header_t response_headers[TTS_HTTP_RESPONSE_HEADERS];
   char response_header_buffer[TTS_HTTP_RESP_HEADER_BUF];
 } g_tts_http;
+
+static uint64_t tts_http_elapsed_ms(void)
+{
+  uint64_t now;
+  if (g_tts_http.runtime.now_ms == NULL) return 0;
+  now = g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context);
+  return now >= g_tts_request_started_ms ? now - g_tts_request_started_ms : 0;
+}
 
 static int tts_http_init(void)
 {
@@ -650,7 +663,80 @@ typedef struct
   size_t capacity;
   size_t used;
   unsigned int status;
+  uint64_t headers_ms;
+  uint64_t first_body_ms;
+  uint64_t last_body_ms;
+  uint64_t progress_ms;
+  uint64_t expected_bytes;
+  size_t progress_bytes;
+  size_t body_callbacks;
+  bool headers_seen;
+  bool length_known;
+  bool length_invalid;
+  bool transfer_encoding;
 } tts_http_sink_t;
+
+/* Header views are length-delimited. Never assume a trailing NUL. */
+static bool tts_header_is(agent_string_view_t name, const char *expected)
+{
+  size_t i;
+  if (name.data == NULL || name.size != strlen(expected)) return false;
+  for (i = 0; i < name.size; i++)
+    {
+      unsigned char c = (unsigned char)name.data[i];
+      if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+      if (c != (unsigned char)expected[i]) return false;
+    }
+  return true;
+}
+
+static bool tts_content_length(agent_string_view_t value, uint64_t *length)
+{
+  size_t i = 0, end = value.size;
+  uint64_t number = 0;
+  if (value.data == NULL) return false;
+  while (i < end && (value.data[i] == ' ' || value.data[i] == '\t')) i++;
+  while (end > i && (value.data[end - 1] == ' ' || value.data[end - 1] == '\t')) end--;
+  if (i == end) return false;
+  for (; i < end; i++)
+    {
+      unsigned char c = (unsigned char)value.data[i];
+      if (c < '0' || c > '9' || number > (UINT64_MAX - (c - '0')) / 10u)
+        return false;
+      number = number * 10u + (c - '0');
+    }
+  *length = number;
+  return true;
+}
+
+/* A matched Content-Length is a byte-count observation, not HTTP success.
+ * Transfer-Encoding takes precedence; framing completion is inside webclient.
+ */
+static const char *tts_length_state(const tts_http_sink_t *sink)
+{
+  if (sink->transfer_encoding) return "transfer-encoded";
+  if (sink->length_invalid) return "invalid";
+  if (!sink->length_known) return "unknown";
+  if (sink->used < sink->expected_bytes) return "short";
+  return sink->used == sink->expected_bytes ? "matched" : "over";
+}
+
+static void tts_http_report(const tts_http_sink_t *sink, int ret)
+{
+  uint64_t elapsed = tts_http_elapsed_ms();
+  printf("[tts] http: ret=%d status=%u body_len=%zu elapsed_ms=%llu "
+         "headers_seen=%u headers_cb_ms=%llu first_body_ms=%llu "
+         "last_body_ms=%llu body_idle_ms=%llu callbacks=%zu "
+         "length_known=%u expected_len=%llu length_state=%s deadline_expired=%u\n",
+         ret, sink->status, sink->used, (unsigned long long)elapsed,
+         (unsigned int)sink->headers_seen, (unsigned long long)sink->headers_ms,
+         (unsigned long long)sink->first_body_ms,
+         (unsigned long long)sink->last_body_ms,
+         (unsigned long long)(sink->body_callbacks ? elapsed - sink->last_body_ms : 0),
+         sink->body_callbacks, (unsigned int)sink->length_known,
+         (unsigned long long)sink->expected_bytes, tts_length_state(sink),
+         (unsigned int)(elapsed >= TTS_TIMEOUT_MS));
+}
 
 static agent_error_t tts_sink_headers(void *context, unsigned int status,
                                       const agent_http_header_t *headers,
@@ -658,9 +744,39 @@ static agent_error_t tts_sink_headers(void *context, unsigned int status,
 {
   tts_http_sink_t *sink = context;
 
-  (void)headers;
-  (void)count;
+  size_t i;
   sink->status = status;
+  sink->headers_seen = true;
+  sink->headers_ms = tts_http_elapsed_ms();
+  printf("[tts] headers: status=%u count=%zu elapsed_ms=%llu\n",
+         status, count, (unsigned long long)sink->headers_ms);
+  for (i = 0; i < count; i++)
+    {
+      const agent_http_header_t *h = &headers[i];
+      bool is_length = tts_header_is(h->name, "content-length");
+      bool is_transfer = tts_header_is(h->name, "transfer-encoding");
+      /* Whitelist framing/type headers only; no cookies, keys or body text. */
+      if (is_length || is_transfer || tts_header_is(h->name, "connection") ||
+          tts_header_is(h->name, "content-type") ||
+          tts_header_is(h->name, "content-encoding"))
+        printf("[tts] header: %.*s: %.*s\n",
+               (int)h->name.size, h->name.data,
+               (int)(h->value.size < 160u ? h->value.size : 160u),
+               h->value.data != NULL ? h->value.data : "");
+      if (is_transfer) sink->transfer_encoding = true;
+      if (is_length)
+        {
+          uint64_t length;
+          if (sink->length_known || sink->length_invalid ||
+              !tts_content_length(h->value, &length))
+            sink->length_invalid = true;
+          else
+            {
+              sink->length_known = true;
+              sink->expected_bytes = length;
+            }
+        }
+    }
   return AGENT_OK;
 }
 
@@ -676,6 +792,24 @@ static agent_error_t tts_sink_body(void *context, const void *data,
 
       memcpy(sink->buffer + sink->used, data, copy);
       sink->used += copy;
+    }
+
+  if (size > 0)
+    {
+      uint64_t elapsed = tts_http_elapsed_ms();
+      if (sink->body_callbacks == 0) sink->first_body_ms = elapsed;
+      sink->body_callbacks++;
+      sink->last_body_ms = elapsed;
+      /* Bound serial overhead: first callback, then 64 KiB or 5 s of progress. */
+      if (sink->body_callbacks == 1 ||
+          sink->used - sink->progress_bytes >= 65536u ||
+          elapsed - sink->progress_ms >= 5000u)
+        {
+          printf("[tts] receive: elapsed_ms=%llu body_len=%zu callbacks=%zu\n",
+                 (unsigned long long)elapsed, sink->used, sink->body_callbacks);
+          sink->progress_bytes = sink->used;
+          sink->progress_ms = elapsed;
+        }
     }
 
   /* 超出 TTS 音频上限的尾部丢弃；与旧 http_post 的截断行为一致。 */
@@ -792,8 +926,9 @@ static int tts_synth_impl(const char *text,
   headers[1].name = agent_string_view("Content-Type", 12u);
   headers[1].value = agent_string_view("application/json", 16u);
 
-  deadline_ms = g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context) +
-                TTS_TIMEOUT_MS;
+  g_tts_request_started_ms =
+      g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context);
+  deadline_ms = g_tts_request_started_ms + TTS_TIMEOUT_MS;
 
   memset(&request, 0, sizeof(request));
   request.method = agent_string_view("POST", 4u);
@@ -810,21 +945,23 @@ static int tts_synth_impl(const char *text,
   http_sink.headers = tts_sink_headers;
   http_sink.body = tts_sink_body;
   http_sink.context = &sink;
+  memset(&sink, 0, sizeof(sink));
   sink.buffer = audio;
   sink.capacity = CONFIG_SMART_HOME_TTS_AUDIO_MAX_BYTES;
   sink.used = 0;
   sink.status = 0;
 
-  printf("[tts] http: POST %s body=%zu deadline=%llums\n",
+  printf("[tts] http: POST %s body=%zu deadline=%llums "
+         "io_timeout_ms=%u io_buffer=%zu\n",
          url, strlen(body),
          (unsigned long long)(deadline_ms -
-           g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context)));
+           g_tts_http.runtime.now_ms(g_tts_http.runtime.clock_context)),
+         (unsigned int)TTS_TIMEOUT_MS, sizeof(g_tts_http.io_buffer));
   ret = g_tts_http.transport.ops->request(g_tts_http.transport.context,
                                           &request, &http_sink);
   free(body);
   response_len = sink.used;
-  printf("[tts] http: ret=%d status=%u body_len=%zu\n",
-         ret, sink.status, response_len);
+  tts_http_report(&sink, ret);
 
   if (ret != AGENT_OK)
     {

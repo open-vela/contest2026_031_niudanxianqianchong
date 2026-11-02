@@ -7,7 +7,9 @@
 
 static int credential_result, transport_result, invalid_body, deny_converted;
 static unsigned status_code=200, source_rate=24000, http_calls;
-static uint64_t fake_now(void *context) { (void)context; return 1; }
+static uint64_t fake_clock = 1000;
+static int diagnostic_case;
+static uint64_t fake_now(void *context) { (void)context; return fake_clock; }
 void *smart_home_bulk_alloc(size_t size)
 { return deny_converted && size==32000 ? NULL : malloc(size); }
 void smart_home_bulk_free(void *p) { free(p); }
@@ -29,11 +31,44 @@ agent_error_t agent_port_openvela_tls_init(agent_port_openvela_tls_t *state,
 
 static void put16(uint8_t *p,uint16_t v) { p[0]=v; p[1]=v>>8; }
 static void put32(uint8_t *p,uint32_t v) { put16(p,v); put16(p+2,v>>16); }
+/* Controlled byte/timing scenarios; no real network or credentials. */
+static agent_error_t diagnostic_request(const agent_http_sink_t *sink)
+{
+    uint64_t start = fake_clock;
+    fake_clock = start + 100;
+    tts_tls_log(NULL,AGENT_LOG_INFO,agent_string_view("tls handshake ok test",21));
+    if (diagnostic_case == 6) {
+        fake_clock = start + 31000;
+        return AGENT_ERROR_TIMEOUT;
+    }
+    agent_http_header_t headers[] = {
+        { {"cOnTeNt-LeNgTh!",14}, {" 8 ",3} }, /* borrowed, non-NUL name view */
+        { {"Connection",10}, {"keep-alive",10} },
+        { {"Content-Type",12}, {"application/json",16} },
+        { {"Set-Cookie",10}, {"secret-cookie",13} },
+        { {"Transfer-Encoding",17}, {"chunked",7} },
+    };
+    size_t count = diagnostic_case == 3 ? 5 : 4;
+    if (diagnostic_case == 4) headers[0].name=agent_string_view("X-Length",8);
+    if (diagnostic_case == 5) headers[0].value=agent_string_view("18446744073709551616",20);
+    fake_clock = start + 500;
+    assert(sink->headers(sink->context,200,headers,count)==0);
+    assert(sink->body(sink->context,"1234",4)==0);
+    if (diagnostic_case != 1) {
+        fake_clock = start + 1000;
+        assert(sink->body(sink->context,"5678",4)==0);
+    }
+    fake_clock = start + 31000;
+    return AGENT_ERROR_TIMEOUT;
+}
+
 static agent_error_t fake_request(void *ctx,const agent_http_request_t *request,
     const agent_http_sink_t *sink)
 {
     (void)ctx;
     http_calls++;
+    assert(request->deadline_ms - g_tts_request_started_ms == 30000);
+    if (diagnostic_case) return diagnostic_request(sink);
     assert(request->headers[0].value.size==strlen("Bearer test-tts-only"));
     assert(!memcmp(request->headers[0].value.data,"Bearer test-tts-only",
                    request->headers[0].value.size));
@@ -104,7 +139,7 @@ static double test_tone(unsigned hz)
     }
     return rms(output,16000);
 }
-int main(void)
+int main(int argc,char **argv)
 {
     uint8_t *pcm=NULL; size_t bytes=0; uint32_t rate=0;
     smart_home_voice_result_t result;
@@ -113,6 +148,14 @@ int main(void)
     strcpy(g_tts_config.backend_id,"mimo"); strcpy(g_tts_config.model,"tts");
     strcpy(g_tts_config.host,"example.invalid"); strcpy(g_tts_config.path,"/chat");
     strcpy(g_tts_config.port,"443"); strcpy(g_tts_config.voice,"mimo_default");
+    if (argc > 1 && !strcmp(argv[1],"--diagnostics")) {
+        for (diagnostic_case=1;diagnostic_case<=6;diagnostic_case++) {
+            printf("CASE %d\n",diagnostic_case);
+            assert(smart_home_tts_synth_ex("test",&pcm,&bytes,&rate,&result)==AGENT_ERROR_TIMEOUT);
+            assert(result.stage==SMART_HOME_VOICE_NETWORK && !pcm && !bytes && !rate);
+        }
+        return 0;
+    }
     credential_result=AGENT_ERROR_NOT_FOUND;
     assert(smart_home_tts_synth_ex("test",&pcm,&bytes,&rate,&result)==credential_result);
     assert(result.stage==SMART_HOME_VOICE_CREDENTIAL && !http_calls && !pcm);

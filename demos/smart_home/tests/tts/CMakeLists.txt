@@ -32,3 +32,8 @@ target_compile_options(voice_play_check PRIVATE -Wall -Wextra
 target_link_libraries(voice_play_check PRIVATE pthread)
 add_test(NAME voice_play_check COMMAND voice_play_check)
 set_tests_properties(voice_play_check PROPERTIES TIMEOUT 15)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME tts_diagnostics_check COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_diagnostics.py" "$<TARGET_FILE:tts_check>")
+set_tests_properties(tts_diagnostics_check PROPERTIES TIMEOUT 15)
