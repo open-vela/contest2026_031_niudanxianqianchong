@@ -235,6 +235,45 @@ int smart_home_secrets_model_api_key_status(const char *backend_id)
     return smart_home_secrets_api_key_status(SMART_HOME_SECRET_LLM, backend_id);
 }
 
+/* 三个服务各自默认的密钥条目。MiMo 是 LLM/ASR/TTS 共同的默认后端，
+ * 新建或补齐文档时必须留下它的空条目，否则界面读不到"未配置"以外的
+ * 状态，也无法在同一个 backend_id 下继续沿用既有密钥。 */
+static const smart_home_secret_service_t g_secret_services[] = {
+    SMART_HOME_SECRET_LLM,
+    SMART_HOME_SECRET_ASR,
+    SMART_HOME_SECRET_TTS
+};
+
+#define SMART_HOME_SECRET_DEFAULT_BACKEND "mimo"
+
+/* 保证某个服务段存在，并且含默认后端的空条目。已有条目一律不动。
+ * 返回 AGENT_OK 或错误码。 */
+static int ensure_key_section(cJSON *root,
+                              smart_home_secret_service_t service)
+{
+    const char *section = smart_home_secrets_key_section(service);
+    cJSON *keys;
+
+    if (!section) {
+        return AGENT_ERROR_INVALID;
+    }
+    keys = cJSON_GetObjectItemCaseSensitive(root, section);
+    if (keys && !cJSON_IsObject(keys)) {
+        return AGENT_ERROR_PARSE;
+    }
+    if (!keys) {
+        keys = cJSON_AddObjectToObject(root, section);
+        if (!keys) {
+            return AGENT_ERROR_NOMEM;
+        }
+    }
+    if (!cJSON_GetObjectItemCaseSensitive(keys, SMART_HOME_SECRET_DEFAULT_BACKEND) &&
+        !cJSON_AddStringToObject(keys, SMART_HOME_SECRET_DEFAULT_BACKEND, "")) {
+        return AGENT_ERROR_NOMEM;
+    }
+    return AGENT_OK;
+}
+
 /* Refuse malformed existing documents rather than replacing other credentials. */
 static int load_update_root(cJSON **out)
 {
@@ -242,7 +281,9 @@ static int load_update_root(cJSON **out)
     size_t size = 0;
     cJSON *root;
     const cJSON *version;
-    int ret = read_secrets_file(&text, &size);
+    int ret, i;
+
+    ret = read_secrets_file(&text, &size);
     if (ret == AGENT_ERROR_NOT_FOUND) {
         root = cJSON_CreateObject();
         if (!root || !cJSON_AddNumberToObject(root, "version", 1)) {
@@ -261,6 +302,18 @@ static int load_update_root(cJSON **out)
             return AGENT_ERROR_PARSE;
         }
     }
+
+    /* 新建文档补齐全部三段；老文档只补缺失的段，绝不覆盖已有密钥。
+     * 这样拆分 asr/tts 段之后，原有的 model_api_keys（含 mimo）仍然留在
+     * 文件里，不会因为一次保存就消失。 */
+    for (i = 0; i < (int)(sizeof(g_secret_services) / sizeof(g_secret_services[0])); i++) {
+        ret = ensure_key_section(root, g_secret_services[i]);
+        if (ret != AGENT_OK) {
+            cJSON_Delete(root);
+            return ret;
+        }
+    }
+
     *out = root;
     return AGENT_OK;
 }
