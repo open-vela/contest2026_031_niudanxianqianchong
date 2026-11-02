@@ -59,6 +59,19 @@ int voice_capture_stop_listening(voice_capture_frame_cb_t cb);
 int voice_capture_record(int seconds, const volatile int *abort,
                          uint8_t **out_pcm, size_t *out_bytes);
 
+/* 带 VAD 自动断句的录制（CONFIG_SMART_HOME_VAD 关闭时等价于上者）。
+ *
+ * 检测到人声之后，若连续 silence_ms 毫秒处于非语音状态，则提前结束录音，
+ * 用于"唤醒后说完自动发送"。未检测到任何人声时不提前结束，只受 seconds
+ * 上限约束，避免把整段录音裁成空。
+ */
+int voice_capture_record_vad(int seconds, const volatile int *abort,
+                             int silence_ms,
+                             uint8_t **out_pcm, size_t *out_bytes);
+
+/* 当前 VAD 是否认为有人在说话（未编入 VAD 时恒返回 0）。 */
+int voice_capture_speech_active(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -235,6 +235,80 @@ endif
 
 endif
 
+config SMART_HOME_VAD
+    bool "Energy-based VAD on the shared audio capture path"
+    depends on ESP32P4_FUNCTION_EV_BOARD_AUDIO_ES8311
+    default n
+    help
+      Add an integer-only voice activity detector to the shared capture
+      service.  It runs on every captured frame before the registered
+      consumer, so it keeps working while ASR and KWS swap the consumer
+      slot.  Once speech has been seen, a sustained silence ends the
+      recording early, which turns push-to-talk into "speak and stop".
+
+      The detector uses a 20 ms frame with a 10 ms hop, a slow/fast
+      adaptive noise floor, a relative threshold and an absolute energy
+      floor, then a start/hangover state machine.  No floating point and
+      no libm calls are used, which matters on the current P4 build
+      (single core, soft float).
+
+if SMART_HOME_VAD
+
+config SMART_HOME_VAD_RATIO_PCT
+    int "Speech threshold relative to the noise floor (percent)"
+    default 400
+    range 150 2000
+    help
+      A frame counts as speech when its energy exceeds the tracked noise
+      floor by this percentage.  400 means +6 dB.  Raise it in noisy
+      rooms, lower it for far-field talkers.
+
+config SMART_HOME_VAD_MIN_ENERGY
+    int "Absolute frame energy floor"
+    default 400
+    range 0 100000
+    help
+      Frames below this energy are never speech, which keeps the
+      detector quiet on digital silence where the noise floor can
+      collapse towards zero.  Energy is sum(x^2) >> 12 over a 20 ms
+      frame at 16 kHz; 400 corresponds to an RMS of roughly 90 LSB.
+
+config SMART_HOME_VAD_INIT_FRAMES
+    int "Noise floor initialisation frames"
+    default 10
+    range 1 200
+    help
+      During the first N frames the noise floor follows the minimum
+      observed energy, so starting a recording on speech does not bias
+      the floor upwards.
+
+config SMART_HOME_VAD_START_FRAMES
+    int "Consecutive speech frames required to start"
+    default 3
+    range 1 50
+    help
+      Each frame advances 10 ms, so the default needs 30 ms of speech.
+
+config SMART_HOME_VAD_END_FRAMES
+    int "Consecutive silence frames required to end"
+    default 30
+    range 1 300
+    help
+      Hangover before the detector reports the end of speech.  The
+      default is 300 ms, which keeps short pauses between words from
+      splitting an utterance.
+
+config SMART_HOME_VAD_AUTOSTOP_SILENCE_MS
+    int "Recording auto-stop silence in ms"
+    default 500
+    range 0 5000
+    help
+      After speech has been detected, the ASR recording ends when this
+      much additional silence follows the detector's end-of-speech
+      event.  0 disables the early stop and keeps the fixed duration.
+
+endif
+
 config SMART_HOME_KWS
     bool "Resident KWS wake-word service (wake_large int8)"
     depends on ESP32P4_FUNCTION_EV_BOARD_AUDIO_ES8311

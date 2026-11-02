@@ -70,9 +70,12 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/voice/smart_home_tts.c
     CSRCS   += src/voice/smart_home_voice_play.c
   endif
-  # 采集服务由 ASR 与 KWS 共用（KWS 开关在阶段三引入，未定义时为空）
-  ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_KWS),)
+  # 采集服务由 ASR / KWS / VAD 共用（未定义的开关在本条中为空）
+  ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_KWS)$(CONFIG_SMART_HOME_VAD),)
     CSRCS   += src/voice/smart_home_voice_capture.c
+  endif
+  ifneq ($(CONFIG_SMART_HOME_VAD),)
+    CSRCS   += src/voice/smart_home_vad.c
   endif
   ifneq ($(CONFIG_SMART_HOME_VOICE_ASR),)
     CSRCS   += src/voice/smart_home_asr.c

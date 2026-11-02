@@ -31,6 +31,10 @@
 
 #include "../smart_home_memory.h"
 
+#ifdef CONFIG_SMART_HOME_VAD
+#  include "smart_home_vad.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -100,12 +104,24 @@ static void capture_dispatch(const FAR struct ap_buffer_s *apb)
   voice_capture_frame_cb_t cb;
   void *user_data;
 
+  if (apb->nbytes < 2)
+    {
+      return;
+    }
+
+#ifdef CONFIG_SMART_HOME_VAD
+  /* VAD 先于消费者执行：ASR 与 KWS 争用消费者槽位期间，
+   * 采集分发路径仍然连续，端点判断不会因让位而中断。
+   */
+  smart_home_vad_process((const int16_t *)apb->samp, apb->nbytes / 2);
+#endif
+
   pthread_mutex_lock(&g_capture.mutex);
   cb = g_capture.cb;
   user_data = g_capture.user_data;
   pthread_mutex_unlock(&g_capture.mutex);
 
-  if (cb != NULL && apb->nbytes >= 2)
+  if (cb != NULL)
     {
       cb((const int16_t *)apb->samp, apb->nbytes / 2, user_data);
     }
@@ -511,8 +527,14 @@ int voice_capture_stop_listening(voice_capture_frame_cb_t cb)
   return 0;
 }
 
-int voice_capture_record(int seconds, const volatile int *abort,
-                         uint8_t **out_pcm, size_t *out_bytes)
+/* 录音主体：auto_stop_ms > 0 时按 VAD 端点提前结束。
+ *
+ * 只有在"曾经检测到人声"之后，持续静音 auto_stop_ms 才提前结束；
+ * 全程无人声时仍录满 seconds，避免把噪声场景裁成空录音。
+ */
+static int capture_record_impl(int seconds, const volatile int *abort,
+                               int auto_stop_ms,
+                               uint8_t **out_pcm, size_t *out_bytes)
 {
   struct capture_collector_s collector;
   voice_capture_frame_cb_t previous_cb;
@@ -521,6 +543,9 @@ int voice_capture_record(int seconds, const volatile int *abort,
   struct timespec now;
   long elapsed_ms;
   long budget_ms;
+  uint64_t now_ms;
+  uint64_t last_speech_ms = 0;
+  int saw_speech = 0;
   int ret;
 
   if (seconds <= 0 || out_pcm == NULL || out_bytes == NULL)
@@ -546,7 +571,9 @@ int voice_capture_record(int seconds, const volatile int *abort,
 
   collector.used = 0;
 
-  /* 暂存并替换当前消费者（KWS 让位），录制结束后恢复。 */
+  /* 暂存并替换当前消费者（KWS 让位），录制结束后恢复。
+   * VAD 运行在采集分发路径上，不受消费者替换影响。
+   */
   pthread_mutex_lock(&g_capture.mutex);
   previous_cb = g_capture.cb;
   previous_user = g_capture.user_data;
@@ -559,19 +586,37 @@ int voice_capture_record(int seconds, const volatile int *abort,
 
   while (true)
     {
+      bool running;
+
       pthread_mutex_lock(&g_capture.mutex);
-      bool running = g_capture.started;
+      running = g_capture.started;
       pthread_mutex_unlock(&g_capture.mutex);
 
       clock_gettime(CLOCK_MONOTONIC, &now);
       elapsed_ms = (now.tv_sec - start.tv_sec) * 1000L +
                    (now.tv_nsec - start.tv_nsec) / 1000000L;
+      now_ms = (uint64_t)now.tv_sec * 1000u +
+               (uint64_t)now.tv_nsec / 1000000u;
 
       if (elapsed_ms >= budget_ms || !running ||
           (abort != NULL && *abort != 0) ||
           collector.used >= collector.capacity)
         {
           break;
+        }
+
+      if (auto_stop_ms > 0)
+        {
+          if (voice_capture_speech_active())
+            {
+              saw_speech = 1;
+              last_speech_ms = now_ms;
+            }
+          else if (saw_speech && elapsed_ms >= 300 &&
+                   now_ms - last_speech_ms >= (uint64_t)auto_stop_ms)
+            {
+              break;
+            }
         }
 
       usleep(20000);
@@ -596,4 +641,32 @@ int voice_capture_record(int seconds, const volatile int *abort,
   *out_pcm = collector.buffer;
   *out_bytes = collector.used;
   return 0;
+}
+
+int voice_capture_record(int seconds, const volatile int *abort,
+                         uint8_t **out_pcm, size_t *out_bytes)
+{
+  return capture_record_impl(seconds, abort, 0, out_pcm, out_bytes);
+}
+
+int voice_capture_record_vad(int seconds, const volatile int *abort,
+                             int silence_ms,
+                             uint8_t **out_pcm, size_t *out_bytes)
+{
+#ifdef CONFIG_SMART_HOME_VAD
+  return capture_record_impl(seconds, abort, silence_ms,
+                             out_pcm, out_bytes);
+#else
+  (void)silence_ms;
+  return capture_record_impl(seconds, abort, 0, out_pcm, out_bytes);
+#endif
+}
+
+int voice_capture_speech_active(void)
+{
+#ifdef CONFIG_SMART_HOME_VAD
+  return smart_home_vad_active();
+#else
+  return 0;
+#endif
 }

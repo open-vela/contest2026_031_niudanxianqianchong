@@ -409,6 +409,13 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
 }
 
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
+/* VAD 关闭时保持原有"录满上限"行为。 */
+#ifdef CONFIG_SMART_HOME_VAD
+#  define SMART_HOME_ASR_AUTOSTOP_MS CONFIG_SMART_HOME_VAD_AUTOSTOP_SILENCE_MS
+#else
+#  define SMART_HOME_ASR_AUTOSTOP_MS 0
+#endif
+
 /* ASR worker：录音 + MiMo 云端识别，结果经 pending 队列回投 LVGL 线程。
  * 本函数绝不调用任何 LVGL API。 */
 static void *asr_worker_main(void *arg)
@@ -422,8 +429,10 @@ static void *asr_worker_main(void *arg)
 
     text[0] = '\0';
 
-    ret = voice_capture_record(CONFIG_SMART_HOME_ASR_AUDIO_MAX_SECONDS,
-                               &ui->asr_abort, &pcm, &bytes);
+    ret = voice_capture_record_vad(CONFIG_SMART_HOME_ASR_AUDIO_MAX_SECONDS,
+                                   &ui->asr_abort,
+                                   SMART_HOME_ASR_AUTOSTOP_MS,
+                                   &pcm, &bytes);
     if (ret == 0 && bytes >= 3200)
       {
         /* 至少 0.1 s（3200 字节）才值得上传识别。 */
