@@ -374,11 +374,71 @@ int smart_home_camera_tools_register(agent_t *agent)
 
   return smart_home_tool_register_local(
       agent, CAMERA_TOOL_NAME,
-      "Control the local SC2336 camera and take a photo. "
-      "action=status/on/off checks or switches the preview; "
-      "action=shot captures the latest preview and saves it under "
-      "/data/smart_home/snapshots (two-file rolling), returning path, "
-      "brightness and frame-to-frame motion.",
+      "Control the local camera. action=status/on/off or shot "
+      "(capture preview, save to /data/smart_home/snapshots, "
+      "return brightness and motion).",
       CAMERA_SCHEMA_JSON, SMART_HOME_TOOL_CATEGORY_CONTROL,
       camera_tool_execute, NULL, AGENT_TOOL_SIDE_EFFECT);
+}
+
+/* 板端自测：构造与模型调用等价的 arguments_json，走同一个 execute 路径。 */
+
+struct camera_selftest_sink_s
+{
+  char *buffer;
+  size_t size;
+  size_t used;
+};
+
+static agent_error_t camera_selftest_write(void *context,
+                                          agent_string_view_t text)
+{
+  struct camera_selftest_sink_s *sink = context;
+
+  if (sink == NULL || (text.data == NULL && text.size > 0u))
+    {
+      return AGENT_ERROR_INVALID;
+    }
+
+  if (text.size >= sink->size - sink->used)
+    {
+      return AGENT_ERROR_CAPACITY;
+    }
+
+  memcpy(sink->buffer + sink->used, text.data, text.size);
+  sink->used += text.size;
+  sink->buffer[sink->used] = '\0';
+  return AGENT_OK;
+}
+
+int smart_home_camera_tool_selftest(const char *action)
+{
+  char arguments[48];
+  char output[768];
+  struct camera_selftest_sink_s state;
+  agent_text_sink_t sink;
+  agent_tool_context_t context;
+  agent_error_t ret;
+
+  if (action == NULL || action[0] == '\0')
+    {
+      return AGENT_ERROR_INVALID;
+    }
+
+  snprintf(arguments, sizeof(arguments), "{\"action\":\"%s\"}", action);
+  output[0] = '\0';
+
+  state.buffer = output;
+  state.size = sizeof(output);
+  state.used = 0u;
+  sink.write = camera_selftest_write;
+  sink.context = &state;
+
+  memset(&context, 0, sizeof(context));
+  context.call.arguments_json = agent_string_view(arguments,
+                                                 strlen(arguments));
+
+  ret = camera_tool_execute(NULL, &context, &sink);
+  printf("camera_tool[%s] ret=%d %s\n", action, (int)ret, output);
+  return ret == AGENT_OK ? 0 : 1;
 }

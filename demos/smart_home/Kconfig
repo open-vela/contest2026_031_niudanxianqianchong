@@ -614,13 +614,14 @@ config SMART_HOME_CAMERA_PREVIEW
 config SMART_HOME_CAMERA_TOOL
     bool "Agent camera tool (power + snapshot)"
     depends on SMART_HOME_CAMERA_PREVIEW
-    default y
+    default n
     help
       Register a local agent tool `camera` with status/on/off/shot
       actions.  `shot` captures the latest 512x300 preview, computes
       brightness and frame-to-frame motion, and stores two rolling
       files under /data/smart_home/snapshots (about 600 KB total).
       Runs only through the camera service; it never opens /dev/video0.
+      Needs about 600 KB of free space on /data for the two slots.
 
 config SMART_HOME_MILOCO_BRIDGE
     bool "Enable Xiaomi Miloco gateway bridge"

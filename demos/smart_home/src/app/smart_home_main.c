@@ -23,6 +23,9 @@
 #include "../camera/smart_home_camera_service.h"
 #include "../camera/smart_home_camera_control.h"
 #endif
+#ifdef CONFIG_SMART_HOME_CAMERA_TOOL
+#include "../tools/smart_home_camera_tools.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,6 +91,16 @@ static int smart_home_selftest_camera(void)
     smart_home_camera_stop();
     return 1;
 }
+
+static int smart_home_selftest_camera_tool(const char *action)
+{
+    return smart_home_camera_tool_selftest(action);
+}
+#elif defined(CONFIG_SMART_HOME_CAMERA_TOOL)
+static int smart_home_selftest_camera_tool(const char *action)
+{
+    return smart_home_camera_tool_selftest(action);
+}
 #endif
 
 int main(int argc, char *argv[])
@@ -116,6 +129,13 @@ int main(int argc, char *argv[])
     if (argc > 1 && strcmp(argv[1], "--selftest-camera") == 0)
     {
         return smart_home_selftest_camera();
+    }
+#endif
+
+#if defined(CONFIG_SMART_HOME_CAMERA_TOOL)
+    if (argc > 2 && strcmp(argv[1], "--selftest-camera-tool") == 0)
+    {
+        return smart_home_selftest_camera_tool(argv[2]);
     }
 #endif
 
