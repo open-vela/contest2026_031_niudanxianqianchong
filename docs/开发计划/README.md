@@ -58,6 +58,7 @@
 | [ESP32-P4X 端侧 KWS 方案](应用与AI/ESP32-P4X-端侧KWS方案.md) | 端侧唤醒词与命令词：可复用资产、数据流、与 cAGENT 边界、K0~K4 阶段 |
 | [ESP32-P4X SmartHome `wake_large` 唤醒词模型接入方案](应用与AI/ESP32-P4X-SmartHome-wake_large唤醒词模型接入方案.md) | `wake_large` int8 模型的特征契约、TFLM 运行时、K0~K5 实施步骤与实机验收指标 |
 | [ESP32-P4X 端侧目标检测方案](应用与AI/ESP32-P4X-端侧目标检测方案.md) | 端侧检测：工具与事件两种范式、数据流、run_service 改造项、D0~D4 阶段 |
+| [ESP32-P4X SmartHome 语音与能力合入实施计划](应用与AI/ESP32-P4X-SmartHome语音与能力合入实施计划.md) | ASR/TTS 真机闭环、VAD/KWS/ESP-NN 合入顺序、camera 工具、分阶段验收与回退 |
 
 ## UI 与 QuickApp 设计
 
