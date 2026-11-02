@@ -12,6 +12,12 @@ CONFIG_MATH_GEMMLOWP=y
 CONFIG_MATH_KISSFFT=y
 CONFIG_MATH_RUY=y
 CONFIG_TFLITEMICRO=y
+# ESP-NN P4 后端：Conv2D / DepthwiseConv2D 走 PIE 加速内核。
+# 需要整机切到乐鑫工具链（patches/nuttx/0012 + 0015），并先跑
+# scripts/link_esp_nn.sh 把 third_party/esp-nn 接到 apps 期望的路径。
+CONFIG_TFLITEMICRO_ESP_NN=y
+CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y
+CONFIG_ARCH_RV_ISA_VENDOR_EXTENSIONS="xespv"
 
 # C++ 运行时（libc++ 要求 TLS_NELEM > 0）。
 CONFIG_HAVE_CXX=y

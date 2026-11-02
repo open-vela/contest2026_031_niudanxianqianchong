@@ -97,3 +97,23 @@ git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0014-es8311-confi
 当前 `smart_home` 使用 4032 字节、2 个 codec 缓冲。P4 RX 超过单帧上限的请求
 返回 `-EFBIG`，暂不支持一个接收请求跨多个 EOF。使用 `GETBUFFERINFO` 返回的
 大小分配缓冲，避免硬编码 4096 字节。
+
+15. `0015-libcxx-gcc14-builtin-trait.patch`：`libs/libxx/libcxx/Make.defs`
+    在 `GCCVER >= 14` 时追加
+    `_LIBCPP_WORKAROUND_OBJCXX_COMPILER_INTRINSICS`。
+
+    GCC 14 拒绝在函数签名里使用内建 trait，而 libc++ 17 的
+    `__filesystem/path.h:623` 用 `__remove_pointer_t<...>` 做返回类型，
+    `libcxx/src/ios.instantiations.cpp` 因此报
+    `error: use of built-in trait '__remove_pointer(...)' in function signature`。
+    openvela 默认的 `riscv-none-elf` 是 GCC 13，不受影响；启用
+    `CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y` 后用的是 Espressif
+    `riscv32-esp-elf` 14.2，才会命中该问题。
+
+    该宏由 libc++ 自己提供，作用是切到非内建 trait 的等价实现，
+    不改变语义、不影响 GCC <= 13 的构建。
+
+```sh
+git apply --check ../contest2026_031_niudanxianqianchong/patches/nuttx/0015-libcxx-gcc14-builtin-trait.patch
+git apply ../contest2026_031_niudanxianqianchong/patches/nuttx/0015-libcxx-gcc14-builtin-trait.patch
+```

@@ -1,0 +1,18 @@
+diff --git a/libs/libxx/libcxx/Make.defs b/libs/libxx/libcxx/Make.defs
+index 0c025afb2d1..9d0b2ae72e5 100644
+--- a/libs/libxx/libcxx/Make.defs
++++ b/libs/libxx/libcxx/Make.defs
+@@ -66,6 +66,13 @@ endif
+ CXXFLAGS += -Wno-shadow -Wno-sign-compare -Wno-cpp
+ CXXFLAGS += -Wno-attributes -Wno-deprecated-declarations
+ 
++# GCC 14 拒绝在函数签名里使用内建 trait（例如 libc++ 17 的
++# __remove_pointer(...)），Espressif riscv32-esp-elf 14.2 会因此编不过
++# ios.instantiations.cpp。libc++ 自带的这个宏会切到非内建实现。
++ifeq ($(shell expr "$(GCCVER)" \>= 14), 1)
++  CXXFLAGS += ${DEFINE_PREFIX}_LIBCPP_WORKAROUND_OBJCXX_COMPILER_INTRINSICS
++endif
++
+ ifeq ($(shell expr "$(GCCVER)" \>= 12), 1)
+   CXXFLAGS += -Wno-maybe-uninitialized -Wno-alloc-size-larger-than
+ endif
