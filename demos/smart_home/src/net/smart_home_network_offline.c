@@ -48,6 +48,7 @@ int smart_home_network_probe(FAR smart_home_network_status_t *status)
       status->ip_status = SMART_HOME_NETWORK_STATUS_NA;
       status->dns_status = SMART_HOME_NETWORK_STATUS_NA;
       status->online = false;
+      status->ssid[0] = '\0';
     }
 
   return SMART_HOME_NETWORK_STATUS_NA;

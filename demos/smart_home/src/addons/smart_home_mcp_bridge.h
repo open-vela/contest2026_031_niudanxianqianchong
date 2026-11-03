@@ -2,11 +2,24 @@
 #pragma once
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <agent.h>
 
 typedef struct smart_home_mcp_bridge smart_home_mcp_bridge_t;
+
+/* Runtime configuration for the V9 settings dialog.  The bridge is rebuilt
+ * with these values; tools from the previous endpoint are unregistered by
+ * caddons_mcp_bridge_destroy() before the new bridge is created. */
+typedef struct {
+    char server_id[64];
+    char host[256];
+    char path[128];
+    char authorization[384];
+    uint16_t port;
+    bool use_tls;
+} smart_home_mcp_runtime_config_t;
 
 /* 手动发现状态机：start 返回后为 IDLE；应用显式请求发现后，操作 worker
  * 在独立大栈中收敛到 READY 或 FAILED。 */
@@ -28,6 +41,12 @@ int smart_home_mcp_bridge_start(smart_home_mcp_bridge_t **bridge_out,
  * then applies catalog mutations. The LVGL thread must use this API instead
  * of performing network I/O directly. */
 int smart_home_mcp_bridge_request_discover(smart_home_mcp_bridge_t *bridge);
+
+/* Rebuild the bridge with a new endpoint/auth.  Returns BUSY while a
+ * discovery is in flight; the caller should retry after it settles. */
+int smart_home_mcp_bridge_reconfigure(
+    smart_home_mcp_bridge_t *bridge,
+    const smart_home_mcp_runtime_config_t *config);
 
 /* Stops the bridge, drains queued unregister operations, and frees state.
  * Joins an in-flight discovery first (bounded by the network deadline). */

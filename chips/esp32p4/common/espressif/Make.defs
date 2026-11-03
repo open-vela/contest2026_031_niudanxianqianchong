@@ -41,6 +41,18 @@ CHIP_CSRCS += esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c
 CHIP_CSRCS += esp_lowputc.c esp_serial.c
 CHIP_CSRCS += esp_systemreset.c
 
+ifeq ($(CONFIG_ESP32P4_DMA2D),y)
+	CHIP_CSRCS += esp_dma2d.c esp_graphics_validate.c
+endif
+ifeq ($(CONFIG_ESP32P4_PPA),y)
+	CHIP_CSRCS += esp_ppa.c
+endif
+
+ifeq ($(CONFIG_SMP),y)
+	CHIP_CSRCS += esp_smp.c esp_atomic64.c
+	CHIP_ASRCS += esp_cpu1_start.S
+endif
+
 ifeq ($(CONFIG_ARCH_HAVE_EXTRA_HEAPS),y)
 	CHIP_CSRCS += esp_extraheaps.c
 	ifeq ($(CONFIG_ESPRESSIF_RETENTION_HEAP),y)
@@ -284,10 +296,6 @@ ESP32P4_ARCHIVES        = $(ESP32P4_ARCHIVE_DIR)$(DELIM)libarch$(LIBEXT) \
 			   $(ESP32P4_ARCHIVE_DIR)$(DELIM)libkarch$(LIBEXT) \
 			   $(TOPDIR)$(DELIM)staging$(DELIM)libarch$(LIBEXT) \
 			   $(TOPDIR)$(DELIM)staging$(DELIM)libkarch$(LIBEXT)
-# Header-level HAL compatibility fixes are not reliably tracked by every
-# generated object dependency.  Limit invalidation to generated objects
-# below the disposable HAL checkout; never delete source files there.
-ESP32P4_HAL_OBJECT_DIR  = $(ESP32P4_ARCHIVE_DIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)
 
 define APPLY_ESP32P4_HAL_PATCHES
 for patch in $(ESP32P4_HAL_PATCHES); do \
@@ -350,7 +358,6 @@ ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 endif
 	$(Q) $(APPLY_ESP32P4_HAL_PATCHES)
 	$(Q) touch $(ESP32P4_HAL_PATCH_STAMP)
-	$(Q) find $(ESP32P4_HAL_OBJECT_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true
 	$(Q) rm -f $(ESP32P4_ARCHIVES)
 
 # HAL patches can alter inline code in headers.  libarch.a must therefore
@@ -359,7 +366,6 @@ endif
 $(ESP32P4_HAL_PATCH_STAMP): $(ESP32P4_HAL_PATCHES) | chip/$(ESP_HAL_3RDPARTY_REPO)
 	$(Q) $(APPLY_ESP32P4_HAL_PATCHES)
 	$(Q) touch $@
-	$(Q) find $(ESP32P4_HAL_OBJECT_DIR) -type f \( -name '*.o' -o -name '*.d' \) -delete 2>/dev/null || true
 	$(Q) rm -f $(ESP32P4_ARCHIVES)
 
 libarch$(LIBEXT): $(ESP32P4_HAL_PATCH_STAMP)
@@ -404,6 +410,13 @@ include chip/hal_${CHIP_SERIES}.mk
 ifeq ($(CONFIG_ESPRESSIF_WIRELESS),y)
 	include $(ESP32P4_COMMON_DIR)$(DELIM)Wireless.mk
 endif
+
+# Rebuild HAL objects after applying patches, including changes to headers.
+# Deleting them from the archive prerequisite races make's object checks.
+
+ESP32P4_HAL_OBJS = $(filter chip/$(ESP_HAL_3RDPARTY_REPO)/%, \
+	$(CHIP_ASRCS:.S=$(OBJEXT)) $(CHIP_CSRCS:.c=$(OBJEXT)))
+$(ESP32P4_HAL_OBJS): $(ESP32P4_HAL_PATCH_STAMP)
 
 context:: chip/$(ESP_HAL_3RDPARTY_REPO)
 	$(call COPYFILE,chip/$(ESP_HAL_3RDPARTY_REPO)/components/soc/$(CHIP_SERIES)/include/soc/gpio_sig_map.h,../include/chip/)

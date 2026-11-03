@@ -7,7 +7,7 @@
 #include "../../config/smart_home_config.h"
 #include "../../smart_home_cpu_debug.h"
 #include "../../smart_home_memory.h"
-#include <cagent/runtime_openvela.h>
+#include "../smart_home_ui_event.h"
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
 #include "../../voice/smart_home_asr.h"
 #include "../../voice/smart_home_voice_capture.h"
@@ -47,17 +47,11 @@ typedef struct {
 typedef struct {
     smart_home_lvgl_t *ui;
     agent_done_t *done;
+    struct ui_pending_item *completion;
     char input[SMART_HOME_INPUT_SIZE];
 } agent_job_t;
 
-typedef struct {
-    agent_event_type_t type;
-    uint32_t iteration;
-    int error_code;
-    char message[128];
-    char tool_name[64];
-    char tool_call_id[64];
-} ui_event_payload_t;
+typedef smart_home_ui_event_t ui_event_payload_t;
 
 typedef enum {
     UI_PENDING_EVENT = 0,
@@ -73,6 +67,7 @@ typedef enum {
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
 typedef struct {
     char text[SMART_HOME_INPUT_SIZE];
+    smart_home_voice_result_t result;
 } ui_asr_payload_t;
 #endif
 
@@ -189,6 +184,37 @@ static int agent_ui_enqueue(smart_home_lvgl_t *ui, ui_pending_item_t *item)
     return 0;
 }
 
+static const char *chat_request_error(int code, int has_operations)
+{
+    if (has_operations) {
+        return "本次对话未完成，部分操作可能已提交。请先查看设备状态。";
+    }
+    switch (code) {
+    case AGENT_ERROR_TIMEOUT:
+        return "等待回复超时，请稍后重试。";
+    case AGENT_ERROR_IO:
+        return "暂时无法连接服务，请检查网络后重试。";
+    case AGENT_ERROR_MODEL_FAILED:
+    case AGENT_ERROR_MODEL_PARSE:
+    case AGENT_ERROR_MODEL_UNAVAILABLE:
+        return "智能管家暂时不可用，请检查模型服务设置。";
+    case AGENT_ERROR_AUTH:
+        return "服务认证失败，请检查密钥或访问权限。";
+    case AGENT_ERROR_MODEL_RATE_LIMIT:
+        return "请求过于频繁，请稍后重试。";
+    case AGENT_ERROR_CONTEXT_OVERFLOW:
+        return "对话内容过长，请开始新对话。";
+    case AGENT_ERROR_POLICY_DENIED:
+        return "此操作尚未获得授权，请在设置中检查操作权限。";
+    case AGENT_ERROR_CANCELLED:
+        return "本次请求已取消。";
+    case AGENT_ERROR_NOMEM:
+        return "设备暂时繁忙，请稍后重试。";
+    default:
+        return "暂时无法完成请求，请稍后重试。";
+    }
+}
+
 static void agent_done_apply(agent_done_t *done)
 {
     smart_home_lvgl_t *ui = done ? done->ui : NULL;
@@ -203,39 +229,51 @@ static void agent_done_apply(agent_done_t *done)
             ui->agent_worker_active = 0;
         }
         ui->request_inflight = 0;
+        if (ui->chat_send_btn) {
+            lv_obj_remove_state(ui->chat_send_btn, LV_STATE_DISABLED);
+        }
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
         printf("[agent] reply(%d): %.200s\n",
                done->ret,
                done->output[0] ? done->output : "(empty)");
 #endif
-        if (done->ret == AGENT_OK) {
+        if (done->ret == AGENT_OK || done->ret == AGENT_ERROR_TRUNCATED) {
             smart_home_lvgl_finish_thinking(ui);
             smart_home_lvgl_append_msg_bubble(ui, done->output, 0);
             smart_home_lvgl_refresh_cards(ui);
+            if (done->ret == AGENT_ERROR_TRUNCATED)
+                smart_home_lvgl_append_error_bubble(ui, "回复超出显示容量，以上内容已截断。");
 #ifdef CONFIG_SMART_HOME_VOICE_TTS
             /* 语音播报在独立 worker 中合成与播放；开关关闭或服务
              * 未就绪时静默跳过，不影响气泡展示路径。 */
-            if (voice_play_announce_enabled()) {
-                if (voice_play_text(done->output) != 0) {
-                    printf("[voice] announce enqueue failed\n");
-                }
+            if (done->ret != AGENT_OK) {
+                printf("[voice] announce skipped (ret=%d)\n", done->ret);
+            } else if (!voice_play_announce_enabled()) {
+                /* 开关关闭时此前完全静默，排查时无从判断是"没触发"还是
+                 * "触发了但无声"。这里必须留一行。 */
+                printf("[voice] announce skipped (voice.json enabled=0)\n");
+            } else {
+                int enq = voice_play_text(done->output);
+                printf("[voice] announce enqueue ret=%d text_len=%zu\n",
+                       enq, strlen(done->output));
             }
 #endif
         } else {
-            char message[160];
-            snprintf(message,
-                     sizeof(message),
-                     "Agent call failed (%d): %.96s",
-                     done->ret,
-                     done->output[0] ? done->output : "no detail");
             smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, message);
+            if (done->output[0] && ui->app &&
+                ui->app->system_status.session_status != AGENT_OK) {
+                smart_home_lvgl_append_msg_bubble(ui, done->output, 0);
+                smart_home_lvgl_append_error_bubble(ui,
+                    "回复已显示，历史保存失败。控制可能已执行，请先确认设备状态。");
+                smart_home_lvgl_refresh_cards(ui);
+            } else {
+                smart_home_lvgl_append_error_bubble(ui,
+                    chat_request_error(done->ret, ui->chat_trace_tool_count > 0));
+            }
         }
         /* Update status hint */
         if (ui->chat_status) {
-            lv_label_set_text(ui->chat_status,
-                              "Done.  (NSH: smart_home \"...\")");
-            lv_obj_clear_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(ui->chat_status, LV_OBJ_FLAG_HIDDEN);
         }
         /* Force display refresh so the response appears immediately
          * without waiting for a user touch event. */
@@ -257,7 +295,7 @@ static void *agent_worker_main(void *arg)
     }
 
     smart_home_cpu_debug_log("lvgl-agent-worker-start");
-    ov_mem_region_log("lvgl-agent-worker-stack", &stack_marker);
+    smart_home_memory_log_region("lvgl-agent-worker-stack", &stack_marker);
 
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     agent_worker_log_context("start", job->ui ? job->ui->app : NULL);
@@ -272,20 +310,15 @@ static void *agent_worker_main(void *arg)
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     agent_worker_log_context("done", job->ui ? job->ui->app : NULL);
 #endif
-    item = (ui_pending_item_t *)calloc(1, sizeof(*item));
-    if (item) {
-        item->type = UI_PENDING_DONE;
-        item->data.done = done;
-        if (agent_ui_enqueue(job->ui, item) == 0) {
-            free(job);
-            return NULL;
-        }
-
-        free(item);
+    item = job->completion;
+    item->type = UI_PENDING_DONE;
+    item->data.done = done;
+    if (agent_ui_enqueue(job->ui, item) == 0) {
+        free(job);
+        return NULL;
     }
+    free(item);
 
-    /* No LVGL call is permitted from this worker.  The only failure path
-     * here is heap/mutex exhaustion, where a UI completion cannot be queued. */
     free(done);
     free(job);
     return NULL;
@@ -302,23 +335,29 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
     }
 
     if (ui->request_inflight) {
-        smart_home_lvgl_append_error_bubble(ui, "Previous request is still running.");
+        smart_home_lvgl_append_error_bubble(ui, "正在处理上一条消息，请稍候。");
         return AGENT_ERROR_BUSY;
     }
 
     job = (agent_job_t *)calloc(1, sizeof(*job));
     if (!job) {
-        smart_home_lvgl_append_error_bubble(ui, "Not enough memory to submit request.");
+        smart_home_lvgl_append_error_bubble(ui, "设备暂时繁忙，请稍后重试。");
         return AGENT_ERROR_NOMEM;
     }
 
     done = (agent_done_t *)calloc(1, sizeof(*done));
     if (!done) {
         free(job);
-        smart_home_lvgl_append_error_bubble(ui, "Not enough memory to start Agent worker.");
+        smart_home_lvgl_append_error_bubble(ui, "设备暂时繁忙，请稍后重试。");
         return AGENT_ERROR_NOMEM;
     }
 
+    job->completion = calloc(1, sizeof(*job->completion));
+    if (!job->completion) {
+        free(done);
+        free(job);
+        return AGENT_ERROR_NOMEM;
+    }
     job->ui = ui;
     job->done = done;
     strncpy(job->input, text, sizeof(job->input) - 1);
@@ -334,16 +373,17 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
                 SMART_HOME_AGENT_WORKER_STACK_SIZE + STACK_ALIGNMENT - 1u);
             if (!ui->agent_worker_stack_alloc) {
                 ui->request_inflight = 0;
+                free(job->completion);
                 free(done);
                 free(job);
                 smart_home_lvgl_append_error_bubble(
-                    ui, "Not enough PSRAM to start Agent worker.");
+                    ui, "设备暂时繁忙，请稍后重试。");
                 return AGENT_ERROR_NOMEM;
             }
 
             ui->agent_worker_stack = (void *)STACK_ALIGN_UP(
                 (uintptr_t)ui->agent_worker_stack_alloc);
-            ov_mem_region_log("lvgl-agent-worker-stack-base",
+            smart_home_memory_log_region("lvgl-agent-worker-stack-base",
                               ui->agent_worker_stack);
             smart_home_bulk_diag("lvgl-agent-worker-stack-reserved");
         }
@@ -364,9 +404,10 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
     }
     if (ret != 0) {
         ui->request_inflight = 0;
+        free(job->completion);
         free(done);
         free(job);
-        smart_home_lvgl_append_error_bubble(ui, "Failed to create Agent worker.");
+        smart_home_lvgl_append_error_bubble(ui, "暂时无法发送消息，请稍后重试。");
         return AGENT_ERROR;
     }
 
@@ -375,6 +416,13 @@ int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
 }
 
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
+/* VAD 关闭时保持原有"录满上限"行为。 */
+#ifdef CONFIG_SMART_HOME_VAD
+#  define SMART_HOME_ASR_AUTOSTOP_MS CONFIG_SMART_HOME_VAD_AUTOSTOP_SILENCE_MS
+#else
+#  define SMART_HOME_ASR_AUTOSTOP_MS 0
+#endif
+
 /* ASR worker：录音 + MiMo 云端识别，结果经 pending 队列回投 LVGL 线程。
  * 本函数绝不调用任何 LVGL API。 */
 static void *asr_worker_main(void *arg)
@@ -384,17 +432,30 @@ static void *asr_worker_main(void *arg)
     uint8_t *pcm = NULL;
     size_t bytes = 0;
     char text[SMART_HOME_INPUT_SIZE];
+    smart_home_voice_result_t result = {AGENT_ERROR, 0, SMART_HOME_VOICE_CAPTURE};
     int ret;
 
     text[0] = '\0';
 
-    ret = voice_capture_record(CONFIG_SMART_HOME_ASR_AUDIO_MAX_SECONDS,
-                               &ui->asr_abort, &pcm, &bytes);
+    ret = voice_capture_record_vad(CONFIG_SMART_HOME_ASR_AUDIO_MAX_SECONDS,
+                                   &ui->asr_abort,
+                                   SMART_HOME_ASR_AUTOSTOP_MS,
+                                   &pcm, &bytes);
     if (ret == 0 && bytes >= 3200)
       {
         /* 至少 0.1 s（3200 字节）才值得上传识别。 */
-        smart_home_asr_recognize(pcm, bytes, text, sizeof(text));
+        ret = smart_home_asr_recognize_ex(pcm, bytes, text, sizeof(text), &result);
       }
+    else if (ret == 0)
+      {
+        /* 录音成功但不足 0.1 s：不是云端失败，按采集阶段报错。 */
+        ret = AGENT_ERROR_INVALID;
+        result.code = AGENT_ERROR_INVALID;
+        result.stage = SMART_HOME_VOICE_CAPTURE;
+      }
+
+    /* asr_abort 的语义是"再点一次结束录音并发送"，不是取消：
+     * 录音循环已经提前退出，这里照常上传已录到的内容。 */
 
     if (pcm != NULL)
       {
@@ -405,6 +466,7 @@ static void *asr_worker_main(void *arg)
     if (item != NULL)
       {
         item->type = UI_PENDING_ASR_TEXT;
+        item->data.asr.result = result;
         strncpy(item->data.asr.text, text, sizeof(item->data.asr.text) - 1);
         item->data.asr.text[sizeof(item->data.asr.text) - 1] = '\0';
         if (agent_ui_enqueue(ui, item) != 0)
@@ -507,16 +569,16 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
     }
 
     switch (payload->type) {
-    case AGENT_EVENT_MODEL_REQUEST:
+    case AGENT_EVENT_MODEL_BEGIN:
         smart_home_lvgl_show_thinking(ui);
         break;
-    case AGENT_EVENT_TOOL_CALL:
+    case AGENT_EVENT_TOOL_BEGIN:
         smart_home_lvgl_trace_tool(ui,
                                    payload->tool_name,
                                    payload->tool_call_id,
                                    -1);
         break;
-    case AGENT_EVENT_TOOL_RESULT:
+    case AGENT_EVENT_TOOL_END:
         if (strcmp(payload->tool_name, "set_light") == 0 ||
             strcmp(payload->tool_name, "set_ac") == 0 ||
             strcmp(payload->tool_name, "run_scene") == 0) {
@@ -525,18 +587,11 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
         smart_home_lvgl_trace_tool(ui,
                                    payload->tool_name,
                                    payload->tool_call_id,
-                                   payload->error_code == AGENT_OK ? 1 : 0);
+                                   payload->status == AGENT_OK ? 1 : 0);
         break;
-    case AGENT_EVENT_ERROR:
-    case AGENT_EVENT_TIMEOUT:
+    case AGENT_EVENT_TURN_END:
+        /* Completion owns the final bubble; terminal events only end activity. */
         smart_home_lvgl_finish_thinking(ui);
-        smart_home_lvgl_append_error_bubble(ui, payload->message);
-        break;
-    case AGENT_EVENT_RUN_DONE:
-        if (payload->error_code != AGENT_OK) {
-            smart_home_lvgl_finish_thinking(ui);
-            smart_home_lvgl_append_error_bubble(ui, payload->message);
-        }
         break;
     default:
         break;
@@ -544,7 +599,7 @@ static void ui_event_apply(smart_home_lvgl_t *ui,
 
 }
 
-void smart_home_lvgl_event_cb(const agent_event_t *event, void *user_data)
+void smart_home_lvgl_event_cb(void *user_data, const agent_event_t *event)
 {
     smart_home_lvgl_t *ui = (smart_home_lvgl_t *)user_data;
     ui_pending_item_t *item;
@@ -553,40 +608,13 @@ void smart_home_lvgl_event_cb(const agent_event_t *event, void *user_data)
         return;
     }
 
-#ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
-    printf("[agent_event] type=%d iter=%" PRIu32 " err=%d tool=%s msg=%s\n",
-           (int)event->type,
-           event->iteration,
-           event->error_code,
-           event->tool_name ? event->tool_name : "-",
-           event->message ? event->message : "-");
-#endif
-
     item = (ui_pending_item_t *)calloc(1, sizeof(*item));
     if (!item) {
         return;
     }
 
     item->type = UI_PENDING_EVENT;
-    item->data.event.type = event->type;
-    item->data.event.iteration = event->iteration;
-    item->data.event.error_code = event->error_code;
-
-    if (event->message) {
-        strncpy(item->data.event.message,
-                event->message,
-                sizeof(item->data.event.message) - 1);
-    }
-    if (event->tool_name) {
-        strncpy(item->data.event.tool_name,
-                event->tool_name,
-                sizeof(item->data.event.tool_name) - 1);
-    }
-    if (event->tool_call_id) {
-        strncpy(item->data.event.tool_call_id,
-                event->tool_call_id,
-                sizeof(item->data.event.tool_call_id) - 1);
-    }
+    smart_home_ui_event_copy(&item->data.event, event);
 
     if (agent_ui_enqueue(ui, item) != 0) {
         free(item);
@@ -600,6 +628,14 @@ void smart_home_lvgl_process_pending(smart_home_lvgl_t *ui)
     if (!ui) {
         return;
     }
+
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+    {
+        smart_home_voice_result_t result;
+        if (voice_play_take_error(&result))
+            smart_home_lvgl_append_error_bubble(ui, smart_home_voice_result_text(&result));
+    }
+#endif
 
     for (;;) {
         if (pthread_mutex_lock(&ui->pending_mutex) != 0) {
@@ -629,11 +665,11 @@ void smart_home_lvgl_process_pending(smart_home_lvgl_t *ui)
                 ui->asr_worker_active = 0;
             }
 
-            if (item->data.asr.text[0]) {
+            if (item->data.asr.result.code == AGENT_OK && item->data.asr.text[0]) {
                 smart_home_lvgl_chat_send_text(ui, item->data.asr.text);
             } else {
                 smart_home_lvgl_append_error_bubble(
-                    ui, "语音识别失败：录音太短、密钥未配置或网络错误。");
+                    ui, smart_home_voice_result_text(&item->data.asr.result));
             }
             smart_home_lvgl_chat_asr_finish(ui);
         }

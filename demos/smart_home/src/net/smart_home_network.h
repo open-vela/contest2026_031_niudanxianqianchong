@@ -46,6 +46,8 @@ typedef struct {
   int ip_status;
   int dns_status;
   bool online;
+  /* Last confirmed Wi-Fi association; display only while connected. */
+  char ssid[33];
 } smart_home_network_status_t;
 
 /****************************************************************************

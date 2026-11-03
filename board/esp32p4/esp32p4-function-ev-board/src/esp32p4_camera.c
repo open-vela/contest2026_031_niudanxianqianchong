@@ -166,6 +166,22 @@ static int board_sc2336_video_init(FAR struct imgsensor_s *sensor)
 
   config.output = ESP_ISP_OUTPUT_RGB565;
   config.bayer_order = ESP_ISP_BAYER_ORDER_BGGR;
+
+  /* Manual white balance.  The ISP demosaics RAW8/BGGR and then runs an
+   * RGB->YUV->RGB round trip with no AWB, CCM or gamma stage, so the frames
+   * arrive with a strong green cast.  These gains compensate the raw channel
+   * imbalance; 256 is unity in the 8.4 fixed point WBG registers, so G is
+   * held at unity and R/B are lifted to match it.
+   *
+   * Derived from the observed cast rather than measured from a grey card, so
+   * treat this as a first-order correction: retune with real RGB means if the
+   * result is still visibly off.
+   */
+
+  config.wbg_gain_r = CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_R_GAIN;
+  config.wbg_gain_g = CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_G_GAIN;
+  config.wbg_gain_b = CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_WB_B_GAIN;
+
   ret = board_sc2336_csi_prepare(&product_id);
   if (ret >= 0)
     ret = board_sc2336_csi_initialize(g_video_csi, &config);

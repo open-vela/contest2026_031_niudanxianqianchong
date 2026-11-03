@@ -166,6 +166,7 @@ extern "C" int main(int argc, char *argv[])
   void *arena;
   float scale;
   int zp;
+  int status;
   int ret;
 
   ret = kws_smoke_parse_options(argc, argv, &warmup, &repeat);
@@ -187,20 +188,43 @@ extern "C" int main(int argc, char *argv[])
       return EXIT_FAILURE;
     }
 
-  printf("[kws_smoke] arena_reserved=%u address=%p backend=reference\n",
-         (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena);
+  /* backend 只反映编译进去的后端，不代表本次推理真的用了加速内核：
+   * ESP-NN 是否接管某个节点还取决于 tensor id 白名单（mask）。
+   * 把 mask 一起打印，避免「backend=esp-nn 但全走 reference」的误判。
+   */
+  printf("[kws_smoke] arena_reserved=%u address=%p backend=%s",
+         (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE, arena,
+         kws_infer_backend() == KWS_INFER_BACKEND_ESPNN ? "esp-nn" :
+                                                          "reference");
+#if defined(CONFIG_TFLITEMICRO_ESP_NN)
+  printf(" conv_mask=0x%08lx dw_mask=0x%08lx",
+         (unsigned long)CONFIG_TFLITEMICRO_ESP_NN_CONV2D_OUTPUT_TENSOR_MASK,
+         (unsigned long)
+             CONFIG_TFLITEMICRO_ESP_NN_DEPTHWISE_CONV2D_OUTPUT_TENSOR_MASK);
+#endif
+  printf("\n");
 
-  if (kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE) != 0)
+
+  status = kws_infer_init(arena, CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE);
+  if (status != 0)
     {
-      fprintf(stderr, "[kws_smoke] model init failed\n");
+      /* -EINVAL：模型版本/算子注册/张量契约不符；-ENOMEM：arena 不足；
+       * -EBUSY：已有其他 arena 的解释器。init 失败时内部已干净退出，
+       * 这里只需释放自己分配的 arena。 */
+      fprintf(stderr,
+              "[kws_smoke] model init failed: %d (arena_reserved=%u, "
+              "arena_used=%u)\n",
+              status, (unsigned)CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE,
+              (unsigned)kws_infer_arena_used());
       smart_home_bulk_free(arena);
       return EXIT_FAILURE;
     }
 
+  fprintf(stderr, "[kws_smoke] stage=allocated arena_used=%u\n",
+          (unsigned)kws_infer_arena_used());
   kws_infer_input_params(&scale, &zp);
-  printf("[kws_smoke] tensors ok: input=int8[124*40*3] scale=%.9g zp=%d "
-         "arena_used=%u\n",
-         (double)scale, zp, (unsigned)kws_infer_arena_used());
+  fprintf(stderr, "[kws_smoke] stage=params scale=%d zp=%d\n",
+          (int)(scale * 1000000.0f), zp);
 
   for (run = 0; run < (unsigned)KWS_INFER_FEATURE_SIZE; run++)
     {
@@ -208,14 +232,23 @@ extern "C" int main(int argc, char *argv[])
                                   UINT32_C(19)) >> 1);
     }
 
+  fprintf(stderr, "[kws_smoke] stage=features ready\n");
   for (run = 0; run < warmup; run++)
     {
+      uint64_t wstart = kws_smoke_monotonic_us();
+      uint64_t wend;
+
       if (kws_infer_run(g_features, g_scores) != 0)
         {
           fprintf(stderr, "[kws_smoke] warmup invoke %u failed\n", run + 1);
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
+
+      wend = kws_smoke_monotonic_us();
+      fprintf(stderr, "[kws_smoke] warmup %u took %llu us\n", run + 1,
+              (unsigned long long)(wend - wstart));
     }
 
   for (run = 0; run < repeat; run++)
@@ -226,6 +259,7 @@ extern "C" int main(int argc, char *argv[])
       if (kws_infer_run(g_features, g_scores) != 0)
         {
           fprintf(stderr, "[kws_smoke] timed invoke %u failed\n", run + 1);
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
@@ -234,6 +268,7 @@ extern "C" int main(int argc, char *argv[])
       if (start == 0 || end < start || end - start > UINT32_MAX)
         {
           fprintf(stderr, "[kws_smoke] monotonic timing unavailable\n");
+          (void)kws_infer_deinit(arena);
           smart_home_bulk_free(arena);
           return EXIT_FAILURE;
         }
@@ -258,6 +293,9 @@ extern "C" int main(int argc, char *argv[])
     }
 
   printf("\n");
+
+  /* 解释器持有 arena 指针，必须先销毁再释放内存。 */
+  (void)kws_infer_deinit(arena);
   smart_home_bulk_free(arena);
   return EXIT_SUCCESS;
 }

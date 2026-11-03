@@ -13,10 +13,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <agent.h>
+
 #include "cagent_addons/errors.h"
 #include "cagent_addons/limits.h"
 #include "cagent_addons/node_proto.h"
-#include <cagent/types.h>
 
 #ifdef __cplusplus
 extern "C" {

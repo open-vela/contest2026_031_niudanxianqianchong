@@ -1,0 +1,56 @@
+# ESP32-P4X SmartHome: voice image with resident KWS wake-word service.
+#
+# KWS 需要 TFLite Micro 与 C++ 运行时，这两项会显著增大镜像并改变启动路径；
+# 因此单独成配置，保持 smart_home_voice 作为 ASR/TTS 的稳定验收镜像，
+# 出问题时可以二分定位是 KWS 引入还是语音基线。
+
+#include "../smart_home_voice/defconfig"
+
+# TFLite Micro 依赖链：flatbuffers + gemmlowp + kissfft + ruy。
+CONFIG_SYSTEM_FLATBUFFERS=y
+CONFIG_MATH_GEMMLOWP=y
+CONFIG_MATH_KISSFFT=y
+CONFIG_MATH_RUY=y
+CONFIG_TFLITEMICRO=y
+# ESP-NN P4 后端：Conv2D / DepthwiseConv2D 走 PIE 加速内核。
+# 需要整机切到乐鑫工具链（patches/nuttx/0012 + 0015），并先跑
+# scripts/link_esp_nn.sh 把 third_party/esp-nn 接到 apps 期望的路径。
+CONFIG_TFLITEMICRO_ESP_NN=y
+CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y
+CONFIG_ARCH_RV_ISA_VENDOR_EXTENSIONS="xespv"
+
+# ESP-NN 的节点白名单：默认 OUTPUT_TENSOR=-1 且 MASK=0x0，即「一个都不用」，
+# 此时 backend 仍是 esp-nn（编译了后端），但推理全部走 reference。
+#
+# 本模型的 conv/dw 输出 tensor id 与算力分布：
+#   CONV_2D           27  2,976,000
+#   DEPTHWISE_CONV_2D 28    357,120
+#   CONV_2D           29  2,539,520
+#   DEPTHWISE_CONV_2D 30    714,240
+#   CONV_2D           31  5,079,040
+#   DEPTHWISE_CONV_2D 32    714,240   ← id >= 32，mask 表示不了
+#   CONV_2D           33  7,618,560   ← id >= 32，mask 表示不了
+#
+# IsEspNnConvOutputSelected() 只接受 0..31，因此只能覆盖前 5 个节点，
+# 合计 11,665,920 / 19,998,720 = 58.3% 的 MAC。
+# 这一步只用于验证 P4 内核算得对不对，同时看速度是否同比下降。
+CONFIG_TFLITEMICRO_ESP_NN_CONV2D_OUTPUT_TENSOR_MASK=0xa8000000
+CONFIG_TFLITEMICRO_ESP_NN_DEPTHWISE_CONV2D_OUTPUT_TENSOR_MASK=0x50000000
+
+# 打开 trace（bring-up 期），用于确认节点真的被选中而不是静默回退。
+CONFIG_TFLITEMICRO_ESP_NN_TRACE=y
+
+# C++ 运行时（libc++ 要求 TLS_NELEM > 0）。
+CONFIG_HAVE_CXX=y
+CONFIG_LIBCXX=y
+CONFIG_TLS_NELEM=4
+CONFIG_TLS_TASK_NELEM=4
+CONFIG_CXX_MINI_LOCALIZATION=y
+
+# 先只验模型与前端（不开音频、不起常驻服务），确认 Invoke 延迟与
+# arena 实际占用后再开 SMART_HOME_KWS。
+CONFIG_SMART_HOME_KWS_SMOKE=y
+
+# KWS 模型 arena：Kconfig 默认 192 KB 在 P4 的 TFLM reference 内核下不够，
+# 先按 384 KB 验证，确认实际占用后再收窄。
+CONFIG_SMART_HOME_KWS_SMOKE_ARENA_SIZE=393216

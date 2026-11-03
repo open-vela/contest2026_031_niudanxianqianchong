@@ -14,12 +14,13 @@
 #include "smart_home_miloco.h"
 #include "smart_home_miloco_client.h"
 #include "smart_home_miloco_specscan.h"
+#include "smart_home_miloco_protocol.h"
 
 #include "../smart_home_memory.h"
 #include "../config/cjson_compat.h"
 #include "../config/smart_home_secrets.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -28,6 +29,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -35,10 +37,12 @@
 #include <time.h>
 #include <unistd.h>
 
-/* 24 KiB：HTTP 路径（getaddrinfo + 非阻塞 connect + 收包解析）实测
- * 栈深，8 KiB 时溢出会踩坏相邻 PSRAM，症状延迟到后续堆操作（cJSON）
- * 才爆——分段日志定位的教训，见开发日志。 */
-#define MILOCO_WORKER_STACK_SIZE   24576u
+/* 48 KiB：HTTP 路径（getaddrinfo + 非阻塞 connect + 收包解析 + 17KB
+ * spec 的 cJSON 整树解析）的栈深余量。历史教训是 8 KiB 时溢出会踩坏
+ * 相邻 PSRAM，症状延迟到后续堆操作（cJSON）才爆；24 KiB 在摄像机
+ * spec 解析路径上仍出现过溢出，故提到 48 KiB。栈走 PSRAM bulk 堆，
+ * 增量 24 KiB 对 32 MB PSRAM 无压力。 */
+#define MILOCO_WORKER_STACK_SIZE   49152u
 #define MILOCO_CONTROL_QUEUE_DEPTH 8
 /* 摄像机等复杂设备的 spec 达 17KB+（实测 17426B），16KB 缓冲会
  * 截断导致解析失败；32KB 走 PSRAM bulk 堆无压力。 */
@@ -50,6 +54,8 @@ typedef struct {
     char iid[14];
     uint8_t is_action;                   /* 0=set_property 1=call_action */
     int32_t value;
+    uint32_t request_id;
+    uint32_t dispatch_observation;
 } miloco_control_request_t;
 
 struct smart_home_miloco {
@@ -70,6 +76,9 @@ struct smart_home_miloco {
     /* 保存请求：worker 代写 secrets.json 后应用配置。 */
     smart_home_miloco_config_t save_config;
     bool save_pending;
+    bool save_in_progress;
+    bool save_completed;
+    int save_result;
 
     pthread_mutex_t lock;
     sem_t wake;
@@ -77,9 +86,20 @@ struct smart_home_miloco {
     /* 以下字段由 lock 保护。 */
     miloco_control_request_t pending[MILOCO_CONTROL_QUEUE_DEPTH];
     size_t pending_count;
+    uint32_t next_request_id;
+    struct { uint32_t id; int result; uint32_t dispatch_observation; }
+        results[MILOCO_CONTROL_QUEUE_DEPTH];
+    unsigned result_next;
     smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
     size_t device_count;
     uint32_t revision;
+
+    /* worker 独占的轮询暂存：避免 19 KB × 3 落在 48 KB 工作线程栈上。
+     * 只有 worker 线程访问，不需要加锁。
+     */
+    smart_home_miloco_device_t poll_parse[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t poll_fresh[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t poll_snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
     bool reachable;
     bool xiaomi_bound;
 };
@@ -188,17 +208,69 @@ bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
 /* 危险动作黑名单与类别映射已迁入 smart_home_miloco_specscan.c
  * （随轻量解析整体迁移，仅 spec 端点使用）。 */
 
+bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
+                                    const char *did,
+                                    smart_home_miloco_device_t *out)
+{
+    bool found = false;
+    if (!service || !did || !out) return false;
+    lock_state((smart_home_miloco_t *)service);
+    for (size_t i = 0; i < service->device_count; i++) {
+        if (!strcmp(service->devices[i].did, did)) {
+            *out = service->devices[i];
+            found = true;
+            break;
+        }
+    }
+    unlock_state((smart_home_miloco_t *)service);
+    return found;
+}
+
+bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
+                                      uint32_t id, int *result)
+{
+    uint32_t observation;
+    return smart_home_miloco_control_result_detail(service, id, result, &observation);
+}
+
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t id, int *result, uint32_t *dispatch_observation)
+{
+    bool found = false;
+    if (!service || !id || !result || !dispatch_observation) return false;
+    lock_state((smart_home_miloco_t *)service);
+    for (unsigned i = 0; i < MILOCO_CONTROL_QUEUE_DEPTH; i++) {
+        if (service->results[i].id == id) {
+            *result = service->results[i].result;
+            *dispatch_observation = service->results[i].dispatch_observation;
+            found = true;
+            break;
+        }
+    }
+    unlock_state((smart_home_miloco_t *)service);
+    return found;
+}
+
 int smart_home_miloco_submit_control(smart_home_miloco_t *service,
+                                     const char *did, const char *iid,
+                                     const char *operation, int32_t value)
+{
+    return smart_home_miloco_submit_control_tracked(service, did, iid,
+                                                    operation, value, NULL);
+}
+
+int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
                                      const char *did,
                                      const char *iid,
                                      const char *operation,
-                                     int32_t value)
+                                     int32_t value, uint32_t *request_id)
 {
     int ret = AGENT_OK;
 
     if (!service || !did || !did[0] || !iid || !iid[0] ||
         strlen(did) >= sizeof(service->pending[0].did) ||
-        strlen(iid) >= sizeof(service->pending[0].iid) || !operation) {
+        strlen(iid) >= sizeof(service->pending[0].iid) || !operation ||
+        (strcmp(operation, "set") && strcmp(operation, "action"))) {
         return AGENT_ERROR_INVALID;
     }
     lock_state(service);
@@ -214,6 +286,9 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
         strcpy(slot->iid, iid);
         slot->is_action = strcmp(operation, "action") == 0;
         slot->value = value;
+        if (++service->next_request_id == 0) ++service->next_request_id;
+        slot->request_id = service->next_request_id;
+        if (request_id) *request_id = slot->request_id;
         service->pending_count++;
     }
     unlock_state(service);
@@ -227,7 +302,12 @@ int smart_home_miloco_submit_power(smart_home_miloco_t *service,
                                    const char *did,
                                    bool on)
 {
-    return smart_home_miloco_submit_control(service, did, "prop.2.1",
+    smart_home_miloco_device_t device;
+    int index;
+    if (!smart_home_miloco_copy_device(service, did, &device)) return AGENT_ERROR_NOT_FOUND;
+    index = smart_home_miloco_power_index(&device);
+    if (index < 0) return AGENT_ERROR_INVALID;
+    return smart_home_miloco_submit_control(service, did, device.controls[index].iid,
                                             "set", on ? 1 : 0);
 }
 
@@ -276,8 +356,11 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
     lock_state(service);
     if (service->stop_requested) {
         ret = AGENT_ERROR_INVALID;
+    } else if (service->save_pending || service->save_in_progress) {
+        ret = AGENT_ERROR_BUSY;
     } else {
         service->save_config = *config;
+        service->save_completed = false;
         service->save_pending = true;
     }
     unlock_state(service);
@@ -285,6 +368,17 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
         sem_post(&service->wake);
     }
     return ret;
+}
+
+int smart_home_miloco_save_status(const smart_home_miloco_t *service)
+{
+    int result;
+    if (!service) return AGENT_ERROR_INVALID;
+    lock_state((smart_home_miloco_t *)service);
+    result = service->save_pending || service->save_in_progress ? AGENT_ERROR_BUSY :
+             service->save_completed ? service->save_result : AGENT_ERROR_NOT_FOUND;
+    unlock_state((smart_home_miloco_t *)service);
+    return result;
 }
 
 /* ── JSON 解析 ─────────────────────────────────────────────── */
@@ -319,7 +413,7 @@ static int parse_device_list(smart_home_miloco_t *service, const char *body,
     cJSON *root = cJSON_Parse(body);
     cJSON *data;
     cJSON *item;
-    smart_home_miloco_device_t parsed[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *parsed = service->poll_parse;
     size_t count = 0;
 
     *fresh_count = 0;
@@ -371,6 +465,7 @@ static int parse_device_list(smart_home_miloco_t *service, const char *body,
                 parsed[i].category = old->category;
                 parsed[i].controllable = old->controllable;
                 parsed[i].power_on = old->power_on;
+                parsed[i].power_valid = old->power_valid;
                 parsed[i].control_count = old->control_count;
                 memcpy(parsed[i].controls, old->controls,
                        sizeof(parsed[i].controls));
@@ -467,62 +562,22 @@ static int parse_device_spec(smart_home_miloco_t *service, const char *body)
     return AGENT_OK;
 }
 
-/* 解析 data: [{iid, value}, ...]，按设备 controls 的 prop 项回读。 */
+/* 新版 data.properties 和旧版 data 数组共用类型及错误码校验。 */
 static int refresh_device_status(smart_home_miloco_t *service,
-                                 const char *did_text,
-                                 char *body, size_t body_size)
+                                 const char *did_text, const char *body)
 {
-    cJSON *root;
-    cJSON *data;
-    cJSON *item;
-    size_t i;
-    uint8_t k;
-    bool changed = false;
-
-    root = cJSON_Parse(body);
-    if (!root) {
-        return AGENT_ERROR_PARSE;
-    }
-    data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    int ret = AGENT_ERROR_NOT_FOUND;
     lock_state(service);
-    for (i = 0; i < service->device_count; i++) {
+    for (size_t i = 0; i < service->device_count; i++) {
         smart_home_miloco_device_t *dev = &service->devices[i];
-
-        if (strcmp(dev->did, did_text) != 0) {
-            continue;
-        }
-        cJSON_ArrayForEach(item, data) {
-            const cJSON *iid = cJSON_GetObjectItemCaseSensitive(item,
-                                                                "iid");
-            const cJSON *value = cJSON_GetObjectItemCaseSensitive(item,
-                                                                  "value");
-            int32_t v;
-
-            if (!cJSON_IsString(iid) || !cJSON_IsNumber(value)) {
-                continue;
-            }
-            v = (int32_t)value->valueint;
-            for (k = 0; k < dev->control_count; k++) {
-                smart_home_miloco_control_t *ctrl = &dev->controls[k];
-
-                if (strcmp(ctrl->iid, iid->valuestring) == 0 &&
-                    ctrl->value != v) {
-                    ctrl->value = v;
-                    changed = true;
-                }
-                if (strcmp(ctrl->iid, "prop.2.1") == 0) {
-                    dev->power_on = v != 0;
-                }
-            }
-        }
+        bool changed = false;
+        if (strcmp(dev->did, did_text)) continue;
+        ret = smart_home_miloco_status_apply(dev, body, &changed);
+        if (changed) service->revision++;
         break;
     }
-    if (changed) {
-        service->revision++;
-    }
     unlock_state(service);
-    cJSON_Delete(root);
-    return AGENT_OK;
+    return ret;
 }
 
 /* 拉取设备全部 prop 控制项的当前值（一次合并请求）。 */
@@ -530,8 +585,8 @@ static int refresh_device_values(smart_home_miloco_t *service,
                                  const char *did,
                                  char *body, size_t body_size)
 {
-    char path[160];
-    char iids[96];
+    char path[80 + SMART_HOME_MILOCO_MAX_CONTROLS * 14];
+    char iids[SMART_HOME_MILOCO_MAX_CONTROLS * 14];
     size_t used = 0;
     int http_status = 0;
     int ret;
@@ -549,7 +604,7 @@ static int refresh_device_values(smart_home_miloco_t *service,
         for (k = 0; k < dev->control_count; k++) {
             const smart_home_miloco_control_t *ctrl = &dev->controls[k];
 
-            if (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION) {
+            if (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION || ctrl->write_only) {
                 continue;
             }
             if (used + strlen(ctrl->iid) + 2 >= sizeof(iids)) {
@@ -568,13 +623,11 @@ static int refresh_device_values(smart_home_miloco_t *service,
              did, iids);
     ret = smart_home_miloco_http_get(&service->client_config, path,
                                      body, body_size, &http_status);
-    if (ret < 0) {
-        return ret;
+    if (ret < 0 || http_status != 200) {
+        (void)refresh_device_status(service, did, NULL);
+        return ret < 0 ? ret : -EIO;
     }
-    if (http_status != 200) {
-        return -EIO;
-    }
-    return refresh_device_status(service, did, body, body_size);
+    return refresh_device_status(service, did, body);
 }
 
 /* ── worker ────────────────────────────────────────────────── */
@@ -706,13 +759,13 @@ static int poll_bind_status(smart_home_miloco_t *service,
         service->revision++;
     }
     unlock_state(service);
-    return bound ? AGENT_OK : AGENT_ERROR_NOTFOUND;
+    return bound ? AGENT_OK : AGENT_ERROR_NOT_FOUND;
 }
 
 static int poll_device_list(smart_home_miloco_t *service,
                             char *body, size_t body_size)
 {
-    smart_home_miloco_device_t fresh[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *fresh = service->poll_fresh;
     size_t fresh_count = 0;
     int http_status = 0;
     int ret;
@@ -732,7 +785,7 @@ static int poll_device_list(smart_home_miloco_t *service,
         return -EIO;
     }
     ret = parse_device_list(service, body, fresh,
-                            sizeof(fresh) / sizeof(fresh[0]), &fresh_count);
+                            SMART_HOME_MILOCO_MAX_DEVICES, &fresh_count);
     if (ret != AGENT_OK) {
         return ret;
     }
@@ -743,7 +796,7 @@ static int poll_device_list(smart_home_miloco_t *service,
         spec_attempt_take(fresh[i].did);
     }
     {
-        smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
+        smart_home_miloco_device_t *snapshot = service->poll_snapshot;
         size_t count;
 
         count = smart_home_miloco_list(service, snapshot,
@@ -925,7 +978,7 @@ int smart_home_miloco_set_weather_city(smart_home_miloco_t *service,
 }
 
 static int execute_control(smart_home_miloco_t *service,
-                           const miloco_control_request_t *request,
+                           miloco_control_request_t *request,
                            char *body, size_t body_size)
 {
     char path[80];
@@ -948,7 +1001,19 @@ static int execute_control(smart_home_miloco_t *service,
         }
         for (k = 0; k < dev->control_count; k++) {
             if (strcmp(dev->controls[k].iid, request->iid) == 0) {
-                iid_allowed = true;
+                const smart_home_miloco_control_t *ctrl = &dev->controls[k];
+                iid_allowed = dev->online &&
+                    request->is_action == (ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION);
+                if (!request->is_action)
+                    iid_allowed = iid_allowed && smart_home_miloco_value_allowed(ctrl, request->value);
+                /* A previous cached value must not confirm this dispatch. */
+                if (iid_allowed && !request->is_action) {
+                    request->dispatch_observation = ctrl->observation;
+                    service->devices[i].controls[k].value_valid = false;
+                    if ((int)k == smart_home_miloco_power_index(dev))
+                        service->devices[i].power_valid = false;
+                    service->revision++;
+                }
                 is_bool = dev->controls[k].type ==
                           SMART_HOME_MILOCO_CTRL_BOOL;
                 break;
@@ -957,9 +1022,7 @@ static int execute_control(smart_home_miloco_t *service,
     }
     unlock_state(service);
     if (!iid_allowed) {
-        syslog(LOG_WARNING,
-               "[milo] control rejected unknown iid %s did %s\n",
-               request->iid, request->did);
+        syslog(LOG_WARNING, "[miloco] control rejected by local validation\n");
         return -EINVAL;
     }
 
@@ -984,14 +1047,28 @@ static int execute_control(smart_home_miloco_t *service,
                                       request_body, body, body_size,
                                       &http_status);
     if (ret < 0) {
-        return ret;
+        syslog(LOG_WARNING, "[miloco] control response: transport error=%d\n", ret);
+        ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+    } else if (http_status != 200) {
+        syslog(LOG_WARNING, "[miloco] control response: http=%d\n", http_status);
+        ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+    } else {
+        ret = smart_home_miloco_control_reply(body, request->did, request->iid,
+                                              request->is_action != 0);
+        if (ret == AGENT_ERROR_PARSE) {
+            syslog(LOG_WARNING, "[miloco] control response: invalid result\n");
+            ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+        } else if (ret != AGENT_OK) {
+            syslog(LOG_WARNING, "[miloco] control response: rejected result=%d\n", ret);
+        }
     }
-    if (http_status != 200) {
-        return -EIO;
+    if (!request->is_action &&
+        (ret == AGENT_OK || ret == SMART_HOME_MILOCO_RESULT_UNCONFIRMED)) {
+        int read_ret = refresh_device_values(service, request->did, body, body_size);
+        if (read_ret != AGENT_OK)
+            syslog(LOG_WARNING, "[miloco] control readback: error=%d\n", read_ret);
     }
-    /* 控制成功后回读真实状态，失败也接受（下轮轮询会补）。 */
-    (void)refresh_device_values(service, request->did, body, body_size);
-    return AGENT_OK;
+    return ret;
 }
 
 static void *miloco_worker(void *argument)
@@ -1044,6 +1121,8 @@ static void *miloco_worker(void *argument)
             int save_ret;
 
             service->save_pending = false;
+            service->save_in_progress = true;
+            memset(&service->save_config, 0, sizeof(service->save_config));
             snprintf(client_config.host, sizeof(client_config.host), "%s",
                      save.host);
             client_config.port = save.port;
@@ -1062,7 +1141,11 @@ static void *miloco_worker(void *argument)
             syslog(LOG_INFO, "[milo] worker: secrets save ret=%d\n",
                    save_ret);
 #endif
+            memset(&save, 0, sizeof(save));
             lock_state(service);
+            service->save_result = save_ret;
+            service->save_in_progress = false;
+            service->save_completed = true;
             if (save_ret == AGENT_OK) {
                 service->client_config = client_config;
                 service->reachable = false;
@@ -1089,11 +1172,17 @@ static void *miloco_worker(void *argument)
             break;
         }
         if (has_control) {
-            if (execute_control(service, &control, body,
-                                MILOCO_RESPONSE_BYTES) != AGENT_OK) {
-                syslog(LOG_WARNING,
-                       "WARNING: [miloco] control did=%s iid=%s failed\n",
-                       control.did, control.iid);
+            int result = execute_control(service, &control, body,
+                                          MILOCO_RESPONSE_BYTES);
+            lock_state(service);
+            service->results[service->result_next].id = control.request_id;
+            service->results[service->result_next].result = result;
+            service->results[service->result_next].dispatch_observation =
+                control.dispatch_observation;
+            service->result_next = (service->result_next + 1) % MILOCO_CONTROL_QUEUE_DEPTH;
+            unlock_state(service);
+            if (result != AGENT_OK) {
+                syslog(LOG_WARNING, "[miloco] control completed: result=%d\n", result);
             }
             continue; /* 立即处理后续排队的控制请求。 */
         }
@@ -1181,6 +1270,29 @@ int smart_home_miloco_start(smart_home_miloco_t **service_out,
         ret = pthread_attr_setstack(&attr, service->worker_stack,
                                     service->worker_stack_bytes);
     }
+#ifdef CONFIG_SMP
+    if (ret == 0) {
+        cpu_set_t cpuset;
+
+        /* 绑 CPU1：LVGL 主循环、DSI 扫描输出与触摸采样都在 CPU0，而米家
+         * 轮询每 5 秒要走 DNS + TCP + TLS 收包，都是阻塞调用。放到 CPU0
+         * 会和 UI 抢同一个核，表现为点击要等（主循环 usleep 到期后还要
+         * 重新竞争 CPU，被网络线程占住就多等一个调度周期）。
+         * 摄像头 worker 绑 CPU0 是因为帧缓冲要与 DSI 同核做 cache sync，
+         * 米家这条链路没有跨核共享的 DMA 缓冲，绑到空闲的 CPU1 更合适。 */
+
+        CPU_ZERO(&cpuset);
+        CPU_SET(1, &cpuset);
+        ret = pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+        if (ret != 0) {
+            /* 绑核失败不阻塞服务：退回继承父线程亲和性（CPU0）。 */
+            syslog(LOG_WARNING,
+                   "[milo] start: affinity set failed ret=%d, using default\n",
+                   ret);
+            ret = 0;
+        }
+    }
+#endif
     syslog(LOG_INFO, "[milo] start: attr ret=%d, creating thread\n", ret);
     if (ret == 0) {
         ret = pthread_create(&service->worker, &attr, miloco_worker, service);

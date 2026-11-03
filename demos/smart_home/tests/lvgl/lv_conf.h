@@ -1,0 +1,20 @@
+#ifndef LV_CONF_H
+#define LV_CONF_H
+#define LV_COLOR_DEPTH 32
+#define LV_USE_OS 0
+#define LV_USE_STDLIB_MALLOC 1
+#define LV_USE_STDLIB_STRING 1
+#define LV_USE_STDLIB_SPRINTF 1
+#define LV_USE_LOG 0
+#define LV_USE_FS_POSIX 1
+#define LV_FS_POSIX_LETTER 'A'
+#define LV_FS_POSIX_PATH "/"
+#define LV_USE_LODEPNG 1
+#define LV_USE_NUTTX 0
+#define LV_USE_TINY_TTF 1
+#define LV_TINY_TTF_FILE_SUPPORT 0
+#define LV_FONT_MONTSERRAT_12 1
+#define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_MONTSERRAT_20 1
+#endif

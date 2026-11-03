@@ -16,6 +16,8 @@ if(CONFIG_SMART_HOME_DEMO)
     src/smart_home_cpu_debug.c
     src/smart_home_memory.c
     src/agent/smart_home_agent.c
+    src/agent/smart_home_agent_backend.c
+    src/agent/smart_home_session.c
     src/config/smart_home_backends.c
     src/config/smart_home_config_store.c
     src/config/smart_home_secrets.c
@@ -25,9 +27,104 @@ if(CONFIG_SMART_HOME_DEMO)
     src/skills/smart_home_scene_catalog.c
     src/skills/smart_home_skills.c
     src/tools/smart_home_tools.c
+    src/tools/smart_home_device_inventory.c
     src/ui/smart_home_ui.c
   )
+  if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+    list(APPEND SMART_HOME_SRCS
+      src/camera/smart_home_camera_service.c
+      src/camera/smart_home_camera_control.c
+    )
+    if(CONFIG_SMART_HOME_CAMERA_TOOL)
+      list(APPEND SMART_HOME_SRCS
+        src/camera/smart_home_snapshot_store.c
+        src/tools/smart_home_camera_tools.c)
+    endif()
+  endif()
+
+  if(CONFIG_SMART_HOME_MILOCO_BRIDGE)
+    list(APPEND SMART_HOME_SRCS
+      src/miloco/smart_home_miloco_client.c
+      src/miloco/smart_home_miloco_service.c
+      src/miloco/smart_home_miloco_specscan.c
+      src/miloco/smart_home_miloco_protocol.c
+      src/miloco/smart_home_miloco_scene.c
+      src/miloco/smart_home_miloco_tools.c
+      src/miloco/smart_home_miloco_qr.c
+      third_party/qrcodegen/qrcodegen.c
+      src/ui/lvgl/smart_home_lvgl_miloco_bind.c
+    )
+  endif()
+
+  if(CONFIG_SMART_HOME_VOICE_TTS)
+    list(APPEND SMART_HOME_SRCS
+      src/voice/smart_home_tts.c
+      src/voice/smart_home_voice_resample.c
+      src/voice/smart_home_voice_play.c
+      src/voice/smart_home_voice_player.c)
+  endif()
+
+  if(CONFIG_SMART_HOME_DEMO_UI_LVGL)
+    if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+      list(APPEND SMART_HOME_SRCS src/ui/lvgl/smart_home_lvgl_camera_dialog.c)
+    endif()
+    list(APPEND SMART_HOME_SRCS
+      src/ui/lvgl/smart_home_lvgl.c
+      src/ui/lvgl/smart_home_lvgl_agent.c
+      src/ui/lvgl/smart_home_lvgl_history.c
+      src/ui/lvgl/smart_home_lvgl_chat.c
+      src/ui/lvgl/smart_home_lvgl_home.c
+      src/ui/lvgl/smart_home_lvgl_home_v9.c
+      if(CONFIG_SMART_HOME_ONBOARDING)
+      src/ui/lvgl/smart_home_lvgl_onboarding.c
+      endif()
+      src/ui/lvgl/smart_home_lvgl_device_dialog.c
+      src/ui/lvgl/smart_home_lvgl_room_dialog.c
+      src/ui/lvgl/smart_home_lvgl_nav.c
+      src/ui/lvgl/smart_home_lvgl_panel.c
+      src/ui/lvgl/smart_home_lvgl_pages.c
+      src/ui/lvgl/smart_home_lvgl_screensaver.c
+      src/ui/lvgl/smart_home_lvgl_settings.c
+      src/ui/lvgl/smart_home_lvgl_settings_v9.c
+      src/ui/lvgl/smart_home_lvgl_voice_settings.c
+      src/ui/lvgl/smart_home_v9_device_view.c
+      src/ui/lvgl/smart_home_lvgl_style.c
+      src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
+    )
+    file(GLOB SMART_HOME_LVGL_ICONS
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/lvgl/icons/generated/*.c)
+    list(APPEND SMART_HOME_SRCS ${SMART_HOME_LVGL_ICONS})
+  endif()
+
+  add_compile_definitions(AGENT_BUILD_CONFIG_HEADER="nuttx/config.h")
   set(SMART_HOME_DEPS cagent)
+  include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/agent
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/camera
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/device
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/miloco
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/net
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/skills
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/tools
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/lvgl
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/lvgl/icons
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/lvgl/images
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen
+    ${NUTTX_APPS_DIR}/packages/cAGENT/include
+    ${NUTTX_APPS_DIR}/crypto/mbedtls/mbedtls/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/model/openai/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/ram/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/files/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/providers/storage/jsonl/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/posix/storage/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/openvela/storage/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/runtime/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/transport/include
+    ${NUTTX_APPS_DIR}/packages/cAGENT/ports/tls/include
+  )
 
   if(CONFIG_FEATURE_SYSTEM_SMARTHOME)
     include_directories(
@@ -49,7 +146,12 @@ if(CONFIG_SMART_HOME_DEMO)
   endif()
 
   if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
-    list(APPEND SMART_HOME_SRCS src/camera/smart_home_camera_service.c)
+    list(APPEND SMART_HOME_SRCS src/camera/smart_home_camera_service.c
+      src/camera/smart_home_camera_control.c)
+    if(CONFIG_SMART_HOME_CAMERA_TOOL)
+      list(APPEND SMART_HOME_SRCS src/camera/smart_home_snapshot_store.c
+        src/tools/smart_home_camera_tools.c)
+    endif()
   endif()
 
   if(CONFIG_SMART_HOME_MILOCO_BRIDGE)
@@ -82,6 +184,9 @@ if(CONFIG_SMART_HOME_DEMO)
   endif()
 
   if(CONFIG_SMART_HOME_DEMO_UI_LVGL)
+    if(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+      list(APPEND SMART_HOME_SRCS src/ui/lvgl/smart_home_lvgl_camera_dialog.c)
+    endif()
     file(GLOB SMART_HOME_GENERATED_ICON_SRCS
       "${CMAKE_CURRENT_LIST_DIR}/src/ui/lvgl/icons/generated/*.c"
     )
@@ -89,12 +194,22 @@ if(CONFIG_SMART_HOME_DEMO)
       src/ui/lvgl/smart_home_lvgl.c
       src/ui/lvgl/smart_home_lvgl_agent.c
       src/ui/lvgl/smart_home_lvgl_chat.c
+      src/ui/lvgl/smart_home_lvgl_history.c
       src/ui/lvgl/smart_home_lvgl_home.c
+      src/ui/lvgl/smart_home_lvgl_home_v9.c
+      if(CONFIG_SMART_HOME_ONBOARDING)
+      src/ui/lvgl/smart_home_lvgl_onboarding.c
+      endif()
+      src/ui/lvgl/smart_home_lvgl_device_dialog.c
+      src/ui/lvgl/smart_home_lvgl_room_dialog.c
       src/ui/lvgl/smart_home_lvgl_nav.c
       src/ui/lvgl/smart_home_lvgl_panel.c
       src/ui/lvgl/smart_home_lvgl_pages.c
       src/ui/lvgl/smart_home_lvgl_screensaver.c
       src/ui/lvgl/smart_home_lvgl_settings.c
+      src/ui/lvgl/smart_home_lvgl_settings_v9.c
+      src/ui/lvgl/smart_home_lvgl_voice_settings.c
+      src/ui/lvgl/smart_home_v9_device_view.c
       src/ui/lvgl/smart_home_lvgl_style.c
       src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
       ${SMART_HOME_GENERATED_ICON_SRCS}

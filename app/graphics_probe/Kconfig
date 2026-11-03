@@ -1,0 +1,8 @@
+config LVX_USE_DEMO_CONTEST2026_031_GRAPHICS_PROBE
+	bool "ESP32-P4X DMA2D/PPA memory probe"
+	depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD && ESP32P4_DMA2D
+	default n
+	---help---
+		Validate image copies and PPA operations without a display or camera.
+		Supports explicit SRAM/PSRAM buffers and a memory matrix; the full
+		matrix requires SPIRAM_USER_HEAP with a separate MM_KERNEL_HEAP.

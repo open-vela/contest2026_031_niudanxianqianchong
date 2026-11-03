@@ -1,6 +1,6 @@
 # 第三方依赖与许可证声明
 
-最后核对：2026-08-19。
+P4 依赖最后核对：2026-08-19；cAGENT V2 包替换记录：2026-10-25。
 
 本文件记录本仓 ESP32-P4 Function EV Board 移植的已识别依赖。它不替代各
 依赖随源代码分发的 `LICENSE`、`NOTICE` 或版权声明；再分发固件或源代码时，
@@ -17,6 +17,14 @@
 原有 SPDX、版权和 NOTICE 声明。`esp-hal-3rdparty` 是构建时拉取的依赖，不作为
 本仓受跟踪源代码提交；其兼容补丁位于
 `chips/esp32p4/common/espressif/patches/`，补丁本身随本仓以 Apache-2.0 发布。
+
+## cAGENT V2 包
+
+`packages/cAGENT/` 已替换为 cAgentV2 的本地快照（原 `packages/cAgent2/`）；
+基线与额外未提交来源见包内 `V2_SNAPSHOT_COMMIT`。V2 Core、OpenAI Provider
+及大部分端口保留 MIT 许可证，见包内 `LICENSE` 和各文件 SPDX 声明。
+`ports/tls/src/tls_core.c` 保留 Apache-2.0 声明，其源码血缘见
+`ports/tls/README.md`；Apache-2.0 全文随本仓根目录 `LICENSE` 提供。
 
 ## 本仓许可证范围
 

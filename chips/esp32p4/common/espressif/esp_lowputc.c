@@ -36,6 +36,7 @@
 #include <unistd.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/init.h>
 #include <nuttx/irq.h>
 #include <nuttx/mutex.h>
 #include <nuttx/spinlock.h>
@@ -337,12 +338,24 @@ bool esp_lowputc_uart_module_enable(const struct esp_uart_s *priv)
   int uart_num = priv->id;
   bool newly_enabled = false;
   mutex_t lock;
+  irqstate_t flags = 0;
+  bool sched_ready = OSINIT_OS_READY();
 
-  nxmutex_init(&lock);
+  /* esp_lowsetup() runs before nx_start(), where NuttX mutexes cannot be
+   * used.  Only CPU0 is running at that point, so masking interrupts is
+   * enough to serialize the one-time bus clock enable.
+   */
 
-  g_uart_context[uart_num].mutex = (_lock_t)&lock;
-
-  _lock_acquire(&(g_uart_context[uart_num].mutex));
+  if (sched_ready)
+    {
+      nxmutex_init(&lock);
+      g_uart_context[uart_num].mutex = (_lock_t)&lock;
+      _lock_acquire(&(g_uart_context[uart_num].mutex));
+    }
+  else
+    {
+      flags = up_irq_save();
+    }
 
   if (g_uart_context[uart_num].hw_enabled != true)
     {
@@ -371,9 +384,17 @@ bool esp_lowputc_uart_module_enable(const struct esp_uart_s *priv)
       newly_enabled = true;
     }
 
-  _lock_release(&(g_uart_context[uart_num].mutex));
-  nxmutex_destroy(&lock);
-  g_uart_context[uart_num].mutex = NULL;
+  if (sched_ready)
+    {
+      _lock_release(&(g_uart_context[uart_num].mutex));
+      nxmutex_destroy(&lock);
+      g_uart_context[uart_num].mutex = NULL;
+    }
+  else
+    {
+      up_irq_restore(flags);
+    }
+
   return newly_enabled;
 }
 

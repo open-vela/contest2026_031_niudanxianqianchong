@@ -10,49 +10,48 @@
 extern "C" {
 #endif
 
-/* ── Light Premium Color Tokens ──────────────────────────── */
-
-/* Primary / Brand */
-#define SMART_HOME_UI_COLOR_PRIMARY        lv_color_hex(0x57916E)
-#define SMART_HOME_UI_COLOR_PRIMARY_DARK   lv_color_hex(0x286A4B)
-
-/* Semantic */
-#define SMART_HOME_UI_COLOR_SUCCESS        lv_color_hex(0x4CD964)
-#define SMART_HOME_UI_COLOR_WARNING        lv_color_hex(0xD98A14)
-#define SMART_HOME_UI_COLOR_DANGER         lv_color_hex(0xD64545)
-
-/* Backgrounds */
-#define SMART_HOME_UI_COLOR_BG             lv_color_hex(0xF4F2EE)
-#define SMART_HOME_UI_COLOR_SURFACE        lv_color_hex(0xFBFAF8)
-#define SMART_HOME_UI_COLOR_SURFACE_SOFT   lv_color_hex(0xF0EFEB)
-#define SMART_HOME_UI_COLOR_SURFACE_ON     lv_color_hex(0xE6F0EA)
-
-/* Text */
-#define SMART_HOME_UI_COLOR_TEXT_PRIMARY   lv_color_hex(0x26312E)
-#define SMART_HOME_UI_COLOR_TEXT_SECONDARY lv_color_hex(0x5C6762)
-#define SMART_HOME_UI_COLOR_TEXT_MUTED     lv_color_hex(0x74807B)
-
-/* Border */
-#define SMART_HOME_UI_COLOR_BORDER         lv_color_hex(0xE5E1DA)
-
-/* ── Light Premium extended tokens ──────────────────────── */
-#define SMART_HOME_UI_COLOR_DEVICE_ON_BORDER lv_color_hex(0xB8DED5)
-#define SMART_HOME_UI_COLOR_USER_BUBBLE      lv_color_hex(0xE8F1FE)
-#define SMART_HOME_UI_COLOR_TOOL_CARD_BG     lv_color_hex(0xFFF8EA)
-#define SMART_HOME_UI_COLOR_ERROR_BUBBLE_BG  lv_color_hex(0xFFF6E5)
-
-/* Nav active indicator (brand blue @ 20% opacity) */
-#define SMART_HOME_UI_COLOR_NAV_ACTIVE_BG    lv_color_hex(0x4A90D9)
-
-/* Cancel / secondary button */
-#define SMART_HOME_UI_COLOR_BTN_SECONDARY    lv_color_hex(0x8A96A8)
+/* ── V9 light tokens ─────────────────────────────────────── */
+#define SMART_HOME_UI_COLOR_PRIMARY        lv_color_hex(0x91BCCB)
+#define SMART_HOME_UI_COLOR_PRIMARY_DARK   lv_color_hex(0x314956)
+#define SMART_HOME_UI_COLOR_SUCCESS        lv_color_hex(0x6D9681)
+#define SMART_HOME_UI_COLOR_WARNING        lv_color_hex(0xD7B58F)
+#define SMART_HOME_UI_COLOR_DANGER         lv_color_hex(0xB66F69)
+#define SMART_HOME_UI_COLOR_BG             lv_color_hex(0xECEFEA)
+#define SMART_HOME_UI_COLOR_SURFACE        lv_color_hex(0xF8F8F4)
+#define SMART_HOME_UI_COLOR_SURFACE_SOFT   lv_color_hex(0xF1F3EF)
+#define SMART_HOME_UI_COLOR_SURFACE_ON     lv_color_hex(0xE1EDF0)
+#define SMART_HOME_UI_COLOR_TEXT_PRIMARY   lv_color_hex(0x314956)
+#define SMART_HOME_UI_COLOR_TEXT_SECONDARY lv_color_hex(0x526775)
+#define SMART_HOME_UI_COLOR_TEXT_MUTED     lv_color_hex(0x718797)
+#define SMART_HOME_UI_COLOR_BORDER         lv_color_hex(0xD8E0DF)
+#define SMART_HOME_UI_COLOR_DEVICE_ON_BORDER lv_color_hex(0xB7D2DA)
+#define SMART_HOME_UI_COLOR_USER_BUBBLE      lv_color_hex(0xE1EDF0)
+#define SMART_HOME_UI_COLOR_TOOL_CARD_BG     lv_color_hex(0xF4EFE6)
+#define SMART_HOME_UI_COLOR_ERROR_BUBBLE_BG  lv_color_hex(0xF7E9E7)
+#define SMART_HOME_UI_COLOR_NAV_ACTIVE_BG    lv_color_hex(0xE1EDF0)
+#define SMART_HOME_UI_COLOR_BTN_SECONDARY    lv_color_hex(0x718797)
 
 typedef struct {
+    lv_font_t *font_11;
+    lv_font_t *font_12;
+    lv_font_t *font_13;
     lv_font_t *font_14;
+    lv_font_t *font_15;
     lv_font_t *font_16;
+    lv_font_t *font_17;
     lv_font_t *font_18;
+    lv_font_t *font_19;
+    lv_font_t *font_20;
+    lv_font_t *font_22;
     lv_font_t *font_24;
+    lv_font_t *font_26;
+    lv_font_t *font_28;
     lv_font_t *font_32;
+    lv_font_t *font_38;
+    lv_font_t *font_48;
+    lv_font_t *font_50;
+    lv_font_t *font_56;
+    lv_font_t *font_96;
 } smart_home_lvgl_style_t;
 
 int smart_home_lvgl_style_init(void);
@@ -62,8 +61,13 @@ const lv_font_t *smart_home_lvgl_font(int size);
 
 void smart_home_lvgl_set_bg(lv_obj_t *obj, lv_color_t color);
 void smart_home_lvgl_card_style(lv_obj_t *obj);
+void smart_home_lvgl_press_feedback(lv_obj_t *obj);
 void smart_home_lvgl_soft_card_style(lv_obj_t *obj);
 void smart_home_lvgl_style_keyboard(lv_obj_t *keyboard);
+void smart_home_lvgl_style_input(lv_obj_t *input, int size);
+void smart_home_lvgl_style_dropdown(lv_obj_t *dropdown, int size);
+/* Tint legacy alpha masks while preserving approved pixel-art colors. */
+void smart_home_lvgl_icon_color(lv_obj_t *icon, lv_color_t color);
 
 lv_obj_t *smart_home_lvgl_label_create(lv_obj_t *parent,
                                        const char *text,

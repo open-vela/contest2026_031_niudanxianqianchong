@@ -11,6 +11,8 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/smart_home_cpu_debug.c
   CSRCS     += src/smart_home_memory.c
   CSRCS     += src/agent/smart_home_agent.c
+  CSRCS     += src/agent/smart_home_agent_backend.c
+  CSRCS     += src/agent/smart_home_session.c
   ifneq ($(CONFIG_FEATURE_SYSTEM_SMARTHOME),)
     CSRCS   += src/quickapp/smart_home_quickapp_provider.c
     CSRCS   += src/quickapp/smart_home_quickapp_ipc_server.c
@@ -44,14 +46,21 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/skills/smart_home_scene_catalog.c
   CSRCS     += src/skills/smart_home_skills.c
   CSRCS     += src/tools/smart_home_tools.c
+  CSRCS     += src/tools/smart_home_device_inventory.c
   CSRCS     += src/ui/smart_home_ui.c
   ifneq ($(CONFIG_SMART_HOME_CAMERA_PREVIEW),)
     CSRCS   += src/camera/smart_home_camera_service.c
+    CSRCS   += src/camera/smart_home_camera_control.c
+  endif
+  ifneq ($(CONFIG_SMART_HOME_CAMERA_TOOL),)
+    CSRCS   += src/camera/smart_home_snapshot_store.c
+    CSRCS   += src/tools/smart_home_camera_tools.c
   endif
   ifneq ($(CONFIG_SMART_HOME_MILOCO_BRIDGE),)
     CSRCS   += src/miloco/smart_home_miloco_client.c
     CSRCS   += src/miloco/smart_home_miloco_service.c
     CSRCS   += src/miloco/smart_home_miloco_specscan.c
+    CSRCS   += src/miloco/smart_home_miloco_protocol.c
     CSRCS   += src/miloco/smart_home_miloco_scene.c
     CSRCS   += src/miloco/smart_home_miloco_tools.c
     CSRCS   += src/miloco/smart_home_miloco_qr.c
@@ -61,11 +70,15 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   ifneq ($(CONFIG_SMART_HOME_VOICE_TTS),)
     CSRCS   += src/voice/smart_home_voice_player.c
     CSRCS   += src/voice/smart_home_tts.c
+    CSRCS   += src/voice/smart_home_voice_resample.c
     CSRCS   += src/voice/smart_home_voice_play.c
   endif
-  # 采集服务由 ASR 与 KWS 共用（KWS 开关在阶段三引入，未定义时为空）
-  ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_KWS),)
+  # 采集服务由 ASR / KWS / VAD 共用（未定义的开关在本条中为空）
+  ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_KWS)$(CONFIG_SMART_HOME_VAD),)
     CSRCS   += src/voice/smart_home_voice_capture.c
+  endif
+  ifneq ($(CONFIG_SMART_HOME_VAD),)
+    CSRCS   += src/voice/smart_home_vad.c
   endif
   ifneq ($(CONFIG_SMART_HOME_VOICE_ASR),)
     CSRCS   += src/voice/smart_home_asr.c
@@ -99,13 +112,28 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   ifneq ($(CONFIG_SMART_HOME_DEMO_UI_LVGL),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_agent.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_history.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_chat.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_home.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_home_v9.c
+    ifneq ($(CONFIG_SMART_HOME_ONBOARDING),)
+      CSRCS += src/ui/lvgl/smart_home_lvgl_onboarding.c
+    endif
+    ifneq ($(CONFIG_SMART_HOME_CAMERA_PREVIEW),)
+      CSRCS += src/ui/lvgl/smart_home_lvgl_camera_dialog.c
+    endif
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_device_dialog.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_room_dialog.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_nav.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_panel.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_pages.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_screensaver.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_settings.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_settings_v9.c
+    ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_VOICE_TTS),)
+      CSRCS += src/ui/lvgl/smart_home_lvgl_voice_settings.c
+    endif
+    CSRCS   += src/ui/lvgl/smart_home_v9_device_view.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_style.c
     CSRCS   += src/ui/lvgl/icons/smart_home_lvgl_png_icons.c
     CSRCS   += $(wildcard src/ui/lvgl/icons/generated/*.c)
@@ -158,11 +186,23 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/icons
   CFLAGS += ${INCDIR_PREFIX}$(CURDIR)/src/ui/lvgl/images
-  # cAGENT 内部头（runtime_openvela.h，TLS 封装复用）
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/include
-  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/src/runtime
+  CFLAGS += -DAGENT_BUILD_CONFIG_HEADER=\"nuttx/config.h\"
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/files/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/jsonl/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/posix/storage/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/openvela/storage/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/storage/ram/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/providers/model/openai/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/runtime/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/transport/include
+  CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/packages/cAGENT/ports/tls/include
   # TTS/ASR 客户端直接使用 mbedtls base64 编解码
   CFLAGS += ${INCDIR_PREFIX}$(APPDIR)/crypto/mbedtls/mbedtls/include
 endif
 
 include $(APPDIR)/Application.mk
+
+# Sources already include their relative directories.  --dep-path . makes
+# mkdeps strip them and attach header dependencies to the wrong objects.
+DEPPATH := --obj-path .

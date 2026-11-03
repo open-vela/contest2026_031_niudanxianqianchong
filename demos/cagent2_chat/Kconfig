@@ -1,0 +1,29 @@
+############################################################################
+# demos/cagent2_chat/Kconfig
+############################################################################
+
+config CAGENT2_CHAT
+	bool "cAgent2 single-turn chat demo"
+	default n
+	select CAGENT
+	select CAGENT_PROVIDER_OPENAI
+	select CAGENT_PORT_OPENVELA_RUNTIME
+	select CAGENT_PORT_OPENVELA_TRANSPORT
+	select CAGENT_PORT_OPENVELA_TLS
+	---help---
+	  基于 vendored cAgentV2 的单轮问答 demo：控制台输入 -> ReAct
+	  单步 -> OpenAI 兼容 provider（mbedTLS HTTPS）-> 打印回复。
+	  当前调试版本通过源码顶部宏配置 API 密钥，会编译进固件；
+	  不得提交真实密钥或分发包含真实密钥的调试固件。
+
+if CAGENT2_CHAT
+
+config CAGENT2_CHAT_STACKSIZE
+	int "chat demo task stack size"
+	default 12288
+
+config CAGENT2_CHAT_PRIORITY
+	int "chat demo task priority"
+	default 100
+
+endif

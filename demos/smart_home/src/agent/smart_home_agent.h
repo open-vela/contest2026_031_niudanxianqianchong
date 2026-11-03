@@ -3,6 +3,8 @@
 #include "../device/smart_home_device_service.h"
 #include "../net/smart_home_network.h"
 #include "../skills/smart_home_skill_loader.h"
+#include "smart_home_agent_backend.h"
+#include "smart_home_tool_metadata.h"
 #ifdef CONFIG_FEATURE_SYSTEM_SMARTHOME
 #include "../quickapp/smart_home_quickapp_provider.h"
 #include "../quickapp/smart_home_quickapp_ipc_server.h"
@@ -10,21 +12,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <pthread.h>
 
 #include <agent.h>
-
-typedef struct {
-    char backend_id[32];
-    char host[128];
-    char path[128];
-    char port[8];
-    char api_key[256];
-    char model[64];
-    int timeout_ms;
-    uint32_t request_buffer_size;
-    uint32_t response_buffer_size;
-    uint32_t max_output_tokens;
-} smart_home_model_config_t;
 
 #define SMART_HOME_STATUS_UNKNOWN 1
 
@@ -34,6 +24,7 @@ typedef struct {
     int skills_status;
     int tools_status;
     int model_status;
+    int session_status;
     int node_gateway_status;
     int mcp_bridge_status;
     size_t skills_loaded;
@@ -41,18 +32,13 @@ typedef struct {
 } smart_home_system_status_t;
 
 /* 本地工具的用户访问策略；底层工具是否可用仍由 cAGENT enabled 表示。 */
-#define SMART_HOME_LOCAL_TOOL_ACCESS_MAX CAGENT_MAX_TOOLS
+#define SMART_HOME_LOCAL_TOOL_ACCESS_MAX AGENT_MAX_TOOLS
 #define SMART_HOME_LOCAL_TOOL_NAME_SIZE  64u
 
 typedef struct {
     char name[SMART_HOME_LOCAL_TOOL_NAME_SIZE];
     int allowed;
 } smart_home_local_tool_access_t;
-
-#if defined(CONFIG_SMART_HOME_NODE_GATEWAY) || defined(CONFIG_SMART_HOME_MCP_BRIDGE) || \
-    defined(CONFIG_SMART_HOME_APP_BRIDGE)
-#include <pthread.h>
-#endif
 
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
 typedef struct smart_home_node_gateway smart_home_node_gateway_t;
@@ -67,6 +53,7 @@ typedef struct smart_home_agent_run_service smart_home_agent_run_service_t;
 
 typedef struct smart_home_agent_app {
     agent_t *agent;
+    smart_home_agent_backend_t *backend;
     smart_home_state_t device_state;
     smart_home_device_service_t device_service;
 #ifdef CONFIG_FEATURE_SYSTEM_SMARTHOME
@@ -79,12 +66,17 @@ typedef struct smart_home_agent_app {
     smart_home_local_tool_access_t
         local_tool_access[SMART_HOME_LOCAL_TOOL_ACCESS_MAX];
     size_t local_tool_access_count;
+    struct {
+        char name[AGENT_MAX_NAME_BYTES + 1u];
+        uint16_t group;
+        int read_only;
+    } remote_routes[AGENT_MAX_TOOLS];
+    size_t remote_route_count;
     uint64_t run_start_ms;
-#if defined(CONFIG_SMART_HOME_NODE_GATEWAY) || defined(CONFIG_SMART_HOME_MCP_BRIDGE) || \
-    defined(CONFIG_SMART_HOME_APP_BRIDGE)
+    agent_event_callback_t observer;
+    void *observer_user_data;
     pthread_mutex_t agent_mutex;
     int agent_mutex_initialized;
-#endif
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
     smart_home_node_gateway_t *node_gateway;
 #endif
@@ -117,10 +109,10 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
                          const char *input,
                          char *output,
                          size_t output_size);
-/** 遍历当前 agent registry；回调内不得修改 agent 或保存字符串指针。 */
+/** 遍历当前 agent registry；回调内不得调用 Agent/应用接口或保存字符串指针。 */
 int smart_home_agent_app_enumerate_tools(
     const smart_home_agent_app_t *app,
-    agent_tool_enumerate_fn callback,
+    smart_home_tool_visit_fn callback,
     void *user_data);
 /** 设置本地工具的用户访问策略；拒绝时工具不会执行，但仍向模型声明。 */
 int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
@@ -129,3 +121,12 @@ int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
 /** 查询本地工具的用户访问策略；未显式配置的本地工具默认允许。 */
 int smart_home_agent_app_local_tool_access_allowed(
     const smart_home_agent_app_t *app, const char *tool_name, int *allowed);
+
+int smart_home_agent_app_clear_session(smart_home_agent_app_t *app);
+
+int smart_home_agent_app_set_observer(smart_home_agent_app_t *app,
+                                      agent_event_callback_t callback, void *user_data);
+
+/* Complete groups newest first; callback must copy borrowed text and must not reenter. */
+int smart_home_agent_app_visit_history(smart_home_agent_app_t *app,
+                                       agent_session_visit_fn visit, void *context);

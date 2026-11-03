@@ -20,8 +20,8 @@ extern "C" {
 #define SMART_HOME_MILOCO_HOST_SIZE 64
 #define SMART_HOME_MILOCO_TOKEN_SIZE 64
 #define SMART_HOME_MILOCO_MAX_DEVICES 16
-#define SMART_HOME_MILOCO_MAX_CONTROLS 8
-#define SMART_HOME_MILOCO_MAX_OPTIONS 4
+#define SMART_HOME_MILOCO_MAX_CONTROLS 16
+#define SMART_HOME_MILOCO_MAX_OPTIONS 8
 #define SMART_HOME_MILOCO_POLL_INTERVAL_SEC 5
 
 /* Miloco 默认监听端口（backend settings server.port）。 */
@@ -42,22 +42,33 @@ typedef enum {
     SMART_HOME_MILOCO_CTRL_BOOL = 0,
     SMART_HOME_MILOCO_CTRL_ENUM,
     SMART_HOME_MILOCO_CTRL_ACTION,
+    SMART_HOME_MILOCO_CTRL_RANGE,
 } smart_home_miloco_ctrl_type_t;
 
 /* 单个可控项：由设备 spec 的可写属性/动作解析而来（黑名单过滤），
  * 是统一控制工具与通用控制抽屉的共同数据源。 */
 typedef struct {
     char iid[14];                        /* 如 "prop.2.3" / "action.2.1" */
-    char desc[24];                       /* spec 中文描述 */
-    char type_name[24];                  /* spec 语义锚点，如 "night-shot"
+    char desc[48];                       /* spec 中文描述 */
+    char type_name[32];                  /* spec 语义锚点，如 "night-shot"
                                           * （场景模式按此匹配，跨型号稳定） */
     uint8_t type;                        /* smart_home_miloco_ctrl_type_t */
     int32_t value;                       /* BOOL:0/1 ENUM:当前值 ACTION:无效 */
     uint8_t option_count;
-    struct {
-        char name[12];
-        int32_t value;
-    } options[SMART_HOME_MILOCO_MAX_OPTIONS];
+    bool write_only;                     /* spec 明确不可读，不伪造状态确认 */
+    bool value_valid;
+    uint32_t observation;                /* 每次成功回读递增，值未变也递增 */
+    union {
+        struct {
+            int32_t minimum;
+            int32_t maximum;
+            int32_t step;
+        } range;
+        struct {
+            char name[24];
+            int32_t value;
+        } options[SMART_HOME_MILOCO_MAX_OPTIONS];
+    };
 } smart_home_miloco_control_t;
 
 typedef struct {
@@ -66,8 +77,9 @@ typedef struct {
     char room[24];
     smart_home_miloco_category_t category;
     bool online;
-    bool controllable;                   /* 存在 prop.2.1 控制项 */
+    bool controllable;                   /* 存在唯一、可读的 on 布尔控制项 */
     bool power_on;
+    bool power_valid;
     smart_home_miloco_control_t controls[SMART_HOME_MILOCO_MAX_CONTROLS];
     uint8_t control_count;
 } smart_home_miloco_device_t;
@@ -82,6 +94,9 @@ typedef struct smart_home_miloco smart_home_miloco_t;
 
 /* 配置校验：host 非空、无控制字符且端口非零。 */
 bool smart_home_miloco_config_valid(const smart_home_miloco_config_t *config);
+
+bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
+                                 smart_home_miloco_config_t *config);
 
 /*
  * 启动网关服务：创建 worker 线程（PSRAM 栈）并立即开始轮询。
@@ -102,6 +117,9 @@ int smart_home_miloco_reconfigure(smart_home_miloco_t *service,
 int smart_home_miloco_request_save(smart_home_miloco_t *service,
                                    const smart_home_miloco_config_t *config);
 
+/* BUSY until the worker completes; otherwise return its save result. */
+int smart_home_miloco_save_status(const smart_home_miloco_t *service);
+
 /* 停止 worker、等待退出并释放全部资源。容忍 NULL 与重复调用。 */
 void smart_home_miloco_stop(smart_home_miloco_t **service);
 
@@ -113,6 +131,9 @@ size_t smart_home_miloco_list(const smart_home_miloco_t *service,
                               smart_home_miloco_device_t *devices,
                               size_t capacity,
                               uint32_t *revision_out);
+bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
+                                    const char *did,
+                                    smart_home_miloco_device_t *out);
 
 /* 网关最近一次轮询是否成功；未启动返回 false。 */
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service);
@@ -150,6 +171,15 @@ int smart_home_miloco_submit_control(smart_home_miloco_t *service,
                                      const char *iid,
                                      const char *operation,
                                      int32_t value);
+int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
+    const char *did, const char *iid, const char *operation, int32_t value,
+    uint32_t *request_id);
+bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
+                                      uint32_t request_id, int *result);
+/* POST may have reached the gateway even if its response was lost or invalid. */
+#define SMART_HOME_MILOCO_RESULT_UNCONFIRMED (-10001)
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t request_id, int *result, uint32_t *dispatch_observation);
 
 /* ── 天气数据（wttr.in 文本格式，worker 每 10 分钟拉取） ────── */
 typedef struct {

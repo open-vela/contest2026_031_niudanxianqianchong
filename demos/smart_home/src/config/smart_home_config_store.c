@@ -10,7 +10,7 @@
 #include "smart_home_backends.h"
 #include "../device/smart_home_device.h"
 
-#include <cagent/types.h>
+#include <agent/error.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -142,7 +142,8 @@ static cJSON *recover(smart_home_config_default_fn make_default,
     return NULL;
 }
 
-int smart_home_config_store_load(const char *path,
+int smart_home_config_store_load_compatible(const char *path,
+                                 int previous_version,
                                  smart_home_config_default_fn make_default,
                                  smart_home_config_recovery_t recovery,
                                  smart_home_config_validate_fn validate,
@@ -195,6 +196,12 @@ int smart_home_config_store_load(const char *path,
     }
 
     ret = check_version(root, error, error_size);
+    if (ret != AGENT_OK && previous_version > 1) {
+        const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "version");
+        if (cJSON_IsNumber(version) && version->valuedouble == previous_version) {
+            ret = AGENT_OK;
+        }
+    }
     if (ret != AGENT_OK) {
         cJSON_Delete(root);
         root = recover(make_default, recovery, error, error_size);
@@ -221,6 +228,17 @@ int smart_home_config_store_load(const char *path,
 
     *out_root = root;
     return AGENT_OK;
+}
+
+int smart_home_config_store_load(const char *path,
+                                 smart_home_config_default_fn make_default,
+                                 smart_home_config_recovery_t recovery,
+                                 smart_home_config_validate_fn validate,
+                                 void *user_data, cJSON **out_root,
+                                 char *error, size_t error_size)
+{
+    return smart_home_config_store_load_compatible(path, 0, make_default,
+        recovery, validate, user_data, out_root, error, error_size);
 }
 
 static int write_all(int fd, const char *buffer, size_t size)
@@ -464,7 +482,7 @@ static int validate_backend_fields(const cJSON *item)
             return AGENT_ERROR_PARSE;
         }
         for (p = host->valuestring; *p; p++) {
-            if (*p <= 0x20u || *p == 0x7fu || *p == '/') {
+            if ((unsigned char)*p <= 0x20u || *p == 0x7fu || *p == '/') {
                 return AGENT_ERROR_PARSE;
             }
         }
@@ -653,7 +671,7 @@ int smart_home_config_settings_save(const cJSON *root)
 
 /* ── state.json ── */
 
-/* 默认工厂：复用 smart_home_device_init() 的三设备默认（唯一默认来源） */
+/* 默认工厂：复用 smart_home_device_init() 的单灯默认（唯一默认来源） */
 static cJSON *state_make_default(void *user_data)
 {
     smart_home_state_t state;

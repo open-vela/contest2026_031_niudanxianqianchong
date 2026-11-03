@@ -130,11 +130,13 @@ static int voice_player_prepare(FAR struct voice_player_state_s *state,
   state->audio_fd = open(VOICE_PLAYER_DEVICE, O_RDWR | O_CLOEXEC);
   if (state->audio_fd < 0)
     {
+      printf("[player] open %s failed: %d\n", VOICE_PLAYER_DEVICE, errno);
       return -errno;
     }
 
   if (ioctl(state->audio_fd, AUDIOIOC_RESERVE, 0) < 0)
     {
+      printf("[player] reserve failed: %d\n", errno);
       return -errno;
     }
 
@@ -148,8 +150,18 @@ static int voice_player_prepare(FAR struct voice_player_state_s *state,
   if (ioctl(state->audio_fd, AUDIOIOC_CONFIGURE,
             (unsigned long)(uintptr_t)&caps) < 0)
     {
+      /* 采样率不被 codec 支持时这里返回 -EINVAL：ES8311 的
+       * (MCLK, rate) 系数表在开机默认 4096000 下没有 24 kHz，
+       * 而 MiMo TTS 固定返回 24 kHz。 */
+      printf("[player] configure rate=%lu ch=%u bits=%u failed: %d\n",
+             (unsigned long)rate, (unsigned)caps.caps.ac_channels,
+             (unsigned)caps.caps.ac_controls.b[2], errno);
       return -errno;
     }
+
+  printf("[player] configure ok rate=%lu ch=%u bits=%u\n",
+         (unsigned long)rate, (unsigned)caps.caps.ac_channels,
+         (unsigned)caps.caps.ac_controls.b[2]);
 
   if (ioctl(state->audio_fd, AUDIOIOC_GETBUFFERINFO,
             (unsigned long)(uintptr_t)&state->buffer_info) < 0)
@@ -269,8 +281,13 @@ static int voice_player_run(FAR struct voice_player_state_s *state)
 
   if (ioctl(state->audio_fd, AUDIOIOC_START, 0) < 0)
     {
+      printf("[player] start failed: %d\n", errno);
       return -errno;
     }
+
+  printf("[player] start ok: bufs=%u bytes_each=%u total=%zu\n",
+         (unsigned)state->buffer_info.nbuffers,
+         (unsigned)state->buffer_info.buffer_size, state->remaining);
 
   state->started = true;
 

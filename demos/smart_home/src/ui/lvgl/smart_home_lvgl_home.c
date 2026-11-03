@@ -14,6 +14,7 @@
 #include "icons/smart_home_lvgl_png_icons.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 enum home_action_e {
@@ -34,13 +35,13 @@ static const struct scene_mode_s {
     const char *icon;
     uint32_t badge_bg;
 } g_scene_modes[] = {
-    { "回家模式", "执行回家模式", "温暖灯光 · 新风开启",
+    { "回家模式", "执行回家模式", "按已接入设备执行",
       ICON_NAV_HOME, 0xFFF5EC },
-    { "观影模式", "执行观影模式", "调暗灯光 · 合上窗帘",
+    { "观影模式", "执行观影模式", "按已接入设备执行",
       ICON_MEDIA_VIDEO, 0xF1F4FF },
-    { "睡眠模式", "执行睡眠模式", "关闭照明 · 安静守护",
+    { "睡眠模式", "执行睡眠模式", "按已接入设备执行",
       ICON_SCENE_SLEEP, 0xF4F2FF },
-    { "离家模式", "执行离家模式", "关闭设备 · 安防布防",
+    { "离家模式", "执行离家模式", "按已接入设备执行",
       ICON_SCENE_AWAY, 0xEDF8F3 },
 };
 
@@ -73,7 +74,7 @@ static void scene_mode_click_cb(lv_event_t *event)
     }
 }
 
-static void open_scene_mode_popup(smart_home_lvgl_t *ui)
+void smart_home_lvgl_open_scene_popup(smart_home_lvgl_t *ui)
 {
     lv_obj_t *mask;
     lv_obj_t *card;
@@ -136,6 +137,7 @@ static void open_scene_mode_popup(smart_home_lvgl_t *ui)
         lv_obj_set_style_pad_all(button, 10, 0);
         lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_user_data(button, (void *)(intptr_t)i);
+        smart_home_lvgl_press_feedback(button);
         lv_obj_add_event_cb(button, scene_mode_click_cb, LV_EVENT_CLICKED, ui);
 
         badge = lv_obj_create(button);
@@ -177,10 +179,10 @@ static lv_color_t topbar_network_color(const smart_home_lvgl_t *ui)
     }
     status = &ui->app->system_status.network_status;
     if (status->online) {
-        return SMART_HOME_UI_COLOR_PRIMARY;
+        return SMART_HOME_UI_COLOR_TEXT_SECONDARY;
     }
     if (status->ip_status == SMART_HOME_NETWORK_OK) {
-        return lv_color_hex(0xC99442);
+        return SMART_HOME_UI_COLOR_WARNING;
     }
     return SMART_HOME_UI_COLOR_TEXT_MUTED;
 }
@@ -221,34 +223,27 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui)
             }
         }
         lv_obj_set_style_text_color(icon, color, 0);
-        lv_obj_set_style_image_recolor(icon, color, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        smart_home_lvgl_icon_color(icon, color);
     }
 }
 
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title)
 {
-    /* 摄像头/麦克风默认 off（本地预览和音频未主动开启）。 */
-    static const char *const status_icons[] = {
-        "asset:microphone-off",
-        "asset:camera-off",
-        ICON_STATUS_DND,
-        ICON_STATUS_WIFI,
-    };
     lv_obj_t *bar;
     lv_obj_t *brand;
-    lv_obj_t *brand_mark;
-    lv_obj_t *status_row;
+    lv_obj_t *clock;
     lv_obj_t *icon;
     int width = smart_home_lvgl_disp_w();
+    bool home = ui && screen == ui->screen_home;
+    int clock_width = home ? 80 : 56;
     int i;
 
     if (!screen) {
         return;
     }
-    /* Product pages keep one stable brand bar; page identity belongs in the
-     * content heading so the shell never jumps while navigating. */
+    /* Product pages keep one stable 56 px brand bar; page identity belongs
+     * in the content heading so the shell never jumps while navigating. */
     (void)title;
 
     bar = lv_obj_create(screen);
@@ -259,73 +254,59 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(bar, 1, 0);
     lv_obj_set_style_border_color(bar, SMART_HOME_UI_COLOR_BORDER, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
 
-    brand_mark = lv_obj_create(bar);
-    lv_obj_remove_style_all(brand_mark);
-    lv_obj_set_size(brand_mark, 36, 36);
-    lv_obj_align(brand_mark, LV_ALIGN_LEFT_MID, smart_home_lvgl_pad_x(), 0);
-    lv_obj_set_style_radius(brand_mark, 11, 0);
-    smart_home_lvgl_set_bg(brand_mark, lv_color_hex(0x79AFBA));
-    icon = smart_home_lvgl_icon_create(brand_mark, ICON_NAV_HOME, 21, 21);
+    icon = smart_home_lvgl_icon_create(bar, ICON_BRAND, 36, 36);
     if (icon) {
-        lv_obj_set_style_text_color(icon, lv_color_white(), 0);
-        lv_obj_set_style_image_recolor(icon, lv_color_white(), 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-        lv_obj_center(icon);
+        lv_obj_set_pos(icon, 24, 10);
+        /* The V9 brand mark keeps its own colors. */
+        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_TRANSP, 0);
     }
 
     brand = smart_home_lvgl_label_create(bar,
                                          "OpenVela HOME",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY,
-                                         20);
-    lv_obj_align_to(brand, brand_mark, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                         18);
+    lv_obj_set_pos(brand, 72, 18);
 
-    {
-        lv_obj_t *clock = smart_home_lvgl_label_create(bar, "--:--",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 20);
-
-        lv_obj_align(clock, LV_ALIGN_RIGHT_MID, -smart_home_lvgl_pad_x(), 0);
-        if (ui && ui->topbar_clock_count <
-                       (int)(sizeof(ui->topbar_clock_labels) /
-                             sizeof(ui->topbar_clock_labels[0]))) {
-            ui->topbar_clock_labels[ui->topbar_clock_count++] = clock;
-        }
+    clock = smart_home_lvgl_label_create(bar, SMART_HOME_UI_DEFAULT_CLOCK,
+                                         SMART_HOME_UI_COLOR_TEXT_SECONDARY,
+                                         home ? 26 : 18);
+    lv_obj_set_width(clock, clock_width);
+    lv_obj_set_style_text_align(clock, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -16, home ? 6 : 16);
+    if (ui && ui->topbar_clock_count <
+                   (int)(sizeof(ui->topbar_clock_labels) /
+                         sizeof(ui->topbar_clock_labels[0]))) {
+        ui->topbar_clock_labels[ui->topbar_clock_count++] = clock;
     }
 
-    /* Keep status icons in a fixed row anchored to the measured time label.
-     * This avoids overlap when the rendered font gives the time a wider
-     * bounding box (for example after the full MiSans font is loaded). */
-    status_row = lv_obj_create(bar);
-    lv_obj_remove_style_all(status_row);
-    lv_obj_set_size(status_row,
-                    (int)(sizeof(status_icons) / sizeof(status_icons[0])) * 26,
-                    20);
-    lv_obj_align_to(status_row,
-                    ui->topbar_clock_labels[ui->topbar_clock_count > 0 ?
-                                            ui->topbar_clock_count - 1 : 0],
-                    LV_ALIGN_OUT_LEFT_MID, -18, 0);
-    lv_obj_clear_flag(status_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(status_row, LV_OBJ_FLAG_CLICKABLE);
+    for (i = 0; i < 4; i++) {
+        const char *name;
+        lv_color_t color;
 
-    for (i = 0; i < (int)(sizeof(status_icons) / sizeof(status_icons[0])); i++) {
-        const char *icon_name = i == 3 ? topbar_network_icon(ui) :
-                             i == 1 ? (ui && ui->topbar_camera_on ?
-                                           ICON_STATUS_CAMERA :
-                                           "asset:camera-off") :
-                                         status_icons[i];
+        if (i == 0) {
+            name = "asset:microphone-off";
+        } else if (i == 1) {
+            name = (ui && ui->topbar_camera_on) ?
+                   ICON_STATUS_CAMERA : "asset:camera-off";
+        } else if (i == 2) {
+            name = "asset:volume";
+        } else {
+            name = topbar_network_icon(ui);
+        }
 
-        icon = smart_home_lvgl_icon_create(status_row, icon_name, 20, 20);
+        icon = smart_home_lvgl_icon_create(bar, name, 20, 20);
         if (!icon) {
             continue;
         }
-
-        lv_color_t color = i == 3 ? topbar_network_color(ui) :
-                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY;
-
+        color = i == 3 ? topbar_network_color(ui) :
+                         SMART_HOME_UI_COLOR_TEXT_SECONDARY;
+        /* 为首页较大的时钟预留宽度，状态图标仍保持 12px 间隔。 */
+        lv_obj_align(icon, LV_ALIGN_TOP_RIGHT,
+                     -(16 + clock_width + 12 + (3 - i) * 32), 18);
         lv_obj_set_style_text_color(icon, color, 0);
-        lv_obj_set_style_image_recolor(icon, color, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-        lv_obj_set_pos(icon, i * 26, 0);
+        smart_home_lvgl_icon_color(icon, color);
         if (i == 3 && ui && ui->topbar_wifi_icon_count <
                            (int)(sizeof(ui->topbar_wifi_icons) /
                                  sizeof(ui->topbar_wifi_icons[0]))) {
@@ -377,9 +358,13 @@ static void home_feature_text(lv_obj_t *card, const char *title,
 {
     lv_obj_t *label = smart_home_lvgl_label_create(card, title, title_color, 16);
 
+    lv_obj_set_width(label, lv_pct(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, -24);
     label = smart_home_lvgl_label_create(card, body,
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
@@ -398,6 +383,21 @@ static const char *weather_icon_for(const char *condition_en)
 
     /* 降水/雾/霾类 → 云雨（现有资产中最接近的图形） */
     return "asset:cloud-rain";
+}
+
+static void home_weather_set_icon(smart_home_lvgl_t *ui, const char *name)
+{
+    if (ui->home_weather_badge) {
+        /* 尺寸取徽标自身宽度，避免与构建时设置的 64/32 不一致。 */
+        int size = smart_home_lvgl_disp_w() > 0 ?
+                   (int)lv_obj_get_width(ui->home_weather_badge) : 32;
+        const lv_image_dsc_t *asset = smart_home_lvgl_png_icon_get(name, size);
+        lv_obj_t *glyph = lv_obj_get_child(ui->home_weather_badge, 0);
+
+        if (asset && glyph && lv_obj_check_type(glyph, &lv_image_class)) {
+            lv_image_set_src(glyph, asset);
+        }
+    }
 }
 
 static lv_obj_t *home_icon_badge(lv_obj_t *card, const char *icon,
@@ -486,10 +486,8 @@ static void home_action_cb(lv_event_t *event)
                                  180, 0, false);
                 break;
             }
-        } else if (!smart_home_miloco_bound(ui->app->miloco) &&
-                   ui->screen_miloco_bind) {
-            lv_scr_load_anim(ui->screen_miloco_bind,
-                             LV_SCR_LOAD_ANIM_MOVE_LEFT, 180, 0, false);
+        } else if (!smart_home_miloco_bound(ui->app->miloco)) {
+            smart_home_lvgl_open_miloco_bind(ui);
             break;
         }
         if (ui->panel_title) {
@@ -498,7 +496,7 @@ static void home_action_cb(lv_event_t *event)
         smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_DEVICES);
         break;
     case HOME_ACTION_SCENES:
-        open_scene_mode_popup(ui);
+        smart_home_lvgl_open_scene_popup(ui);
         break;
     case HOME_ACTION_SECURITY:
         smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_SECURITY);
@@ -519,6 +517,7 @@ static void home_make_clickable(lv_obj_t *card, smart_home_lvgl_t *ui,
 {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(card, (void *)(intptr_t)action);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, home_action_cb, LV_EVENT_CLICKED, ui);
 }
 
@@ -546,7 +545,7 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
     }
 
     if (ui->home_env_label) {
-        snprintf(text, sizeof(text), "湿度 %d%%  ·  空气舒适",
+        snprintf(text, sizeof(text), "演示湿度 %d%%",
                  state->env_humidity);
         lv_label_set_text(ui->home_env_label, text);
     }
@@ -555,7 +554,6 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
     {
         bool reachable = ui->app && ui->app->miloco &&
                          smart_home_miloco_reachable(ui->app->miloco);
-        bool configured = ui->app && ui->app->miloco;
         size_t miloco_count = 0;
         size_t online_count = 0;
 
@@ -580,16 +578,14 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
 
             if (ui->home_miloco_sub_label) {
                 lv_label_set_text(ui->home_miloco_sub_label,
-                                  !reachable ? (configured ?
-                                                "未连接 · 等待网关" :
-                                                "未配置 · 系统设置中配置") :
+                                  !reachable ? "未连接 · 查看网关设置" :
                                   bound ? "已连接 · 米家已绑定" :
                                           "已连接 · 待绑定账号");
             }
             if (ui->home_ac_label) {
                 if (!reachable) {
                     snprintf(text, sizeof(text),
-                             "米家网关未连接\n系统设置中配置后显示");
+                             "米家网关未连接\n点击查看网关设置");
                 } else if (!bound) {
                     snprintf(text, sizeof(text),
                              "米家账号未绑定\n点击扫码绑定");
@@ -604,39 +600,68 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
         /* 天气卡显示（真实数据或占位）。 */
         {
             smart_home_miloco_weather_t wx;
-            char buf[48];
+            char buf[96];
 
-            if (smart_home_miloco_get_weather(ui->app->miloco, &wx)) {
+            if (ui->app && ui->app->miloco &&
+                smart_home_miloco_get_weather(ui->app->miloco, &wx) && wx.valid) {
+                if (ui->home_weather_city_label) {
+                    lv_label_set_text(ui->home_weather_city_label,
+                        !strcmp(wx.city, "Shenzhen") ? "深圳" : wx.city);
+                }
+                if (ui->screensaver_weather_label) {
+                    snprintf(buf, sizeof(buf), "%s · %d°C",
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER, wx.temperature);
+                    lv_label_set_text(ui->screensaver_weather_label, buf);
+                }
                 snprintf(buf, sizeof(buf), "%d°", wx.temperature);
                 if (ui->home_weather_temp_label) {
                     lv_label_set_text(ui->home_weather_temp_label, buf);
                 }
-                snprintf(buf, sizeof(buf), "%s · 湿%d%% · 风%dkm/h",
+                if (ui->screensaver_temp_label) {
+                    lv_label_set_text(ui->screensaver_temp_label, buf);
+                }
+                if (ui->screensaver_condition_label) {
+                    lv_label_set_text(ui->screensaver_condition_label,
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER);
+                }
+                if (ui->home_weather_condition_label) {
+                    lv_label_set_text(ui->home_weather_condition_label,
+                        wx.condition_cn[0] ? wx.condition_cn :
+                            SMART_HOME_UI_DEFAULT_WEATHER);
+                }
+                snprintf(buf, sizeof(buf), "%s · 湿度 %d%%\n风速 %d km/h",
                          wx.condition_cn, wx.humidity, wx.wind_kmph);
                 if (ui->home_env_label) {
                     lv_label_set_text(ui->home_env_label, buf);
                 }
                 /* 图标随真实天气同步：晴=太阳，降水=云雨，其他保持云雨。 */
-                if (ui->home_weather_badge) {
-                    const char *icon = weather_icon_for(wx.condition_en);
-                    const lv_image_dsc_t *asset =
-                        smart_home_lvgl_png_icon_get(icon, 60);
-
-                    if (asset) {
-                        lv_obj_t *glyph =
-                            lv_obj_get_child(ui->home_weather_badge, 0);
-
-                        if (glyph) {
-                            lv_image_set_src(glyph, asset);
-                        }
-                    }
-                }
+                home_weather_set_icon(ui, weather_icon_for(wx.condition_en));
+            } else {
+                if (ui->home_weather_temp_label)
+                    lv_label_set_text(ui->home_weather_temp_label, "--°");
+                if (ui->home_weather_city_label)
+                    lv_label_set_text(ui->home_weather_city_label, "");
+                if (ui->home_env_label)
+                    lv_label_set_text(ui->home_env_label, SMART_HOME_UI_DEFAULT_WEATHER);
+                if (ui->home_weather_condition_label)
+                    lv_label_set_text(ui->home_weather_condition_label,
+                                      SMART_HOME_UI_DEFAULT_WEATHER);
+                if (ui->screensaver_weather_label)
+                    lv_label_set_text(ui->screensaver_weather_label, SMART_HOME_UI_DEFAULT_WEATHER);
+                if (ui->screensaver_temp_label)
+                    lv_label_set_text(ui->screensaver_temp_label, "--°");
+                if (ui->screensaver_condition_label)
+                    lv_label_set_text(ui->screensaver_condition_label,
+                                      SMART_HOME_UI_DEFAULT_WEATHER);
+                home_weather_set_icon(ui, "asset:sun");
             }
         }
         if (ui->home_status_label) {
             if (reachable) {
-                snprintf(text, sizeof(text), "%u 台设备在线\n家庭状态正常",
-                         (unsigned)online_count);
+                snprintf(text, sizeof(text), "在线 %u / 共 %u 台\n米家设备状态",
+                         (unsigned)online_count, (unsigned)miloco_count);
             } else {
                 snprintf(text, sizeof(text), "设备状态未知\n网关未连接");
             }
@@ -650,90 +675,55 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui)
         lv_label_set_text(ui->home_ac_label, text);
     }
     if (ui->home_status_label) {
-        snprintf(text, sizeof(text), "%d 个设备正在运行\n家庭状态正常", on_count);
+        snprintf(text, sizeof(text), "%d 个演示设备开启\n本地演示状态", on_count);
         lv_label_set_text(ui->home_status_label, text);
     }
 #endif
+    smart_home_lvgl_v9_refresh_views(ui);
     (void)on_count;
 }
 
-/* 统一时钟刷新：首页卡片 + 顶栏 + 屏保，由各定时器调用。 */
+/* UI 共用一份北京时间，日期与时间同时更新，排除板端 2019 初始日期。 */
+void smart_home_lvgl_update_clock_at(smart_home_lvgl_t *ui, time_t utc)
+{
+    struct tm tm_now;
+    char clock_text[16] = SMART_HOME_UI_DEFAULT_CLOCK;
+    char date_text[40] = "";
+    static const char *const weekdays[] = {"日", "一", "二", "三", "四", "五", "六"};
+    if (!ui) return;
+    if (utc >= 1577836800L) {
+        utc += 8 * 3600L;
+        if (gmtime_r(&utc, &tm_now)) {
+            snprintf(clock_text, sizeof(clock_text), "%02d:%02d",
+                     tm_now.tm_hour, tm_now.tm_min);
+            snprintf(date_text, sizeof(date_text), "%d月%d日 星期%s",
+                     tm_now.tm_mon + 1, tm_now.tm_mday, weekdays[tm_now.tm_wday % 7]);
+        }
+    }
+    for (int i = 0; i < ui->topbar_clock_count; i++) {
+        if (ui->topbar_clock_labels[i])
+            lv_label_set_text(ui->topbar_clock_labels[i], clock_text);
+    }
+    if (ui->home_time_label) lv_label_set_text(ui->home_time_label, clock_text);
+    if (ui->screensaver_time_label)
+        lv_label_set_text(ui->screensaver_time_label, clock_text);
+    if (ui->home_date_label) lv_label_set_text(ui->home_date_label, date_text);
+    if (ui->screensaver_date_label)
+        lv_label_set_text(ui->screensaver_date_label, date_text);
+}
+
 void smart_home_lvgl_update_clock(smart_home_lvgl_t *ui)
 {
     struct timespec ts;
-    struct tm tm_now;
-    char buf[16];
-
-    if (!ui) {
-        return;
-    }
-
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
-        return;   /* 未同步：各处保持占位 */
-    }
-
-    ts.tv_sec += 8 * 3600L;
-    gmtime_r(&ts.tv_sec, &tm_now);
-    snprintf(buf, sizeof(buf), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
-
-    {
-        int i;
-
-        for (i = 0; i < ui->topbar_clock_count; i++) {
-            if (ui->topbar_clock_labels[i]) {
-                lv_label_set_text(ui->topbar_clock_labels[i], buf);
-            }
-        }
-    }
-    if (ui->home_time_label) {
-        lv_label_set_text(ui->home_time_label, buf);
-    }
-    if (ui->screensaver_time_label) {
-        lv_label_set_text(ui->screensaver_time_label, buf);
-    }
-}
-
-static void home_time_update(smart_home_lvgl_t *ui)
-{
-    struct timespec ts;
-    struct tm tm_now;
-    char buf[32];
-
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 || ts.tv_sec < 1000000000L) {
-        /* NTP 未同步：以 12:00 占位（假时间），同步成功后自动刷新。 */
-        if (ui->home_time_label) {
-            lv_label_set_text(ui->home_time_label, "12:00");
-        }
-        if (ui->home_date_label) {
-            lv_label_set_text(ui->home_date_label, "时间同步中…");
-        }
-        return;
-    }
-    /* HTTP Date 为 UTC，加 8 小时偏移显示北京时间（东八区）。 */
-    ts.tv_sec += 8 * 3600L;
-    gmtime_r(&ts.tv_sec, &tm_now);
-    static const char *const weekdays[] = {
-        "日", "一", "二", "三", "四", "五", "六"
-    };
-    snprintf(buf, sizeof(buf), "%d月%d日 星期%s",
-             tm_now.tm_mon + 1, tm_now.tm_mday,
-             weekdays[tm_now.tm_wday % 7]);
-    if (ui->home_date_label) {
-        lv_label_set_text(ui->home_date_label, buf);
-    }
-    snprintf(buf, sizeof(buf), "%02d:%02d",
-             tm_now.tm_hour, tm_now.tm_min);
-    if (ui->home_time_label) {
-        lv_label_set_text(ui->home_time_label, buf);
-    }
+    time_t now = clock_gettime(CLOCK_REALTIME, &ts) == 0 ? ts.tv_sec : 0;
+    smart_home_lvgl_update_clock_at(ui, now);
 }
 
 static void home_time_timer_cb(lv_timer_t *timer)
 {
     smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
-
-    home_time_update(ui);
     smart_home_lvgl_update_clock(ui);
+    smart_home_lvgl_refresh_home(ui);
 }
 
 void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
@@ -774,13 +764,13 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     ui->home_date_label = smart_home_lvgl_label_create(card, "",
                                                        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
     lv_obj_align(ui->home_date_label, LV_ALIGN_TOP_LEFT, 0, 0);
-    ui->home_time_label = smart_home_lvgl_label_create(card, "12:00",
+    ui->home_time_label = smart_home_lvgl_label_create(card, SMART_HOME_UI_DEFAULT_CLOCK,
                                                        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 32);
     lv_obj_align(ui->home_time_label, LV_ALIGN_TOP_LEFT, 0, 24);
-    label = smart_home_lvgl_label_create(card, "深圳市南山区",
+    ui->home_weather_city_label = smart_home_lvgl_label_create(card, "",
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY, 13);
-    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 70);
-    ui->home_weather_badge = home_icon_badge(card, ICON_HUMIDITY,
+    lv_obj_align(ui->home_weather_city_label, LV_ALIGN_TOP_LEFT, 0, 70);
+    ui->home_weather_badge = home_icon_badge(card, "asset:sun",
                                              lv_color_hex(0xEAF4F5), 76);
     /* Make the weather pictogram the visual anchor of the tall card. */
     lv_obj_align(ui->home_weather_badge, LV_ALIGN_CENTER, 0, -10);
@@ -791,12 +781,14 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
     ui->home_env_label = smart_home_lvgl_label_create(card, "",
                                                       SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                                       14);
+    lv_obj_set_width(ui->home_env_label, lv_pct(100));
+    lv_label_set_long_mode(ui->home_env_label, LV_LABEL_LONG_WRAP);
     lv_obj_align(ui->home_env_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     card = home_card(screen, x + weather_w + gap, y, scene_w, top_h,
                      SMART_HOME_UI_COLOR_SURFACE_ON);
     home_icon_badge(card, ICON_NAV_HOME, lv_color_hex(0xFFF8F1), 48);
-    home_feature_text(card, "回家模式", "温暖灯光 · 新风开启",
+    home_feature_text(card, "家庭模式", "选择模式并发起请求",
                       SMART_HOME_UI_COLOR_PRIMARY_DARK);
     home_make_clickable(card, ui, HOME_ACTION_SCENES);
 
@@ -819,14 +811,19 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
                      y, monitor_w, top_h, SMART_HOME_UI_COLOR_SURFACE_SOFT);
     badge = home_icon_badge(card, ICON_STATUS_CAMERA, lv_color_hex(0xE9F4F1), 64);
     lv_obj_align(badge, LV_ALIGN_CENTER, 0, -6);
-    home_feature_text(card, "摄像头 G3", "客厅 · 实时预览与安防 ›",
+    home_feature_text(card, "家庭安防",
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+                      "查看摄像头预览 ›",
+#else
+                      "摄像头预览未启用",
+#endif
                       SMART_HOME_UI_COLOR_TEXT_PRIMARY);
     home_make_clickable(card, ui, HOME_ACTION_SECURITY);
 
     card = home_card(screen, x + weather_w + gap, y + top_h + gap, scene_w,
                      bottom_h, SMART_HOME_UI_COLOR_SURFACE);
     home_icon_badge(card, ICON_NAV_CHAT, lv_color_hex(0xF2F0FF), 54);
-    home_feature_text(card, "Hi，OpenVela", "问问家庭状态",
+    home_feature_text(card, "智能管家", "问问家庭状态",
                       SMART_HOME_UI_COLOR_TEXT_PRIMARY);
     home_make_clickable(card, ui, HOME_ACTION_AGENT);
 
@@ -834,7 +831,7 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
                      y + top_h + gap, primary_w, bottom_h,
                      SMART_HOME_UI_COLOR_SURFACE_ON);
     home_icon_badge(card, ICON_NAV_DEVICES, lv_color_hex(0xFFF8F2), 48);
-    home_feature_text(card, "Node 设备", "传感器 · 远程控制",
+    home_feature_text(card, "我的设备", "查看接入设备与状态",
                       SMART_HOME_UI_COLOR_TEXT_PRIMARY);
     home_make_clickable(card, ui, HOME_ACTION_DEVICES);
 
@@ -842,16 +839,19 @@ void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui)
                      y + top_h + gap, monitor_w, bottom_h,
                      SMART_HOME_UI_COLOR_SURFACE);
     home_icon_badge(card, ICON_NAV_SECURITY, lv_color_hex(0xEDF8F3), 54);
-    home_feature_text(card, "家庭状态", "门窗全部关闭",
-                      SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+    label = smart_home_lvgl_label_create(card, "设备概况",
+        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 16);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 64);
     ui->home_status_label = smart_home_lvgl_label_create(card, "",
                                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                                          14);
-    lv_obj_align(ui->home_status_label, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_set_width(ui->home_status_label, lv_pct(100));
+    lv_label_set_long_mode(ui->home_status_label, LV_LABEL_LONG_WRAP);
+    lv_obj_align(ui->home_status_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     home_make_clickable(card, ui, HOME_ACTION_DEVICES);
 
     smart_home_lvgl_build_nav_bar(screen, ui);
-    home_time_update(ui);
+    smart_home_lvgl_update_clock(ui);
     ui->home_time_timer = lv_timer_create(home_time_timer_cb, 30000, ui);
     smart_home_lvgl_refresh_home(ui);
 }

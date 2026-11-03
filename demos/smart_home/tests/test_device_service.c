@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <cagent/types.h>
+#include <agent.h>
+#include <agent/context.h>
 #include <smart_home_device.h>
 #include <smart_home_device_service.h>
 #include <smart_home_scene_catalog.h>
@@ -20,6 +21,30 @@ static void on_event(const smart_home_device_event_t *event, void *user_data)
     assert(event != NULL);
     (*count)++;
     g_last_event = *event;
+}
+
+static void test_single_light_default_and_legacy_migration(void)
+{
+    smart_home_state_t state, restored;
+    smart_home_device_init(&state);
+    assert(smart_home_device_count(&state) == 1);
+    assert(state.devices[0].type == SMART_HOME_DEVICE_LIGHT);
+    assert(smart_home_device_add(&state, "bedroom", "Bedroom Light", SMART_HOME_DEVICE_LIGHT, NULL) == AGENT_OK);
+    assert(smart_home_device_add(&state, "bedroom", "Bedroom AC", SMART_HOME_DEVICE_AC, NULL) == AGENT_OK);
+    int user_id;
+    assert(smart_home_device_add(&state, "bedroom", "User light", SMART_HOME_DEVICE_LIGHT, &user_id) == AGENT_OK);
+    cJSON *saved = smart_home_device_state_to_json(&state);
+    assert(saved && smart_home_device_state_from_json(&restored, saved) == AGENT_OK);
+    cJSON_Delete(saved);
+    smart_home_device_remove_legacy_demos(&restored);
+    assert(smart_home_device_count(&restored) == 2);
+    assert(smart_home_device_find_by_id(&restored, 1));
+    assert(smart_home_device_find_by_id(&restored, user_id));
+    assert(!smart_home_device_find_by_id(&restored, 2));
+    assert(!smart_home_device_find_by_id(&restored, 3));
+    assert(smart_home_room_count(&restored) == 2);
+    smart_home_device_remove_legacy_demos(&restored);
+    assert(smart_home_device_count(&restored) == 2);
 }
 
 static void test_state_mutation_emits_revisioned_event(void)
@@ -70,6 +95,8 @@ static void test_scene_catalog_drives_one_logical_revision(void)
         "<!-- scene_catalog:end -->\n";
 
     smart_home_device_init(&state);
+    int ac_id;
+    assert(smart_home_device_add(&state, "bedroom", "Test AC", SMART_HOME_DEVICE_AC, &ac_id) == AGENT_OK);
     assert(smart_home_device_service_init(&service, &state) == AGENT_OK);
     assert(smart_home_scene_catalog_load(scene_skill, &catalog) == AGENT_OK);
     assert(smart_home_device_service_set_scene_catalog(&service, &catalog)
@@ -78,12 +105,12 @@ static void test_scene_catalog_drives_one_logical_revision(void)
     assert(smart_home_device_service_revision(&service) == 1u);
     assert(state.devices[0].on == 1);
     assert(state.devices[0].brightness == 42);
-    assert(state.devices[2].on == 1);
-    assert(state.devices[2].ac_mode == 1);
-    assert(state.devices[2].ac_fan_speed == 2);
-    assert(state.devices[2].temperature == 23);
+    assert(smart_home_device_find_by_id(&state, ac_id)->on == 1);
+    assert(smart_home_device_find_by_id(&state, ac_id)->ac_mode == 1);
+    assert(smart_home_device_find_by_id(&state, ac_id)->ac_fan_speed == 2);
+    assert(smart_home_device_find_by_id(&state, ac_id)->temperature == 23);
     assert(smart_home_device_service_run_scene(&service, "movie")
-           == AGENT_ERROR_NOTFOUND);
+           == AGENT_ERROR_NOT_FOUND);
     assert(smart_home_device_service_revision(&service) == 1u);
     smart_home_device_service_deinit(&service);
 }
@@ -112,7 +139,7 @@ static void test_room_catalog_allows_device_reassignment(void)
     smart_home_device_service_deinit(&service);
 }
 
-static void test_default_scene_skill_catalog_is_valid(void)
+static void test_miloco_scene_skill_omits_virtual_catalog(void)
 {
     FILE *file;
     long size;
@@ -130,25 +157,24 @@ static void test_default_scene_skill_catalog_is_valid(void)
     assert(fread(text, 1u, (size_t)size, file) == (size_t)size);
     fclose(file);
 
-    assert(smart_home_scene_catalog_load(text, &catalog) == AGENT_OK);
-    assert(catalog.version == SMART_HOME_SCENE_CATALOG_VERSION);
-    assert(catalog.scene_count == 4u);
-    assert(strcmp(catalog.scenes[0].id, "sleep") == 0);
+    assert(smart_home_scene_catalog_load(text, &catalog) == AGENT_ERROR_NOT_FOUND);
+    assert(catalog.version == 0u && catalog.scene_count == 0u);
     free(text);
 }
 
 int main(void)
 {
+    test_single_light_default_and_legacy_migration();
     test_state_mutation_emits_revisioned_event();
     test_scene_catalog_drives_one_logical_revision();
     test_room_catalog_allows_device_reassignment();
-    test_default_scene_skill_catalog_is_valid();
+    test_miloco_scene_skill_omits_virtual_catalog();
     printf("all device_service tests passed\n");
     return 0;
 }
 
 /* device.c 引用了 cAGENT 的 context provider 注册，测试提供 stub。 */
-int agent_register_context_provider(agent_t *agent,
+agent_error_t agent_register_context(agent_t *agent,
                                     const agent_context_provider_t *provider)
 {
     (void)agent;

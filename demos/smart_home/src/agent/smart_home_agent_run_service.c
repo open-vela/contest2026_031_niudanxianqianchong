@@ -2,7 +2,6 @@
 #include "smart_home_agent.h"
 #include "../smart_home_cpu_debug.h"
 #include "../smart_home_memory.h"
-#include <cagent/runtime_openvela.h>
 
 #include <nuttx/irq.h>
 

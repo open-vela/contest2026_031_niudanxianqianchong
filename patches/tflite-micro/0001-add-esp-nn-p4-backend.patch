@@ -1,0 +1,133 @@
+diff --git a/mlearning/tflite-micro/CMakeLists.txt b/mlearning/tflite-micro/CMakeLists.txt
+index 55945c799..2a5a4f359 100644
+--- a/mlearning/tflite-micro/CMakeLists.txt
++++ b/mlearning/tflite-micro/CMakeLists.txt
+@@ -53,13 +53,19 @@ if(CONFIG_TFLITEMICRO)
+     if(NOT EXISTS ${ESP_NN_DIR}/include/esp_nn.h)
+       message(FATAL_ERROR
+               "ESP-NN is enabled but ${ESP_NN_DIR} is unavailable. "
+-              "Run ccf_audioevent/scripts/link_esp_nn.sh first.")
++              "Run scripts/link_esp_nn.sh from the contest repository first.")
+     endif()
+ 
+     list(APPEND COMMON_FLAGS
+          -DESP_NN=1
+-         -DCONFIG_NN_OPTIMIZED=1
+-         -DCONFIG_IDF_TARGET_ESP32S3=1)
++         -DCONFIG_NN_OPTIMIZED=1)
++    if(CONFIG_ARCH_CHIP_ESP32P4)
++      # The P4 kernels use Espressif PIE (xespv) and need
++      # CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y for the vendor extension.
++      list(APPEND COMMON_FLAGS -DCONFIG_IDF_TARGET_ESP32P4=1)
++    else()
++      list(APPEND COMMON_FLAGS -DCONFIG_IDF_TARGET_ESP32S3=1)
++    endif()
+   endif()
+ 
+   # ############################################################################
+@@ -234,6 +240,41 @@ if(CONFIG_TFLITEMICRO)
+          ${ESP_NN_SRCS})
+   endif()
+ 
++  # ############################################################################
++  # ESP-NN ESP32-P4 source selection
++  #
++  # The P4 backend ships ansi + opt + p4 variants of each operator.  The S3
++  # list above is Xtensa-specific, so the P4 build replaces it entirely.
++  if(CONFIG_TFLITEMICRO_ESP_NN AND CONFIG_ARCH_CHIP_ESP32P4)
++    list(REMOVE_ITEM TFLITE_MICRO_SRCS ${ESP_NN_SRCS})
++    list(APPEND TFLITE_MICRO_SRCS
++         ${ESP_NN_DIR}/src/activation_functions/esp_nn_relu_ansi.c
++         ${ESP_NN_DIR}/src/activation_functions/esp_nn_hard_swish_ansi.c
++         ${ESP_NN_DIR}/src/common/esp_nn_mean_ansi.c
++         ${ESP_NN_DIR}/src/common/esp_nn_mean_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/common/esp_nn_multiply_by_quantized_mult_esp32p4.S
++         ${ESP_NN_DIR}/src/basic_math/esp_nn_add_ansi.c
++         ${ESP_NN_DIR}/src/basic_math/esp_nn_add_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/basic_math/esp_nn_mul_ansi.c
++         ${ESP_NN_DIR}/src/basic_math/esp_nn_mul_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_conv_ansi.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_conv_opt.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_conv_esp32p4.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_depthwise_conv_ansi.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_depthwise_conv_opt.c
++         ${ESP_NN_DIR}/src/convolution/esp_nn_depthwise_conv_esp32p4.c
++         ${ESP_NN_DIR}/src/fully_connected/esp_nn_fully_connected_ansi.c
++         ${ESP_NN_DIR}/src/fully_connected/esp_nn_fully_connected_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/softmax/esp_nn_softmax_ansi.c
++         ${ESP_NN_DIR}/src/softmax/esp_nn_softmax_opt.c
++         ${ESP_NN_DIR}/src/softmax/esp_nn_softmax_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/logistic/esp_nn_logistic_ansi.c
++         ${ESP_NN_DIR}/src/pooling/esp_nn_avg_pool_ansi.c
++         ${ESP_NN_DIR}/src/pooling/esp_nn_avg_pool_s8_esp32p4.c
++         ${ESP_NN_DIR}/src/pooling/esp_nn_max_pool_ansi.c
++         ${ESP_NN_DIR}/src/pooling/esp_nn_max_pool_s8_esp32p4.c)
++  endif()
++
+   # ############################################################################
+   # Xtensa hardware operator support
+   if(CONFIG_XTENSA_HIFI)
+diff --git a/mlearning/tflite-micro/Kconfig b/mlearning/tflite-micro/Kconfig
+index cae5c88b9..1309129ab 100644
+--- a/mlearning/tflite-micro/Kconfig
++++ b/mlearning/tflite-micro/Kconfig
+@@ -39,11 +39,15 @@ if TFLITEMICRO
+ 	config TFLITEMICRO_ESP_NN
+ 	bool "Enable ESP-NN optimized kernels"
+ 	default n
+-	depends on ARCH_CHIP_ESP32S3
++	depends on ARCH_CHIP_ESP32S3 || ARCH_CHIP_ESP32P4
+ 	depends on !MLEARNING_CMSIS_NN && !XTENSA_HIFI
+ 	---help---
+ 		Enable ESP-NN optimized implementations of the TFLite Micro
+-		Conv2D and DepthwiseConv2D operators for ESP32-S3.
++		Conv2D and DepthwiseConv2D operators for ESP32-S3 and ESP32-P4.
++
++		On ESP32-P4 the kernels come from packages/esp-nn and use
++		Espressif PIE (xespv) intrinsics, so the firmware must also
++		select CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y.
+ 
+ 	config TFLITEMICRO_ESP_NN_TRACE
+ 	bool "Trace ESP-NN operator eligibility"
+diff --git a/mlearning/tflite-micro/Makefile b/mlearning/tflite-micro/Makefile
+index 84eaa5250..7d66a7fb4 100644
+--- a/mlearning/tflite-micro/Makefile
++++ b/mlearning/tflite-micro/Makefile
+@@ -109,18 +109,35 @@ CSRCS += operators/neon/arm_elementwise_add_s8.c
+ endif
+ endif
+ 
+-# ESP-NN optimized TFLite Micro kernels for ESP32-S3.
++# ESP-NN optimized TFLite Micro kernels.
++#
++# ESP_NN_DIR stays at the value TFLite Micro already expects
++# ($(APPDIR)/mlearning/esp-nn/esp-nn).  scripts/link_esp_nn.sh points that
++# path at the contest repository's third_party/esp-nn, so no variable
++# override is needed here.
++#
++# The P4 kernels use Espressif PIE (xespv) instructions and therefore need
++# CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y, which switches the whole firmware to
++# riscv32-esp-elf (see patches/nuttx/0012).
+ ifneq ($(CONFIG_TFLITEMICRO_ESP_NN),)
+ COMMON_FLAGS += -DESP_NN=1
+ COMMON_FLAGS += -DCONFIG_NN_OPTIMIZED=1
+-COMMON_FLAGS += -DCONFIG_IDF_TARGET_ESP32S3=1
+ COMMON_FLAGS += ${INCDIR_PREFIX}$(ESP_NN_DIR)/include
+ COMMON_FLAGS += ${INCDIR_PREFIX}$(ESP_NN_DIR)/src/common
+ 
++ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
++COMMON_FLAGS += -DCONFIG_IDF_TARGET_ESP32P4=1
++ESP_NN_CSRCS := $(wildcard $(ESP_NN_DIR)/src/*/*_ansi.c)
++ESP_NN_CSRCS += $(wildcard $(ESP_NN_DIR)/src/*/*_opt.c)
++ESP_NN_CSRCS += $(wildcard $(ESP_NN_DIR)/src/*/*_esp32p4.c)
++ESP_NN_ASRCS := $(wildcard $(ESP_NN_DIR)/src/*/*_esp32p4.S)
++else
++COMMON_FLAGS += -DCONFIG_IDF_TARGET_ESP32S3=1
+ ESP_NN_CSRCS := $(wildcard $(ESP_NN_DIR)/src/*/*_ansi.c)
+ ESP_NN_CSRCS += $(wildcard $(ESP_NN_DIR)/src/*/*_opt.c)
+ ESP_NN_CSRCS += $(wildcard $(ESP_NN_DIR)/src/*/*_esp32s3.c)
+ ESP_NN_ASRCS := $(wildcard $(ESP_NN_DIR)/src/*/*_esp32s3.S)
++endif
+ UNNEEDED_SRCS := $(TFLM_DIR)/tensorflow/lite/micro/kernels/conv.cc
+ UNNEEDED_SRCS += $(TFLM_DIR)/tensorflow/lite/micro/kernels/depthwise_conv.cc
+ CXXSRCS := $(filter-out $(UNNEEDED_SRCS), $(CXXSRCS))

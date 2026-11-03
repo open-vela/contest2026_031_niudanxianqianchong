@@ -1,0 +1,11 @@
+{
+  "home": "03-devices",
+  "chat": "11-chat",
+  "settings": "09-settings",
+  "set-display": "09-settings",
+  "set-network": "10-network",
+  "set-model": "13-model",
+  "set-tools": "15-tools",
+  "set-services": "17-services",
+  "set-health": "18-health"
+}

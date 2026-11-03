@@ -1,0 +1,8 @@
+config LVX_USE_DEMO_CONTEST2026_031_SMP_FLASH_TEST
+	bool "ESP32-P4X SMP LittleFS concurrency test"
+	depends on ESP32P4_SMP_SPIFLASH && ESPRESSIF_SPIFLASH
+	default n
+	---help---
+		Build smp_flash_test, which exercises LittleFS on the SPI Flash
+		MTD from both HP CPUs at the same time: per-CPU files, a shared
+		file with per-CPU slots, and directory create/unlink churn.

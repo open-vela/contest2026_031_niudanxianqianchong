@@ -5,7 +5,7 @@
 
 ## 文档分类
 
-本目录按主题分为五类。分类只表示文档的组织方式，不代表完成状态；
+本目录按主题分为六类。分类只表示文档的组织方式，不代表完成状态；
 每篇文档自身的状态行与验收条件才是判断依据。
 
 ### 基础与规划
@@ -14,6 +14,9 @@
 | --- | --- |
 | [ESP32-P4 上游成熟适配吸收计划](基础与规划/ESP32-P4上游成熟适配吸收计划.md) | 上游 Apache NuttX / OpenVela 的 ESP32-P4 成熟基础适配吸收策略：固定来源、逐能力单元吸收、本地 DSI overlay 保留 |
 | [ESP32-P4 竞赛参考差异对照](基础与规划/ESP32-P4竞赛参考差异对照.md) | 竞赛参考实现与本项目现网实现的差异对照 |
+| [ESP32-P4X 双核 SMP 适配方案](基础与规划/ESP32-P4X-双核SMP适配方案.md) | 次核启动、跨核中断与调度、Flash/缓存保护及分阶段验收 |
+| [SMP 音频链路故障分析](ESP32-P4X-SMP音频链路故障分析.md) | 音频全链路、SMP 下的 6 个失效点、候选根因排序与取证方案 |
+| [SMP 音频链路排查与修复方案](ESP32-P4X-SMP音频链路排查与修复方案_20261101.md) | 把 v1.0 的候选根因落到代码行：违规点清单、一次上板定位矩阵、可直接落地的补丁 |
 
 ### 显示与触摸
 
@@ -36,17 +39,26 @@
 | --- | --- |
 | [ESP32-P4X SmartHome 板载 C6 Wi-Fi 接入方案](网络与连接/ESP32-P4X-SmartHome板载C6-WiFi接入方案.md) | 板载 ESP32-C6 经 SDIO 的 ESP-Hosted 接入：分层设计、W0~W4 阶段与验收 |
 | [ESP32-P4X SmartHome 板载以太网接入方案](网络与连接/ESP32-P4X-SmartHome板载以太网接入方案.md) | 板载 EMAC 以太网接入方案与验收 |
+| [ESP32-P4X 板载 C6 蓝牙/BLE 适配方案](网络与连接/ESP32-P4X-板载C6蓝牙BLE适配方案.md) | Hosted-HCI、NimBLE、C6 固件匹配及 Wi-Fi/BLE 共存验收 |
+
+### 存储与文件系统
+
+| 文档 | 内容 |
+| --- | --- |
+| [ESP32-P4X microSD 卡存储适配方案](存储与文件系统/ESP32-P4X-microSD卡存储适配方案.md) | SDMMC 双槽共享、标准 MMCSD/FAT32 接入及 C6 并发验收 |
 
 ### 应用与 AI
 
 | 文档 | 内容 |
 | --- | --- |
+| [SmartHome cAGENT V2 移植方案](应用与AI/ESP32-P4X-SmartHome-cAGENT-V2移植方案.md) | V2 接入顺序、验收范围与 Git 提交安排 |
 | [ESP32-P4X SmartHome Demo 测试开发计划](应用与AI/ESP32-P4X-SmartHome-Demo测试开发计划.md) | 基于已验证 DSI 显示基线的 demo 分阶段方案、代码边界、defconfig 方向与验收矩阵 |
 | [ESP32-P4X SmartHome 摄像头实时预览接入方案](应用与AI/ESP32-P4X-SmartHome摄像头实时预览接入方案.md) | 基于 `/dev/video0` V4L2 视频通路的本地预览架构、线程/缓冲边界、分期实施与真机验收 |
 | [ESP32-P4X 智能家居中控面板 UI 设计方案](应用与AI/ESP32-P4X-智能家居中控面板UI设计方案.md) | 1024x600 横屏深色中控面板：信息架构、视觉规范、组件规划、业务解耦，附录含 LVGL 与快应用路线取舍 |
 | [ESP32-P4X 端侧 KWS 方案](应用与AI/ESP32-P4X-端侧KWS方案.md) | 端侧唤醒词与命令词：可复用资产、数据流、与 cAGENT 边界、K0~K4 阶段 |
 | [ESP32-P4X SmartHome `wake_large` 唤醒词模型接入方案](应用与AI/ESP32-P4X-SmartHome-wake_large唤醒词模型接入方案.md) | `wake_large` int8 模型的特征契约、TFLM 运行时、K0~K5 实施步骤与实机验收指标 |
 | [ESP32-P4X 端侧目标检测方案](应用与AI/ESP32-P4X-端侧目标检测方案.md) | 端侧检测：工具与事件两种范式、数据流、run_service 改造项、D0~D4 阶段 |
+| [ESP32-P4X SmartHome 语音与能力合入实施计划](应用与AI/ESP32-P4X-SmartHome语音与能力合入实施计划.md) | ASR/TTS 真机闭环、VAD/KWS/ESP-NN 合入顺序、camera 工具、分阶段验收与回退 |
 
 ## UI 与 QuickApp 设计
 

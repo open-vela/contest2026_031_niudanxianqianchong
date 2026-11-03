@@ -7,6 +7,7 @@
 #include "../../miloco/smart_home_miloco.h"
 #endif
 #include "images/smart_home_icons.h"
+#include "../../smart_home_memory.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -148,6 +149,105 @@ static void room_dropdown_options(const smart_home_state_t *state,
     }
 }
 
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+#define MILOCO_ROOM_OPTIONS_SIZE (32 * SMART_HOME_MILOCO_MAX_DEVICES + 32)
+
+static const char *miloco_room_name(const char *room)
+{
+    return room && room[0] ? device_room_name(room) : "未分配房间";
+}
+
+/* 房间来自真实设备快照；同名房间只列一次，不混入本地演示房间。 */
+static void miloco_room_options(smart_home_lvgl_t *ui, char *buffer, size_t size)
+{
+    const char *rooms[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
+    size_t count = 0, room_count = 0, used;
+
+    snprintf(buffer, size, "全部");
+    used = strlen(buffer);
+
+    /* 整表快照约 19 KB：放 PSRAM，避免下拉菜单构建时压栈。 */
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL) {
+        return;
+    }
+    if (ui->app && ui->app->miloco) {
+        count = smart_home_miloco_list(ui->app->miloco, devices,
+                                      SMART_HOME_MILOCO_MAX_DEVICES, NULL);
+    }
+    for (size_t i = 0; i < count; i++) {
+        const char *room = miloco_room_name(devices[i].room);
+        size_t j;
+        for (j = 0; j < room_count; j++) {
+            if (!strcmp(rooms[j], room)) {
+                break;
+            }
+        }
+        if (j != room_count) {
+            continue;
+        }
+        int n = snprintf(buffer + used, size - used, "\n%s", room);
+        if (n < 0 || (size_t)n >= size - used) {
+            break;
+        }
+        used += (size_t)n;
+        rooms[room_count++] = room;
+    }
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    if (ui->app && ui->app->node_gateway) {
+        caddons_node_info_t nodes[CAGENT_ADDONS_MAX_NODES];
+        size_t node_count = smart_home_node_gateway_list(ui->app->node_gateway,
+            nodes, CAGENT_ADDONS_MAX_NODES, NULL);
+        int has_unassigned = 0;
+        for (size_t i = 0; i < room_count; i++)
+            if (!strcmp(rooms[i], miloco_room_name(""))) has_unassigned = 1;
+        if (node_count && !has_unassigned)
+            snprintf(buffer + used, size - used, "\n%s", miloco_room_name(""));
+    }
+#endif
+
+    smart_home_bulk_free(devices);
+}
+
+static int miloco_matches_room(smart_home_lvgl_t *ui, const char *room)
+{
+    char selected[32];
+    if (!ui->panel_room_dd || !lv_dropdown_get_selected(ui->panel_room_dd)) {
+        return 1;
+    }
+    lv_dropdown_get_selected_str(ui->panel_room_dd, selected, sizeof(selected));
+    return !strcmp(selected, miloco_room_name(room));
+}
+
+/* 按房间名称保留选择，避免设备发现顺序变化后筛错房间。 */
+static int miloco_sync_room_options(smart_home_lvgl_t *ui)
+{
+    char options[MILOCO_ROOM_OPTIONS_SIZE];
+    char selected[32];
+    uint32_t index = 0;
+    miloco_room_options(ui, options, sizeof(options));
+    if (!strcmp(options, lv_dropdown_get_options(ui->panel_room_dd))) {
+        return 0;
+    }
+    lv_dropdown_get_selected_str(ui->panel_room_dd, selected, sizeof(selected));
+    lv_dropdown_set_options(ui->panel_room_dd, options);
+    const char *start = options;
+    while (start && *start) {
+        const char *end = strchr(start, '\n');
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        if (strlen(selected) == len && !strncmp(start, selected, len)) {
+            lv_dropdown_set_selected(ui->panel_room_dd, index);
+            break;
+        }
+        start = end ? end + 1 : NULL;
+        index++;
+    }
+    return 1;
+}
+#endif
+
 static const char *device_display_name(const smart_home_device_t *device)
 {
     if (!device || !device->name[0]) {
@@ -189,6 +289,13 @@ static int device_matches_filter(smart_home_lvgl_t *ui,
 }
 #endif
 
+static const char *device_ac_mode_text(int mode)
+{
+    static const char *const modes[] = {"制冷", "制热", "除湿", "送风", "自动"};
+    return mode >= 0 && mode < (int)(sizeof(modes) / sizeof(modes[0])) ?
+        modes[mode] : "未知模式";
+}
+
 #ifndef CONFIG_SMART_HOME_MILOCO_BRIDGE
 static void format_device_card_text(const smart_home_device_t *device,
                                     char *buffer,
@@ -204,7 +311,7 @@ static void format_device_card_text(const smart_home_device_t *device,
                      buffer_size,
                      "%s · %d°C · %s",
                      device_room_name(device->room), device->temperature,
-                     smart_home_ac_mode_name(device->ac_mode));
+                     device_ac_mode_text(device->ac_mode));
         } else {
             snprintf(buffer, buffer_size, "%s · 已关闭",
                      device_room_name(device->room));
@@ -323,6 +430,7 @@ static void set_card_content(lv_obj_t *card,
 
     if (ui && slot >= 0) {
         sw = lv_switch_create(card);
+        smart_home_lvgl_press_feedback(sw);
         lv_obj_set_size(sw, 40, 22);
         lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
         if (is_on) {
@@ -524,7 +632,7 @@ static void env_slider_cb(lv_event_t *event)
     ui->env_pending_value = value;
 
     if (ui->env_pending_type == ENV_TEMP) {
-        snprintf(text, sizeof(text), "%d C", value);
+        snprintf(text, sizeof(text), "%d°C", value);
     } else if (ui->env_pending_type == ENV_HUM) {
         snprintf(text, sizeof(text), "%d%%", value);
     } else {
@@ -715,6 +823,7 @@ static void create_room_chip(lv_obj_t *row, smart_home_lvgl_t *ui,
     smart_home_lvgl_set_bg(chip, selected ? SMART_HOME_UI_COLOR_SURFACE_ON :
                            SMART_HOME_UI_COLOR_SURFACE);
     lv_obj_set_user_data(chip, (void *)(intptr_t)index);
+    smart_home_lvgl_press_feedback(chip);
     lv_obj_add_event_cb(chip, room_chip_cb, LV_EVENT_CLICKED, ui);
     label = smart_home_lvgl_label_create(chip, text,
                                          selected ? SMART_HOME_UI_COLOR_PRIMARY_DARK :
@@ -796,6 +905,7 @@ static void open_room_creator(smart_home_lvgl_t *ui)
                      compact ? 12 : 16);
 
         ui->room_preset_dd = lv_dropdown_create(popup);
+        smart_home_lvgl_press_feedback(ui->room_preset_dd);
     lv_obj_set_style_text_font(ui->room_preset_dd, smart_home_lvgl_font(13), 0);
         lv_dropdown_set_options(ui->room_preset_dd, "厨房\n卫生间\n书房\n阳台");
         lv_obj_set_size(ui->room_preset_dd, lv_pct(74), compact ? 32 : 36);
@@ -809,11 +919,13 @@ static void open_room_creator(smart_home_lvgl_t *ui)
                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY);
         lv_obj_align(btn, LV_ALIGN_BOTTOM_LEFT, compact ? 22 : 30,
                      compact ? -10 : -16);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn, room_popup_cancel_cb, LV_EVENT_CLICKED, ui);
         btn = create_action_button(popup, "创建",
                                    SMART_HOME_UI_COLOR_PRIMARY, lv_color_white());
         lv_obj_align(btn, LV_ALIGN_BOTTOM_RIGHT, compact ? -22 : -30,
                      compact ? -10 : -16);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn, room_popup_confirm_cb, LV_EVENT_CLICKED, ui);
     }
     lv_label_set_text(ui->room_popup_title, "新增房间");
@@ -835,6 +947,17 @@ static void rebuild_room_filters(smart_home_lvgl_t *ui)
         return;
     }
     lv_obj_clean(ui->panel_filter_row);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    const char *start = lv_dropdown_get_options(ui->panel_room_dd);
+    for (i = 0; start && *start; i++) {
+        const char *end = strchr(start, '\n');
+        char room[32];
+        size_t len = end ? (size_t)(end - start) : strlen(start);
+        snprintf(room, sizeof(room), "%.*s", (int)len, start);
+        create_room_chip(ui->panel_filter_row, ui, room, i);
+        start = end ? end + 1 : NULL;
+    }
+#else
     create_room_chip(ui->panel_filter_row, ui, "全部", 0);
     for (i = 0; i < smart_home_room_count(ui->device_state); i++) {
         create_room_chip(ui->panel_filter_row, ui,
@@ -849,12 +972,14 @@ static void rebuild_room_filters(smart_home_lvgl_t *ui)
         lv_obj_set_size(btn, smart_home_lvgl_compact() ? 72 : 96, 34);
         lv_obj_set_style_radius(btn, 12, 0);
         smart_home_lvgl_set_bg(btn, SMART_HOME_UI_COLOR_SURFACE_SOFT);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn, add_room_cb, LV_EVENT_CLICKED, ui);
         label = smart_home_lvgl_label_create(btn, "+ 新增房间",
                                              SMART_HOME_UI_COLOR_PRIMARY_DARK,
                                              12);
         lv_obj_center(label);
     }
+#endif
 }
 
 #ifndef CONFIG_SMART_HOME_MILOCO_BRIDGE
@@ -941,7 +1066,7 @@ static void refresh_sensor_bar(smart_home_lvgl_t *ui)
             snprintf(text,
                      sizeof(text),
                      "空调 %s %d°C",
-                     ac->on ? smart_home_ac_mode_name(ac->ac_mode) : "已关闭",
+                     ac->on ? device_ac_mode_text(ac->ac_mode) : "已关闭",
                      ac->temperature);
         } else {
             snprintf(text, sizeof(text), "暂无空调");
@@ -1007,6 +1132,7 @@ static void ensure_control_popup(smart_home_lvgl_t *ui)
     lv_obj_align(ui->ctrl_switch, LV_ALIGN_TOP_RIGHT,
                  compact ? -16 : -28, compact ? 10 : 16);
     lv_obj_set_style_radius(ui->ctrl_switch, 8, 0);
+    smart_home_lvgl_press_feedback(ui->ctrl_switch);
     lv_obj_add_event_cb(ui->ctrl_switch, ctrl_toggle_cb, LV_EVENT_CLICKED, ui);
     label = smart_home_lvgl_label_create(ui->ctrl_switch,
                                          "开关",
@@ -1020,6 +1146,7 @@ static void ensure_control_popup(smart_home_lvgl_t *ui)
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, compact ? 16 : 28,
                  compact ? 52 : 68);
     ui->ctrl_room_dd = lv_dropdown_create(popup);
+    smart_home_lvgl_press_feedback(ui->ctrl_room_dd);
     lv_obj_set_style_text_font(ui->ctrl_room_dd, smart_home_lvgl_font(13), 0);
     lv_obj_set_size(ui->ctrl_room_dd, compact ? 112 : 142,
                     compact ? 30 : 34);
@@ -1037,6 +1164,7 @@ static void ensure_control_popup(smart_home_lvgl_t *ui)
                  compact ? 90 : 114);
 
     ui->ctrl_mode_dd = lv_dropdown_create(popup);
+    smart_home_lvgl_press_feedback(ui->ctrl_mode_dd);
     lv_obj_set_style_text_font(ui->ctrl_mode_dd, smart_home_lvgl_font(13), 0);
     lv_dropdown_set_options(ui->ctrl_mode_dd, "制冷\n制热\n除湿\n送风\n自动");
     lv_obj_set_size(ui->ctrl_mode_dd, compact ? 104 : 116, 32);
@@ -1051,6 +1179,7 @@ static void ensure_control_popup(smart_home_lvgl_t *ui)
                         ui);
 
     ui->ctrl_fan_dd = lv_dropdown_create(popup);
+    smart_home_lvgl_press_feedback(ui->ctrl_fan_dd);
     lv_obj_set_style_text_font(ui->ctrl_fan_dd, smart_home_lvgl_font(13), 0);
     lv_dropdown_set_options(ui->ctrl_fan_dd, "低速\n中速\n高速\n自动");
     lv_obj_set_size(ui->ctrl_fan_dd, compact ? 104 : 116, 32);
@@ -1090,24 +1219,28 @@ static void ensure_control_popup(smart_home_lvgl_t *ui)
                                "删除",
                                SMART_HOME_UI_COLOR_DANGER,
                                lv_color_white());
+    smart_home_lvgl_press_feedback(btn);
     lv_obj_add_event_cb(btn, ctrl_delete_cb, LV_EVENT_CLICKED, ui);
 
     btn = create_action_button(row,
                                "关闭",
                                SMART_HOME_UI_COLOR_BTN_SECONDARY,
                                SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+    smart_home_lvgl_press_feedback(btn);
     lv_obj_add_event_cb(btn, ctrl_cancel_cb, LV_EVENT_CLICKED, ui);
 
     btn = create_action_button(row,
                                "重命名",
                                SMART_HOME_UI_COLOR_SURFACE_SOFT,
                                SMART_HOME_UI_COLOR_TEXT_PRIMARY);
+    smart_home_lvgl_press_feedback(btn);
     lv_obj_add_event_cb(btn, ctrl_edit_cb, LV_EVENT_CLICKED, ui);
 
     btn = create_action_button(row,
                                "保存",
                                SMART_HOME_UI_COLOR_PRIMARY,
                                lv_color_white());
+    smart_home_lvgl_press_feedback(btn);
     lv_obj_add_event_cb(btn, ctrl_confirm_cb, LV_EVENT_CLICKED, ui);
 }
 
@@ -1186,7 +1319,7 @@ static void env_click_cb(lv_event_t *event)
     smart_home_state_t *state;
     int min = 0;
     int max = 100;
-    const char *title = "Environment";
+    const char *title = "环境";
 
     if (!ui || !ui->device_state) {
         return;
@@ -1195,15 +1328,15 @@ static void env_click_cb(lv_event_t *event)
     state = ui->device_state;
     ui->env_pending_type = type;
     if (type == ENV_TEMP) {
-        title = "Temperature";
+        title = "温度";
         max = 45;
         ui->env_pending_value = state->env_temperature;
     } else if (type == ENV_HUM) {
-        title = "Humidity";
+        title = "湿度";
         max = 100;
         ui->env_pending_value = state->env_humidity;
     } else {
-        title = "Ambient Light";
+        title = "光照";
         max = 1000;
         ui->env_pending_value = state->env_light;
     }
@@ -1246,23 +1379,25 @@ static void env_click_cb(lv_event_t *event)
                             ui);
 
         btn = create_action_button(popup,
-                                   "Cancel",
+                                   "取消",
                                    SMART_HOME_UI_COLOR_BTN_SECONDARY,
                                    SMART_HOME_UI_COLOR_TEXT_PRIMARY);
         lv_obj_align(btn,
                      LV_ALIGN_BOTTOM_LEFT,
                      compact ? 24 : 30,
                      compact ? -10 : -18);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn, env_cancel_cb, LV_EVENT_CLICKED, ui);
 
         btn = create_action_button(popup,
-                                   "Apply",
+                                   "应用",
                                    SMART_HOME_UI_COLOR_PRIMARY,
                                    lv_color_white());
         lv_obj_align(btn,
                      LV_ALIGN_BOTTOM_RIGHT,
                      compact ? -24 : -30,
                      compact ? -10 : -18);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn, env_confirm_cb, LV_EVENT_CLICKED, ui);
 
         (void)label;
@@ -1327,6 +1462,7 @@ static void open_device_editor(smart_home_lvgl_t *ui,
                             ui);
 
         ui->device_room_dd = lv_dropdown_create(popup);
+        smart_home_lvgl_press_feedback(ui->device_room_dd);
     lv_obj_set_style_text_font(ui->device_room_dd, smart_home_lvgl_font(13), 0);
         lv_dropdown_set_options(ui->device_room_dd, "客厅\n卧室");
         lv_obj_set_size(ui->device_room_dd, lv_pct(78), compact ? 32 : 34);
@@ -1339,6 +1475,7 @@ static void open_device_editor(smart_home_lvgl_t *ui,
                                    0);
 
         ui->device_type_dd = lv_dropdown_create(popup);
+        smart_home_lvgl_press_feedback(ui->device_type_dd);
     lv_obj_set_style_text_font(ui->device_type_dd, smart_home_lvgl_font(13), 0);
         lv_dropdown_set_options(ui->device_type_dd, "灯光\n空调");
         lv_obj_set_size(ui->device_type_dd, lv_pct(78), compact ? 32 : 34);
@@ -1358,6 +1495,7 @@ static void open_device_editor(smart_home_lvgl_t *ui,
                      LV_ALIGN_BOTTOM_LEFT,
                      compact ? 24 : 30,
                      compact ? -10 : -18);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn,
                             device_editor_cancel_cb,
                             LV_EVENT_CLICKED,
@@ -1371,6 +1509,7 @@ static void open_device_editor(smart_home_lvgl_t *ui,
                      LV_ALIGN_BOTTOM_RIGHT,
                      compact ? -24 : -30,
                      compact ? -10 : -18);
+        smart_home_lvgl_press_feedback(btn);
         lv_obj_add_event_cb(btn,
                             device_editor_confirm_cb,
                             LV_EVENT_CLICKED,
@@ -1425,6 +1564,7 @@ static lv_obj_t *create_device_card(lv_obj_t *grid,
     lv_obj_set_size(card, card_w, card_h);
     smart_home_lvgl_card_style(card);
     lv_obj_set_user_data(card, (void *)(intptr_t)slot);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, card_click_cb, LV_EVENT_CLICKED, ui);
 
     format_device_card_text(device, text, sizeof(text));
@@ -1444,6 +1584,7 @@ static lv_obj_t *create_add_card(lv_obj_t *grid, smart_home_lvgl_t *ui)
 
     lv_obj_set_size(card, card_w, card_h);
     smart_home_lvgl_card_style(card);
+    smart_home_lvgl_press_feedback(card);
     lv_obj_add_event_cb(card, add_device_cb, LV_EVENT_CLICKED, ui);
     set_card_content(card, ICON_ADD, "添加设备", "接入新的家庭设备", 0,
                      NULL, -1);
@@ -1465,10 +1606,10 @@ static void format_remote_command_text(const caddons_node_info_t *node,
         return;
     }
 
-    snprintf(buffer, buffer_size, "Commands: ");
+    snprintf(buffer, buffer_size, "支持操作：");
     used = strlen(buffer);
     if (!node || node->command_count == 0u) {
-        snprintf(buffer, buffer_size, "Commands: none");
+        snprintf(buffer, buffer_size, "暂无可用操作");
         return;
     }
 
@@ -1491,13 +1632,20 @@ static void format_remote_command_text(const caddons_node_info_t *node,
         separator = ", ";
     }
 
-    if (used == strlen("Commands: ")) {
-        snprintf(buffer, buffer_size, "Commands: none");
+    if (used == strlen("支持操作：")) {
+        snprintf(buffer, buffer_size, "暂无可用操作");
     }
 }
 
+static void remote_node_card_deleted(lv_event_t *event)
+{
+    smart_home_lvgl_node_card_t *binding = lv_event_get_user_data(event);
+    memset(binding, 0, sizeof(*binding));
+}
+
 static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
-                                         const caddons_node_info_t *node)
+                                         const caddons_node_info_t *node,
+                                         smart_home_lvgl_node_card_t *binding)
 {
     int card_w = device_card_width();
     int card_h = smart_home_lvgl_compact() ? 104 : 112;
@@ -1513,6 +1661,10 @@ static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
     smart_home_lvgl_card_style(card);
     smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_SURFACE_SOFT);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+    binding->card = card;
+    snprintf(binding->id, sizeof(binding->id), "%s", node->node_id);
+    lv_obj_add_event_cb(card, remote_node_card_deleted, LV_EVENT_DELETE, binding);
 
     content = lv_obj_create(card);
     lv_obj_remove_style_all(content);
@@ -1536,14 +1688,15 @@ static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
     label = smart_home_lvgl_label_create(content, name,
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                          font_size + 1);
+    binding->name = label;
     lv_obj_set_width(label, lv_pct(100));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 
-    label = smart_home_lvgl_label_create(content, "Online",
+    label = smart_home_lvgl_label_create(content, "在线",
                                          SMART_HOME_UI_COLOR_SUCCESS,
                                          font_size);
-    label = smart_home_lvgl_label_create(content, "Source: Node",
+    label = smart_home_lvgl_label_create(content, "来源：节点设备",
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                          font_size);
     format_remote_command_text(node, commands, sizeof(commands));
@@ -1551,6 +1704,7 @@ static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
                                          SMART_HOME_UI_COLOR_TEXT_MUTED,
                                          font_size);
     lv_obj_set_width(label, lv_pct(100));
+    binding->commands = label;
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     return card;
@@ -1559,22 +1713,47 @@ static lv_obj_t *create_remote_node_card(lv_obj_t *grid,
 static void append_online_remote_node_cards(smart_home_lvgl_t *ui)
 {
     caddons_node_info_t nodes[CAGENT_ADDONS_MAX_NODES];
-    uint32_t revision = 0;
-    size_t count;
-    size_t i;
-
-    if (!ui || !ui->app || !ui->app->node_gateway) {
-        ui->remote_node_revision = 0;
-        return;
+    size_t count = 0;
+    int show = device_matches_source(ui, 2);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    show = show && miloco_matches_room(ui, "");
+#else
+    show = show && (!ui->panel_room_dd || !lv_dropdown_get_selected(ui->panel_room_dd));
+#endif
+    if (ui->app && ui->app->node_gateway) {
+        count = smart_home_node_gateway_list(ui->app->node_gateway, nodes,
+                                             CAGENT_ADDONS_MAX_NODES, &ui->remote_node_revision);
     }
-
-    count = smart_home_node_gateway_list(ui->app->node_gateway, nodes,
-                                          CAGENT_ADDONS_MAX_NODES, &revision);
-    ui->remote_node_revision = revision;
-    for (i = 0; i < count && i < CAGENT_ADDONS_MAX_NODES; i++) {
-        if (nodes[i].online) {
-            create_remote_node_card(ui->panel_grid, &nodes[i]);
+    for (size_t i = 0; i < CAGENT_ADDONS_MAX_NODES; i++) {
+        smart_home_lvgl_node_card_t *binding = &ui->node_cards[i];
+        if (!binding->card) continue;
+        size_t j;
+        for (j = 0; j < count; j++) {
+            if (show && nodes[j].online && !strcmp(binding->id, nodes[j].node_id)) break;
         }
+        if (j == count) lv_obj_delete(binding->card);
+    }
+    for (size_t i = 0; show && i < count; i++) {
+        if (!nodes[i].online) continue;
+        smart_home_lvgl_node_card_t *binding = NULL;
+        for (size_t j = 0; j < CAGENT_ADDONS_MAX_NODES; j++) {
+            if (ui->node_cards[j].card && !strcmp(ui->node_cards[j].id, nodes[i].node_id)) {
+                binding = &ui->node_cards[j]; break;
+            }
+        }
+        if (!binding) {
+            for (size_t j = 0; j < CAGENT_ADDONS_MAX_NODES; j++) {
+                if (!ui->node_cards[j].card) { binding = &ui->node_cards[j]; break; }
+            }
+            if (!binding) break;
+            create_remote_node_card(ui->panel_grid, &nodes[i], binding);
+        }
+        const char *name = nodes[i].display_name[0] ? nodes[i].display_name : nodes[i].node_id;
+        char commands[192];
+        format_remote_command_text(&nodes[i], commands, sizeof(commands));
+        if (strcmp(lv_label_get_text(binding->name), name)) lv_label_set_text(binding->name, name);
+        if (strcmp(lv_label_get_text(binding->commands), commands))
+            lv_label_set_text(binding->commands, commands);
     }
 }
 
@@ -1587,6 +1766,11 @@ static void remote_node_timer_cb(lv_timer_t *timer)
         return;
     }
 
+    /* 仅设备页可见时轮询节点 revision。 */
+    if (lv_scr_act() != ui->screen_panel) {
+        return;
+    }
+
     (void)smart_home_node_gateway_list(ui->app->node_gateway, NULL, 0,
                                         &revision);
     if (revision != ui->remote_node_revision) {
@@ -1596,13 +1780,24 @@ static void remote_node_timer_cb(lv_timer_t *timer)
 #endif
 
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-/* 米家（Miloco 网关）远程设备卡：电源开关提交异步控制，实际状态
- * 以 worker 轮询回读为准（revision 变化触发整卡重建）。
- *
- * user_data 不能指向 append_miloco_cards 的栈上快照拷贝（悬空），
- * did 复制到长期存储池后再取址。 */
-static char g_miloco_card_dids[SMART_HOME_MILOCO_MAX_DEVICES][24];
-static uint8_t g_miloco_card_did_count;
+/* 绑定记录归 UI 所有，did 地址在卡片存活期内稳定。 */
+#define MILOCO_CONFIRM_WAIT_MS 15000u
+
+static void miloco_label_update(lv_obj_t *label, const char *text)
+{
+    if (strcmp(lv_label_get_text(label), text)) lv_label_set_text(label, text);
+}
+
+static void miloco_sheet_deleted(lv_event_t *event)
+{
+    smart_home_lvgl_t *ui = lv_event_get_user_data(event);
+    smart_home_bulk_free(ui->miloco_sheet_context);
+    ui->miloco_sheet_context = NULL;
+    ui->miloco_sheet = NULL;
+    ui->miloco_sheet_feedback = NULL;
+    ui->miloco_sheet_did[0] = '\0';
+}
+
 /* ── 米家通用控制抽屉：按 controls 的值类型渲染 ──
  *   BOOL→开关  ENUM→分段选择  ACTION→按钮
  * 状态以 worker 回读为准；revision 变化时刷新控件。 */
@@ -1611,6 +1806,7 @@ static void miloco_sheet_close_impl(smart_home_lvgl_t *ui)
     if (ui && ui->miloco_sheet) {
         lv_obj_delete(ui->miloco_sheet);
         ui->miloco_sheet = NULL;
+        ui->miloco_sheet_feedback = NULL;
         ui->miloco_sheet_did[0] = '\0';
     }
 }
@@ -1620,64 +1816,129 @@ static void miloco_sheet_close(lv_event_t *event)
     miloco_sheet_close_impl((smart_home_lvgl_t *)lv_event_get_user_data(event));
 }
 
-/* 控件私有数据：iid 拷贝（设备快照是栈上临时拷贝，指针会悬空）。 */
+static int miloco_find_device(smart_home_lvgl_t *ui, const char *did,
+                               smart_home_miloco_device_t *out)
+{
+    if (!ui || !ui->app || !ui->app->miloco || !did) {
+        return 0;
+    }
+
+    /* 按 did 单条拷贝，避免为了找一个设备把整份 19 KB 快照搬上栈。 */
+    return smart_home_miloco_copy_device(ui->app->miloco, did, out) ? 1 : 0;
+}
+
+static void miloco_feedback(smart_home_lvgl_t *ui, const char *text, int error)
+{
+    lv_obj_t *labels[] = {ui->panel_feedback_label, ui->miloco_sheet_feedback};
+    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
+        if (labels[i]) {
+            lv_label_set_text(labels[i], text);
+            lv_obj_set_style_text_color(labels[i], error ?
+                SMART_HOME_UI_COLOR_DANGER : SMART_HOME_UI_COLOR_PRIMARY_DARK, 0);
+        }
+    }
+}
+
+static void miloco_restore_switch(lv_obj_t *sw, int on)
+{
+    if (on) {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    } else {
+        lv_obj_remove_state(sw, LV_STATE_CHECKED);
+    }
+}
+
+/* 控件私有数据不引用临时设备快照。容量涵盖每项的全部枚举选项。 */
 typedef struct {
     smart_home_lvgl_t *ui;
     char iid[14];
-    const char *operation;              /* 字面量 "set"/"action"，静态 */
+    const char *operation;
     int32_t value;
+    int32_t confirmed_value;
+    lv_obj_t *widget;
+    int pending;
+    uint32_t submitted_at;
 } miloco_sheet_req_t;
 
-static miloco_sheet_req_t g_miloco_sheet_req[SMART_HOME_MILOCO_MAX_CONTROLS +
-                                             1];
+typedef struct {
+    smart_home_miloco_device_t snapshot;
+    lv_obj_t *title;
+    lv_obj_t *status;
+    size_t request_count;
+    miloco_sheet_req_t requests[
+        SMART_HOME_MILOCO_MAX_CONTROLS * (SMART_HOME_MILOCO_MAX_OPTIONS + 1)];
+} miloco_sheet_context_t;
+
+static void miloco_sheet_submit(miloco_sheet_req_t *req, int32_t value,
+                                lv_obj_t *sw)
+{
+    smart_home_miloco_device_t dev;
+    smart_home_lvgl_t *ui = req->ui;
+    int found = miloco_find_device(ui, ui->miloco_sheet_did, &dev);
+    int32_t confirmed = req->confirmed_value;
+    req->pending = 0;
+    if (found) {
+        for (size_t i = 0; i < dev.control_count &&
+             i < SMART_HOME_MILOCO_MAX_CONTROLS; i++) {
+            if (!strcmp(dev.controls[i].iid, req->iid)) {
+                confirmed = dev.controls[i].value;
+                break;
+            }
+        }
+    }
+    if (!found || !dev.online || !smart_home_miloco_reachable(ui->app->miloco)) {
+        if (sw) miloco_restore_switch(sw, confirmed);
+        miloco_feedback(ui, "设备当前不可用，请连接后重试", 1);
+        return;
+    }
+    int ret = smart_home_miloco_submit_control(ui->app->miloco,
+        ui->miloco_sheet_did, req->iid, req->operation, value);
+    if (ret != AGENT_OK) {
+        if (sw) miloco_restore_switch(sw, confirmed);
+        miloco_feedback(ui, "操作未能提交，请稍后重试", 1);
+        return;
+    }
+    if (sw) {
+        req->pending = 1;
+        req->value = value;
+        req->submitted_at = lv_tick_get();
+    }
+    miloco_feedback(ui, "已提交，等待设备状态更新", 0);
+}
 
 static void miloco_sheet_set_cb(lv_event_t *event)
 {
     miloco_sheet_req_t *req = lv_event_get_user_data(event);
-
-    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !req ||
-        !req->ui || !req->ui->app || !req->ui->app->miloco) {
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || !req || !req->ui) {
         return;
     }
-    (void)smart_home_miloco_submit_control(
-        req->ui->app->miloco, req->ui->miloco_sheet_did, req->iid,
-        req->operation,
-        lv_obj_has_state(lv_event_get_current_target(event),
-                         LV_STATE_CHECKED) ? 1 : 0);
+    lv_obj_t *sw = lv_event_get_current_target(event);
+    miloco_sheet_submit(req, lv_obj_has_state(sw, LV_STATE_CHECKED), sw);
 }
 
 static void miloco_sheet_pick_cb(lv_event_t *event)
 {
     miloco_sheet_req_t *req = lv_event_get_user_data(event);
-
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !req ||
-        !req->ui || !req->ui->app || !req->ui->app->miloco) {
-        return;
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED && req && req->ui) {
+        miloco_sheet_submit(req, req->value, NULL);
     }
-    (void)smart_home_miloco_submit_control(
-        req->ui->app->miloco, req->ui->miloco_sheet_did, req->iid,
-        req->operation, req->value);
 }
 
 static void miloco_sheet_action_cb(lv_event_t *event)
 {
     miloco_sheet_req_t *req = lv_event_get_user_data(event);
-
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !req ||
-        !req->ui || !req->ui->app || !req->ui->app->miloco) {
-        return;
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED && req && req->ui) {
+        miloco_sheet_submit(req, 0, NULL);
     }
-    (void)smart_home_miloco_submit_control(
-        req->ui->app->miloco, req->ui->miloco_sheet_did, req->iid,
-        "action", 0);
 }
 
 static void miloco_card_click_cb(lv_event_t *event);
 
 static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t device_record;
     smart_home_miloco_device_t *dev = NULL;
+    miloco_sheet_context_t *context;
     lv_obj_t *sheet;
     lv_obj_t *row;
     lv_obj_t *label;
@@ -1688,21 +1949,25 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
     int y = 0;
     uint8_t k;
     uint8_t req_slot = 0;
-    size_t count;
-    size_t i;
 
-    count = smart_home_miloco_list(ui->app->miloco, devices,
-                                   SMART_HOME_MILOCO_MAX_DEVICES, NULL);
-    for (i = 0; i < count; i++) {
-        if (strcmp(devices[i].did, did) == 0) {
-            dev = &devices[i];
-            break;
-        }
+    /* 只取目标设备，避免为打开一个抽屉把整份 19 KB 快照搬上栈。 */
+    if (ui->app && ui->app->miloco &&
+        smart_home_miloco_copy_device(ui->app->miloco, did, &device_record)) {
+        dev = &device_record;
     }
     if (!dev) {
         return;
     }
 
+    context = smart_home_bulk_alloc(sizeof(*context));
+    if (!context) {
+        miloco_feedback(ui, "暂时无法打开设备，请稍后重试", 1);
+        return;
+    }
+    memset(context, 0, sizeof(*context));
+    context->snapshot = *dev;
+    int available = dev->online && smart_home_miloco_reachable(ui->app->miloco);
+    ui->miloco_sheet_context = context;
     drawer_w = smart_home_lvgl_compact() ? smart_home_lvgl_content_w() :
               smart_home_lvgl_disp_w() * 56 / 100;
     drawer_h = smart_home_lvgl_disp_h() - SMART_HOME_TOPBAR_H -
@@ -1714,27 +1979,38 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
     smart_home_lvgl_card_style(sheet);
     lv_obj_set_style_pad_all(sheet, 16, 0);
     ui->miloco_sheet = sheet;
+    lv_obj_add_event_cb(sheet, miloco_sheet_deleted, LV_EVENT_DELETE, ui);
     snprintf(ui->miloco_sheet_did, sizeof(ui->miloco_sheet_did), "%s", did);
 
     label = smart_home_lvgl_label_create(sheet, dev->name,
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                          16);
+    context->title = label;
+    lv_obj_set_width(label, lv_pct(65));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
     label = smart_home_lvgl_label_create(sheet,
-                                         dev->online ? "● 在线 · 米家" :
+                                         available ? "● 在线 · 米家" :
                                                        "○ 离线 · 米家",
-                                         dev->online ?
+                                         available ?
                                              SMART_HOME_UI_COLOR_SUCCESS :
                                              SMART_HOME_UI_COLOR_TEXT_MUTED,
                                          12);
+    context->status = label;
     lv_obj_align(label, LV_ALIGN_TOP_RIGHT, 0, 4);
     btn = lv_btn_create(sheet);
     lv_obj_set_size(btn, 64, 32);
     lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, 0, 24);
     label = smart_home_lvgl_label_create(btn, "关闭", lv_color_white(), 12);
     lv_obj_center(label);
+    smart_home_lvgl_press_feedback(btn);
     lv_obj_add_event_cb(btn, miloco_sheet_close, LV_EVENT_CLICKED, ui);
-    y = 56;
+    ui->miloco_sheet_feedback = smart_home_lvgl_label_create(
+        sheet, "状态以设备回读为准", SMART_HOME_UI_COLOR_TEXT_MUTED, 12);
+    lv_obj_set_width(ui->miloco_sheet_feedback, lv_pct(100));
+    lv_label_set_long_mode(ui->miloco_sheet_feedback, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(ui->miloco_sheet_feedback, 0, 60);
+    y = 88;
 
     if (dev->control_count == 0) {
         /* spec 拉取中或失败（服务侧每轮重试，见 spec_attempt_take）：
@@ -1751,9 +2027,11 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
     for (k = 0; k < dev->control_count && k <
          SMART_HOME_MILOCO_MAX_CONTROLS; k++) {
         const smart_home_miloco_control_t *ctrl = &dev->controls[k];
-        miloco_sheet_req_t *req = &g_miloco_sheet_req[req_slot++];
+        miloco_sheet_req_t *req = &context->requests[req_slot++];
+        int row_height = 40;
 
         req->ui = ui;
+        req->confirmed_value = ctrl->value;
         snprintf(req->iid, sizeof(req->iid), "%s", ctrl->iid);
         req->operation = ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION ?
                          "action" : "set";
@@ -1770,38 +2048,45 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
         if (ctrl->type == SMART_HOME_MILOCO_CTRL_BOOL) {
             req->value = 0;
             sw = lv_switch_create(row);
+            smart_home_lvgl_press_feedback(sw);
+            req->widget = sw;
             lv_obj_set_size(sw, 44, 24);
             lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
             if (ctrl->value) {
                 lv_obj_add_state(sw, LV_STATE_CHECKED);
             }
+            if (!available) lv_obj_add_state(sw, LV_STATE_DISABLED);
             lv_obj_add_event_cb(sw, miloco_sheet_set_cb,
                                 LV_EVENT_VALUE_CHANGED, req);
         } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM &&
                    ctrl->option_count > 0) {
             uint8_t j;
+            row_height = 28 + ((ctrl->option_count + 3) / 4) * 36;
+            lv_obj_set_height(row, row_height);
+            lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
-            for (j = 0; j < ctrl->option_count; j++) {
-                miloco_sheet_req_t *oreq = &g_miloco_sheet_req[req_slot++];
+            for (j = 0; j < ctrl->option_count &&
+                 j < SMART_HOME_MILOCO_MAX_OPTIONS; j++) {
+                miloco_sheet_req_t *oreq = &context->requests[req_slot++];
                 lv_obj_t *opt;
 
-                if (req_slot >= sizeof(g_miloco_sheet_req) /
-                                sizeof(g_miloco_sheet_req[0])) {
-                    break;
-                }
                 oreq->ui = ui;
+                oreq->confirmed_value = ctrl->value;
                 snprintf(oreq->iid, sizeof(oreq->iid), "%s", ctrl->iid);
                 oreq->operation = "set";
                 oreq->value = ctrl->options[j].value;
                 opt = lv_btn_create(row);
-                lv_obj_set_size(opt, 56, 30);
-                lv_obj_align(opt, LV_ALIGN_RIGHT_MID,
-                             -(int)(j * 62), 0);
+                oreq->widget = opt;
+                lv_obj_set_size(opt, 74, 30);
+                lv_obj_align(opt, LV_ALIGN_TOP_RIGHT,
+                             -(int)((j % 4) * 80), 28 + (j / 4) * 36);
                 label = smart_home_lvgl_label_create(
                     opt, ctrl->options[j].name,
                     ctrl->value == ctrl->options[j].value ?
                         lv_color_white() :
                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 11);
+                lv_obj_set_width(label, 68);
+                lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
                 lv_obj_center(label);
                 if (ctrl->value == ctrl->options[j].value) {
                     smart_home_lvgl_set_bg(opt, SMART_HOME_UI_COLOR_PRIMARY);
@@ -1809,23 +2094,35 @@ static void miloco_sheet_build(smart_home_lvgl_t *ui, const char *did)
                     smart_home_lvgl_set_bg(opt,
                         SMART_HOME_UI_COLOR_SURFACE_SOFT);
                 }
+                if (!available) lv_obj_add_state(opt, LV_STATE_DISABLED);
+                smart_home_lvgl_press_feedback(opt);
                 lv_obj_add_event_cb(opt, miloco_sheet_pick_cb,
                                     LV_EVENT_CLICKED, oreq);
             }
+        } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE) {
+            char value_text[48];
+            snprintf(value_text, sizeof(value_text), "%ld · 请在首页调节", (long)ctrl->value);
+            label = smart_home_lvgl_label_create(row, value_text,
+                        SMART_HOME_UI_COLOR_TEXT_SECONDARY, 12);
+            lv_obj_align(label, LV_ALIGN_RIGHT_MID, 0, 0);
         } else {
             req->value = 0;
             btn = lv_btn_create(row);
+            req->widget = btn;
             lv_obj_set_size(btn, 88, 32);
             lv_obj_align(btn, LV_ALIGN_RIGHT_MID, 0, 0);
             label = smart_home_lvgl_label_create(btn, "执行", lv_color_white(),
                                                  12);
             lv_obj_center(label);
             smart_home_lvgl_set_bg(btn, SMART_HOME_UI_COLOR_PRIMARY);
+            if (!available) lv_obj_add_state(btn, LV_STATE_DISABLED);
+            smart_home_lvgl_press_feedback(btn);
             lv_obj_add_event_cb(btn, miloco_sheet_action_cb,
                                 LV_EVENT_CLICKED, req);
         }
-        y += 48;
+        y += row_height + 8;
     }
+    context->request_count = req_slot;
 }
 
 static void miloco_card_click_cb(lv_event_t *event)
@@ -1841,16 +2138,79 @@ static void miloco_card_click_cb(lv_event_t *event)
     miloco_sheet_build(ui, did);
 }
 
-/* revision 变化时刷新打开中的抽屉（重建以取最新值）。 */
+static int miloco_same_controls(const smart_home_miloco_device_t *a,
+                                 const smart_home_miloco_device_t *b)
+{
+    if (a->control_count != b->control_count) return 0;
+    for (size_t i = 0; i < a->control_count && i < SMART_HOME_MILOCO_MAX_CONTROLS; i++) {
+        const smart_home_miloco_control_t *x = &a->controls[i], *y = &b->controls[i];
+        if (strcmp(x->iid, y->iid) || strcmp(x->desc, y->desc) ||
+            x->type != y->type || x->option_count != y->option_count) return 0;
+        for (size_t j = 0; j < x->option_count && j < SMART_HOME_MILOCO_MAX_OPTIONS; j++) {
+            if (x->options[j].value != y->options[j].value ||
+                strcmp(x->options[j].name, y->options[j].name)) return 0;
+        }
+    }
+    return 1;
+}
+
 void smart_home_lvgl_miloco_sheet_refresh(smart_home_lvgl_t *ui)
 {
-    if (ui && ui->miloco_sheet && ui->miloco_sheet_did[0]) {
+    smart_home_miloco_device_t dev;
+    if (!ui || !ui->miloco_sheet || !ui->miloco_sheet_context) return;
+    if (!miloco_find_device(ui, ui->miloco_sheet_did, &dev)) {
+        miloco_sheet_close_impl(ui);
+        miloco_feedback(ui, "设备已移除，请重新选择", 1);
+        return;
+    }
+    miloco_sheet_context_t *context = ui->miloco_sheet_context;
+    if (!miloco_same_controls(&context->snapshot, &dev)) {
         char did[24];
-
-        snprintf(did, sizeof(did), "%s", ui->miloco_sheet_did);
+        int32_t scroll_y = lv_obj_get_scroll_y(ui->miloco_sheet);
+        snprintf(did, sizeof(did), "%s", dev.did);
         miloco_sheet_close_impl(ui);
         miloco_sheet_build(ui, did);
+        if (ui->miloco_sheet) {
+            lv_obj_update_layout(ui->miloco_sheet);
+            lv_obj_scroll_to_y(ui->miloco_sheet, scroll_y, LV_ANIM_OFF);
+        }
+        return;
     }
+    int online = dev.online && smart_home_miloco_reachable(ui->app->miloco);
+    miloco_label_update(context->title, dev.name);
+    miloco_label_update(context->status, online ? "● 在线 · 米家" : "○ 不可用 · 米家");
+    lv_obj_set_style_text_color(context->status, online ?
+        SMART_HOME_UI_COLOR_SUCCESS : SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+    for (size_t i = 0; i < context->request_count; i++) {
+        miloco_sheet_req_t *req = &context->requests[i];
+        if (!req->widget) continue; /* 枚举项共用的描述记录。 */
+        const smart_home_miloco_control_t *ctrl = NULL;
+        for (size_t j = 0; j < dev.control_count && j < SMART_HOME_MILOCO_MAX_CONTROLS; j++) {
+            if (!strcmp(req->iid, dev.controls[j].iid)) { ctrl = &dev.controls[j]; break; }
+        }
+        if (!ctrl) continue;
+        if (online) lv_obj_remove_state(req->widget, LV_STATE_DISABLED);
+        else lv_obj_add_state(req->widget, LV_STATE_DISABLED);
+        if (ctrl->type == SMART_HOME_MILOCO_CTRL_BOOL) {
+            if (req->pending && online && ctrl->value != req->value &&
+                lv_tick_elaps(req->submitted_at) < MILOCO_CONFIRM_WAIT_MS) continue;
+            if (req->pending && ctrl->value != req->value)
+                miloco_feedback(ui, "设备状态尚未确认，请稍后重试", 1);
+            if (req->pending && ctrl->value == req->value)
+                miloco_feedback(ui, "设备状态已更新", 0);
+            req->pending = 0;
+            miloco_restore_switch(req->widget, ctrl->value);
+        } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM &&
+                   req->confirmed_value != ctrl->value) {
+            int selected = ctrl->value == req->value;
+            smart_home_lvgl_set_bg(req->widget, selected ?
+                SMART_HOME_UI_COLOR_PRIMARY : SMART_HOME_UI_COLOR_SURFACE_SOFT);
+            lv_obj_set_style_text_color(lv_obj_get_child(req->widget, 0), selected ?
+                lv_color_white() : SMART_HOME_UI_COLOR_TEXT_PRIMARY, 0);
+        }
+        req->confirmed_value = ctrl->value;
+    }
+    context->snapshot = dev;
 }
 
 static void miloco_switch_cb(lv_event_t *event)
@@ -1863,17 +2223,43 @@ static void miloco_switch_cb(lv_event_t *event)
         !ui->app || !ui->app->miloco || !did) {
         return;
     }
-    if (smart_home_miloco_submit_power(ui->app->miloco, did,
-                                       lv_obj_has_state(sw,
-                                                        LV_STATE_CHECKED))
-            != AGENT_OK) {
-        /* 提交失败：回读当前缓存状态以恢复开关视觉。 */
-        lv_obj_remove_state(sw, LV_STATE_CHECKED);
+    smart_home_miloco_device_t dev;
+    int requested = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++) {
+        if (ui->miloco_cards[i].card && !strcmp(ui->miloco_cards[i].did, did))
+            ui->miloco_cards[i].pending = 0;
     }
+    int found = miloco_find_device(ui, did, &dev);
+    if (!found || !dev.online || !smart_home_miloco_reachable(ui->app->miloco)) {
+        miloco_restore_switch(sw, found ? dev.power_on : !requested);
+        miloco_feedback(ui, "设备当前不可用，请连接后重试", 1);
+        return;
+    }
+    if (smart_home_miloco_submit_power(ui->app->miloco, did, requested) != AGENT_OK) {
+        miloco_restore_switch(sw, dev.power_on);
+        miloco_feedback(ui, "操作未能提交，请稍后重试", 1);
+        return;
+    }
+    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++) {
+        smart_home_lvgl_miloco_card_t *binding = &ui->miloco_cards[i];
+        if (binding->card && !strcmp(binding->did, did)) {
+            binding->pending = 1;
+            binding->submitted_at = lv_tick_get();
+            break;
+        }
+    }
+    miloco_feedback(ui, "已提交，等待设备状态更新", 0);
+}
+
+static void miloco_card_deleted(lv_event_t *event)
+{
+    smart_home_lvgl_miloco_card_t *binding = lv_event_get_user_data(event);
+    memset(binding, 0, sizeof(*binding));
 }
 
 static lv_obj_t *create_miloco_card(smart_home_lvgl_t *ui,
-                                    const smart_home_miloco_device_t *device)
+                                    const smart_home_miloco_device_t *device,
+                                    smart_home_lvgl_miloco_card_t *binding)
 {
     int compact = smart_home_lvgl_compact();
     int card_w = device_card_width();
@@ -1909,23 +2295,15 @@ static lv_obj_t *create_miloco_card(smart_home_lvgl_t *ui,
     smart_home_lvgl_card_style(card);
     smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_SURFACE_SOFT);
 
-    {
-        const char *stable_did = g_miloco_card_dids[0];
-
-        if (g_miloco_card_did_count < SMART_HOME_MILOCO_MAX_DEVICES) {
-            stable_did =
-                g_miloco_card_dids[g_miloco_card_did_count];
-            snprintf(g_miloco_card_dids[g_miloco_card_did_count],
-                     sizeof(g_miloco_card_dids[0]), "%.23s", device->did);
-            g_miloco_card_did_count++;
-        }
-        /* 无论有无 controls 都可点击：controls 为空的设备抽屉里显示
-         * "暂无可控项"占位（spec 拉取中/失败），而不是永远点不动。 */
-        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_user_data(card, (void *)stable_did);
-        lv_obj_add_event_cb(card, miloco_card_click_cb, LV_EVENT_CLICKED,
-                            ui);
-    }
+    binding->card = card;
+    binding->category = device->category;
+    binding->controllable = device->controllable;
+    snprintf(binding->did, sizeof(binding->did), "%s", device->did);
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(card, binding->did);
+    smart_home_lvgl_press_feedback(card);
+    lv_obj_add_event_cb(card, miloco_card_click_cb, LV_EVENT_CLICKED, ui);
+    lv_obj_add_event_cb(card, miloco_card_deleted, LV_EVENT_DELETE, binding);
 
     content = lv_obj_create(card);
     lv_obj_remove_style_all(content);
@@ -1946,6 +2324,7 @@ static lv_obj_t *create_miloco_card(smart_home_lvgl_t *ui,
     label = smart_home_lvgl_label_create(content, device->name,
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
                                          font_size + 1);
+    binding->name = label;
     lv_obj_set_width(label, lv_pct(100));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
@@ -1959,19 +2338,24 @@ static lv_obj_t *create_miloco_card(smart_home_lvgl_t *ui,
     label = smart_home_lvgl_label_create(content, room_text,
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
                                          font_size);
+    binding->room = label;
     label = smart_home_lvgl_label_create(
-        content, device->online ? "Online" : "Offline",
+        content, device->online ? "在线" : "离线",
         device->online ? SMART_HOME_UI_COLOR_SUCCESS :
                          SMART_HOME_UI_COLOR_TEXT_MUTED,
         font_size);
 
+    binding->status = label;
     if (device->controllable) {
         sw = lv_switch_create(content);
+        smart_home_lvgl_press_feedback(sw);
+        binding->power = sw;
         lv_obj_set_size(sw, 40, 22);
         if (device->power_on) {
             lv_obj_add_state(sw, LV_STATE_CHECKED);
         }
         lv_obj_set_user_data(sw, lv_obj_get_user_data(card));
+        if (!device->online) lv_obj_add_state(sw, LV_STATE_DISABLED);
         lv_obj_add_event_cb(sw, miloco_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
     }
     return card;
@@ -1990,6 +2374,7 @@ static void create_miloco_placeholder_card(smart_home_lvgl_t *ui)
     smart_home_lvgl_card_style(card);
     smart_home_lvgl_set_bg(card, SMART_HOME_UI_COLOR_SURFACE_SOFT);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    ui->miloco_placeholder = card;
 
     label = smart_home_lvgl_label_create(card, "米家设备",
                                          SMART_HOME_UI_COLOR_TEXT_PRIMARY,
@@ -2004,22 +2389,92 @@ static void create_miloco_placeholder_card(smart_home_lvgl_t *ui)
 
 static void append_miloco_cards(smart_home_lvgl_t *ui)
 {
-    smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
+    smart_home_miloco_device_t *devices;
+    size_t count = 0;
+    int show = device_matches_source(ui, 1);
+    int reachable = ui->app && ui->app->miloco &&
+                    smart_home_miloco_reachable(ui->app->miloco);
 
-    g_miloco_card_did_count = 0;
-    size_t count;
-    size_t i;
-
-    if (!ui || !ui->app || !ui->app->miloco) {
-        ui->miloco_revision = 0;
+    devices = smart_home_bulk_alloc(sizeof(*devices) *
+                                    SMART_HOME_MILOCO_MAX_DEVICES);
+    if (devices == NULL) {
         return;
     }
-    count = smart_home_miloco_list(ui->app->miloco, devices,
-                                   SMART_HOME_MILOCO_MAX_DEVICES,
-                                   &ui->miloco_revision);
-    for (i = 0; i < count; i++) {
-        create_miloco_card(ui, &devices[i]);
+    if (ui->app && ui->app->miloco) {
+        count = smart_home_miloco_list(ui->app->miloco, devices,
+                                      SMART_HOME_MILOCO_MAX_DEVICES, &ui->miloco_revision);
     }
+    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++) {
+        smart_home_lvgl_miloco_card_t *binding = &ui->miloco_cards[i];
+        if (!binding->card) continue;
+        size_t j;
+        for (j = 0; j < count; j++) {
+            if (show && miloco_matches_room(ui, devices[j].room) &&
+                !strcmp(binding->did, devices[j].did) &&
+                binding->category == (int)devices[j].category &&
+                binding->controllable == devices[j].controllable) break;
+        }
+        if (j == count) lv_obj_delete(binding->card);
+    }
+    if (show && !reachable && !ui->miloco_placeholder) create_miloco_placeholder_card(ui);
+    else if ((!show || reachable) && ui->miloco_placeholder) {
+        lv_obj_delete(ui->miloco_placeholder);
+        ui->miloco_placeholder = NULL;
+    }
+    for (size_t i = 0; show && i < count; i++) {
+        smart_home_miloco_device_t *dev = &devices[i];
+        if (!miloco_matches_room(ui, dev->room)) continue;
+        smart_home_lvgl_miloco_card_t *binding = NULL;
+        for (size_t j = 0; j < SMART_HOME_MILOCO_MAX_DEVICES; j++) {
+            if (ui->miloco_cards[j].card && !strcmp(ui->miloco_cards[j].did, dev->did)) {
+                binding = &ui->miloco_cards[j]; break;
+            }
+        }
+        if (!binding) {
+            for (size_t j = 0; j < SMART_HOME_MILOCO_MAX_DEVICES; j++) {
+                if (!ui->miloco_cards[j].card) { binding = &ui->miloco_cards[j]; break; }
+            }
+            if (!binding) break;
+            create_miloco_card(ui, dev, binding);
+        }
+        char room[48];
+        snprintf(room, sizeof(room), "%s · 米家", miloco_room_name(dev->room));
+        miloco_label_update(binding->name, dev->name);
+        miloco_label_update(binding->room, room);
+        miloco_label_update(binding->status, !reachable ? "状态未知" :
+                            dev->online ? "在线" : "离线");
+        lv_obj_set_style_text_color(binding->status, reachable && dev->online ?
+            SMART_HOME_UI_COLOR_SUCCESS : SMART_HOME_UI_COLOR_TEXT_MUTED, 0);
+        if (binding->power) {
+            int desired = lv_obj_has_state(binding->power, LV_STATE_CHECKED);
+            if (reachable && dev->online) lv_obj_remove_state(binding->power, LV_STATE_DISABLED);
+            else lv_obj_add_state(binding->power, LV_STATE_DISABLED);
+            if (binding->pending && reachable && dev->online && desired != dev->power_on &&
+                lv_tick_elaps(binding->submitted_at) < MILOCO_CONFIRM_WAIT_MS) continue;
+            if (binding->pending && desired != dev->power_on)
+                miloco_feedback(ui, "设备状态尚未确认，请稍后重试", 1);
+            if (binding->pending && desired == dev->power_on)
+                miloco_feedback(ui, "设备状态已更新", 0);
+            binding->pending = 0;
+            miloco_restore_switch(binding->power, dev->power_on);
+        }
+    }
+
+    smart_home_bulk_free(devices);
+}
+
+static int miloco_pending_expired(smart_home_lvgl_t *ui)
+{
+    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++) {
+        if (ui->miloco_cards[i].pending &&
+            lv_tick_elaps(ui->miloco_cards[i].submitted_at) >= MILOCO_CONFIRM_WAIT_MS) return 1;
+    }
+    miloco_sheet_context_t *context = ui->miloco_sheet_context;
+    for (size_t i = 0; context && i < context->request_count; i++) {
+        if (context->requests[i].pending &&
+            lv_tick_elaps(context->requests[i].submitted_at) >= MILOCO_CONFIRM_WAIT_MS) return 1;
+    }
+    return 0;
 }
 
 static void miloco_timer_cb(lv_timer_t *timer)
@@ -2031,7 +2486,9 @@ static void miloco_timer_cb(lv_timer_t *timer)
         return;
     }
     (void)smart_home_miloco_list(ui->app->miloco, NULL, 0, &revision);
-    if (revision != ui->miloco_revision) {
+    if (revision != ui->miloco_polled_revision ||
+        (ui->active_tab == SMART_HOME_TAB_DEVICES && miloco_pending_expired(ui))) {
+        ui->miloco_polled_revision = revision;
         if (ui->miloco_sheet) {
             smart_home_lvgl_miloco_sheet_refresh(ui);
         }
@@ -2066,24 +2523,15 @@ static void rebuild_device_cards(smart_home_lvgl_t *ui)
         return;
     }
 
-    lv_obj_clean(ui->panel_grid);
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    /* 抽屉挂在 screen_panel 上，lv_obj_clean(panel_grid) 删不到它；
-     * 这里绝不能显式关抽屉——worker 轮询触发的全网格重建会把用户
-     * 刚打开的抽屉立即杀掉（表现为二级菜单弹不出/一闪而过）。
-     * 抽屉生命周期由 miloco_timer_cb 的 sheet_refresh 全权管理：
-     * 设备消失时 build 找不到 did 自然关闭。 */
-    /* 米家桥接模式下设备页只呈现真实设备（米家 + Node）；本地虚拟
-     * 设备不上屏，仅保留给 Agent 本地工具与场景使用。 */
-    for (slot = 0; slot < SMART_HOME_MAX_DEVICES; slot++) {
-        ui->device_cards[slot] = NULL;
+    if (miloco_sync_room_options(ui)) {
+        rebuild_room_filters(ui);
     }
-    ui->panel_add_btn = NULL;
-    if (!ui->app || !ui->app->miloco ||
-        !smart_home_miloco_reachable(ui->app->miloco)) {
-        create_miloco_placeholder_card(ui);
-    }
+    /* 只对新增/移除设备调整对象，状态值在原控件上更新。 */
+    (void)slot;
+    append_miloco_cards(ui);
 #else
+    lv_obj_clean(ui->panel_grid);
     for (slot = 0; slot < SMART_HOME_MAX_DEVICES; slot++) {
         smart_home_device_t *device;
 
@@ -2104,14 +2552,7 @@ static void rebuild_device_cards(smart_home_lvgl_t *ui)
 #endif
 
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
-    if (device_matches_source(ui, 2)) {
-        append_online_remote_node_cards(ui);
-    }
-#endif
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    if (device_matches_source(ui, 1)) {
-        append_miloco_cards(ui);
-    }
+    append_online_remote_node_cards(ui);
 #endif
 }
 
@@ -2132,6 +2573,7 @@ static lv_obj_t *create_sensor_entry(lv_obj_t *row,
     lv_obj_set_style_bg_opa(entry, LV_OPA_TRANSP, 0);
     lv_obj_set_style_radius(entry, 8, 0);
     lv_obj_set_user_data(entry, (void *)(intptr_t)type);
+    smart_home_lvgl_press_feedback(entry);
     lv_obj_add_event_cb(entry, env_click_cb, LV_EVENT_CLICKED, ui);
 
     if (type == ENV_HUM) {
@@ -2188,7 +2630,7 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
     int content_w = smart_home_lvgl_content_w();
     int pad_x = smart_home_lvgl_pad_x();
     int compact = smart_home_lvgl_compact();
-    int grid_y = SMART_HOME_TOPBAR_H + (compact ? 84 : 122);
+    int grid_y = SMART_HOME_TOPBAR_H + (compact ? 108 : 146);
     int sensor_h = compact ? 26 : 30;
     int sensor_bottom =
         SMART_HOME_NAV_H + SMART_HOME_NAV_BOTTOM_PAD + (compact ? 8 : 16);
@@ -2197,7 +2639,11 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
                  sensor_bottom -
                  sensor_h -
                  (compact ? 6 : 12);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    char room_options[MILOCO_ROOM_OPTIONS_SIZE];
+#else
     char room_options[128];
+#endif
 
     if (grid_h < (compact ? 84 : 120)) {
         grid_h = compact ? 84 : 120;
@@ -2220,8 +2666,13 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
                  SMART_HOME_TOPBAR_H + (compact ? 10 : 26));
 
     ui->panel_room_dd = lv_dropdown_create(screen);
+    smart_home_lvgl_press_feedback(ui->panel_room_dd);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    miloco_room_options(ui, room_options, sizeof(room_options));
+#else
     room_dropdown_options(ui->device_state, room_options,
                           sizeof(room_options), 1);
+#endif
     lv_dropdown_set_options(ui->panel_room_dd, room_options);
     /* Keep the existing selection contract as the source of truth while the
      * product page exposes it as touch-friendly room chips below. */
@@ -2241,7 +2692,8 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
 
     /* 来源筛选：全部/米家/Node，与房间筛选互补。 */
     ui->panel_source_dd = lv_dropdown_create(screen);
-    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\nNode");
+    smart_home_lvgl_press_feedback(ui->panel_source_dd);
+    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\n节点");
     lv_obj_set_style_text_font(ui->panel_source_dd, smart_home_lvgl_font(13), 0);
     lv_obj_t *source_list = lv_dropdown_get_list(ui->panel_source_dd);
     if (source_list) {
@@ -2268,6 +2720,12 @@ void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui)
     lv_obj_set_scrollbar_mode(filter_row, LV_SCROLLBAR_MODE_OFF);
     ui->panel_filter_row = filter_row;
     rebuild_room_filters(ui);
+
+    ui->panel_feedback_label = smart_home_lvgl_label_create(
+        screen, "", SMART_HOME_UI_COLOR_TEXT_MUTED, 12);
+    lv_obj_set_width(ui->panel_feedback_label, content_w);
+    lv_label_set_long_mode(ui->panel_feedback_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(ui->panel_feedback_label, pad_x, grid_y - 22);
 
     grid = lv_obj_create(screen);
     lv_obj_remove_style_all(grid);

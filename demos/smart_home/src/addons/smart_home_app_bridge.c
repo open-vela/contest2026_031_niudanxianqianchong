@@ -5,7 +5,6 @@
 #include "../agent/smart_home_agent_run_service.h"
 #include "../smart_home_cpu_debug.h"
 #include "../smart_home_memory.h"
-#include <cagent/runtime_openvela.h>
 
 #include <cagent_addons/ws_frame.h>
 

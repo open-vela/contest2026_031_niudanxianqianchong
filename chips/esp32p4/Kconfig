@@ -42,6 +42,89 @@ config ARCH_CHIP_ESP32P4
 
 if ARCH_CHIP_ESP32P4
 
+config ESP32P4_DMA2D
+	bool "Experimental 2D-DMA image copy"
+	depends on EXPERIMENTAL && BUILD_FLAT && !PM
+	depends on !SMP || ESP32P4_SMP_GRAPHICS_CPU0
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Enable interrupt-driven RGB565 ROI copies with linked descriptors.
+		This port exclusively owns DMA2D; do not combine it with another
+		DMA2D channel allocator (including the IDF JPEG driver).
+
+config ESP32P4_PPA
+	bool "Experimental PPA image operations"
+	depends on ESP32P4_DMA2D
+	---help---
+		Enable fill, scale/rotate/mirror, blend and selected RGB/YUV
+		conversions using the same DMA2D owner and completion path.
+
+config ESP32P4_ESPRESSIF_TOOLCHAIN
+	bool "Build ESP32-P4 with the Espressif riscv32-esp-elf toolchain"
+	default n
+	---help---
+		Use Espressif's crosstool-NG riscv32-esp-elf GCC for the whole
+		firmware, the same way ESP32-S3 uses xtensa-esp32s3-elf.  Required
+		by packages that emit Espressif PIE (xespv) instructions, such as
+		packages/esp-nn.
+
+		The toolchain must be on PATH as riscv32-esp-elf-gcc (fixed
+		version esp-14.2.0_20260121 or newer, which is the first release
+		carrying ESP32-P4 ECO5 / xespv support).
+
+		Defaults to n so that a plain checkout builds with the generic
+		riscv-none-elf toolchain shipped in prebuilts; enable it explicitly
+		per configuration.
+
+config ESP32P4_SMP
+	bool "Experimental ESP32-P4 dual-core SMP"
+	depends on SMP && EXPERIMENTAL
+	depends on BUILD_FLAT && !ARCH_USE_S_MODE
+	depends on !ESP32P4_SELECTS_REV_LESS_V3 && !ARCH_RV_SHADOW_STACK
+	depends on ARCH_INTERRUPTSTACK > 0
+	depends on !PM
+	---help---
+		Enable the initial HP CPU1 startup and cross-core scheduler port.
+		This requires the project RISC-V custom SMP patch. Power management
+		remains disabled. PSRAM and Flash MTD require separate experimental
+		opt-ins for board validation.
+
+config ESP32P4_SMP_PSRAM
+	bool "Experimental PSRAM access with SMP"
+	depends on ESP32P4_SMP
+	default n
+	---help---
+		Allow PSRAM initialization and mapping on CPU0 before CPU1 starts.
+		Use the smp_psram profile to validate both CPUs before enabling
+		display scanout. Runtime remapping and Flash MTD remain out of scope.
+
+config ESP32P4_SMP_SPIFLASH
+	bool "Experimental Flash MTD and LittleFS with SMP"
+	depends on ESP32P4_SMP
+	default n
+	---help---
+		Allow the SPI Flash MTD and LittleFS stack to be used while both HP
+		CPUs are running.  Flash operations serialize through the HAL cache
+		and IPC locks; use the smp_fs profile for concurrent validation.
+
+config ESP32P4_SMP_GRAPHICS_CPU0
+	bool "Experimental DMA2D/PPA coexistence on CPU0"
+	depends on ESP32P4_SMP
+	default n
+	---help---
+		Allow DMA2D/PPA probes alongside the SMP SmartHome firmware.
+		Initialize and use graphics only from threads pinned to CPU0.
+		Buffers must remain private to CPU0 until the job is reclaimed.
+		This does not enable cross-core graphics or accelerate the UI.
+		Graphics initialization is deferred until the probe runs.
+
+config ARCH_CUSTOM_SMP
+	bool
+	default y if ESP32P4_SMP
+
+config SMP_NCPUS
+	range 2 2 if ESP32P4_SMP
+
 # ESP32-P4 shares the generic Espressif flash, bootloader and SDK options.
 # This source is required so the selected flash size reaches .config and the
 # generic image rule can derive FLASH_SIZE for esptool.

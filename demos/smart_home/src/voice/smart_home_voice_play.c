@@ -71,6 +71,8 @@ static void *g_voice_worker_stack_alloc;   /* bulk 原始指针（释放用） *
 static void *g_voice_worker_stack;         /* 16B 对齐后交给 pthread */
 static bool g_voice_started;
 static bool g_voice_stop_requested;
+static bool g_voice_error_pending;
+static smart_home_voice_result_t g_voice_last_error;
 
 /****************************************************************************
  * Private Functions
@@ -82,6 +84,7 @@ static void *voice_worker_main(void *arg)
   uint8_t *pcm;
   size_t bytes;
   uint32_t rate;
+  smart_home_voice_result_t result;
   int ret;
 
   (void)arg;
@@ -111,7 +114,11 @@ static void *voice_worker_main(void *arg)
 
       pcm = NULL;
       bytes = 0;
-      ret = smart_home_tts_synth(job->text, &pcm, &bytes, &rate);
+      rate = 0;
+      printf("[voice] job: text_len=%zu\n", strlen(job->text));
+      ret = smart_home_tts_synth_ex(job->text, &pcm, &bytes, &rate, &result);
+      printf("[voice] synth: ret=%d pcm=%p bytes=%zu rate=%lu\n",
+             ret, (void *)pcm, bytes, (unsigned long)rate);
       if (ret == 0)
         {
           pthread_mutex_lock(&g_voice_mutex);
@@ -121,8 +128,18 @@ static void *voice_worker_main(void *arg)
 
           if (!cancelled)
             {
-              smart_home_voice_player_play_mem(pcm, bytes, rate,
-                                               &g_voice_abort);
+              int play_ret = smart_home_voice_player_play_mem(
+                  pcm, bytes, rate, &g_voice_abort);
+              printf("[voice] play: ret=%d\n", play_ret);
+              if (play_ret != -EINTR) {
+                ret = play_ret;
+                result.code = play_ret;
+                result.stage = SMART_HOME_VOICE_PLAYBACK;
+              }
+            }
+          else
+            {
+              printf("[voice] play: skipped (cancelled)\n");
             }
 
           smart_home_bulk_free(pcm);
@@ -136,6 +153,10 @@ static void *voice_worker_main(void *arg)
 
       pthread_mutex_lock(&g_voice_mutex);
       g_voice_state = VOICE_PLAY_IDLE;
+      if (ret != 0) {
+        g_voice_last_error = result;
+        g_voice_error_pending = true;
+      }
     }
 
   pthread_mutex_unlock(&g_voice_mutex);
@@ -168,6 +189,7 @@ int voice_play_init(void)
          config.enabled, config.backend_id);
 
   g_voice_stop_requested = false;
+  g_voice_error_pending = false;
   g_voice_queue = NULL;
   g_voice_queue_tail = NULL;
   g_voice_state = VOICE_PLAY_IDLE;
@@ -355,4 +377,16 @@ int voice_play_announce_enabled(void)
 
   smart_home_tts_config_load(&config);
   return config.enabled;
+}
+
+int voice_play_take_error(smart_home_voice_result_t *result)
+{
+  int pending;
+  if (result == NULL) return 0;
+  pthread_mutex_lock(&g_voice_mutex);
+  pending = g_voice_error_pending;
+  if (pending) *result = g_voice_last_error;
+  g_voice_error_pending = false;
+  pthread_mutex_unlock(&g_voice_mutex);
+  return pending;
 }

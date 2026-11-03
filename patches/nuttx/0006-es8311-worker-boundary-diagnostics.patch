@@ -9,17 +9,29 @@ The receive error log is rate-limited to the first consecutive failure so a
 high-priority worker cannot flood the console during diagnosis. Apply after
 0005-es8311-start-boundary-diagnostics.patch.
 
-diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
+Use contextual hunks so the wait log precedes the blocking receive and
+the error counter precedes continue when replayed on the pinned baseline.
+
 --- a/drivers/audio/es8311.c
 +++ b/drivers/audio/es8311.c
-@@ -2057,0 +2058 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+@@ -2054,9 +2054,13 @@
+   struct audio_msg_s msg;
+   FAR struct ap_buffer_s *apb;
+   int msglen;
 +  int ret;
-@@ -2058,0 +2060,2 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+   unsigned int prio;
 +  unsigned int mq_errors = 0;
 +  bool first_iteration = true;
-@@ -2060,0 +2063 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+
+   audinfo("ES8311 worker thread starting\n");
 +  syslog(LOG_INFO, "INFO: ES8311 worker: entered\n");
-@@ -2091 +2095,14 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+
+ #ifndef CONFIG_AUDIO_EXCLUDE_STOP
+   priv->terminating = false;
+@@ -2085,10 +2089,29 @@
+         {
+           /* Check if we can process more audio buffers */
+
 -          es8311_processbegin(priv);
 +          if (first_iteration)
 +            {
@@ -35,14 +47,22 @@ diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
 +                     "INFO: ES8311 worker: process end ret=%d inflight=%d\n",
 +                     ret, priv->inflight);
 +            }
-@@ -2095,0 +2111,6 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+         }
+
+       /* Wait for messages from our message queue */
++
 +      if (first_iteration)
 +        {
 +          syslog(LOG_INFO, "INFO: ES8311 worker: mq wait\n");
 +          first_iteration = false;
 +        }
-+
-@@ -2102,0 +2124,8 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+
+       msglen = file_mq_receive(&priv->mq, (FAR char *)&msg,
+                                sizeof(msg), &prio);
+@@ -2097,8 +2120,20 @@
+
+       if (msglen < sizeof(struct audio_msg_s))
+         {
 +          if (mq_errors == 0)
 +            {
 +              syslog(LOG_ERR,
@@ -51,8 +71,12 @@ diff --git a/drivers/audio/es8311.c b/drivers/audio/es8311.c
 +            }
 +
 +          mq_errors++;
-@@ -2106,0 +2136,4 @@ static void *es8311_workerthread(pthread_addr_t pvarg)
+           auderr("Message too small: %d\n", msglen);
+           continue;
+         }
++
 +      mq_errors = 0;
 +      syslog(LOG_INFO, "INFO: ES8311 worker: mq received len=%d id=%d\n",
 +             msglen, msg.msg_id);
-+
+
+       /* Process the message */

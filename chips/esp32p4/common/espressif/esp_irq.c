@@ -42,6 +42,7 @@
 
 #include "esp_gpio.h"
 #include "esp_irq.h"
+#include "esp_smp.h"
 #include "esp_rtc_gpio.h"
 
 #include "esp_attr.h"
@@ -137,8 +138,15 @@ static void esp_cpuint_initialize(void)
   /* Set CPU interrupt threshold level */
 
   esprv_int_set_threshold(RVHAL_INTR_ENABLE_THRESH);
-  rv_utils_intr_global_enable();
 }
+
+#ifdef CONFIG_SMP
+void esp_irq_initialize_cpu(void)
+{
+  esp_cpu_intr_disable(UINT32_MAX);
+  esp_cpuint_initialize();
+}
+#endif
 
 #ifdef CONFIG_ESPRESSIF_IRAM_ISR_DEBUG
 
@@ -302,7 +310,10 @@ void up_irqinitialize(void)
   /* Initialize GPIO interrupt support */
 
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
-  esp_gpioirqinitialize();
+  if (esp_gpioirqinitialize() < 0)
+    {
+      PANIC();
+    }
 #endif
 
   /* Initialize RTCIO interrupt support */

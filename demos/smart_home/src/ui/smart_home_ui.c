@@ -12,16 +12,12 @@
 static const char *event_type_name(agent_event_type_t type)
 {
     switch (type) {
-    case AGENT_EVENT_RUN_START:       return " RUN_START";
-    case AGENT_EVENT_RUN_DONE:        return " RUN_DONE ";
-    case AGENT_EVENT_ITERATION_START: return "ITERATION";
-    case AGENT_EVENT_MODEL_REQUEST:   return "MODEL_REQ";
-    case AGENT_EVENT_MODEL_RESPONSE:  return "MODEL_RESP";
-    case AGENT_EVENT_TOOL_CALL:       return "TOOL_CALL";
-    case AGENT_EVENT_TOOL_RESULT:     return "TOOL_RES";
-    case AGENT_EVENT_ERROR:           return "   ERROR  ";
-    case AGENT_EVENT_CANCELLED:       return "CANCELLED ";
-    case AGENT_EVENT_TIMEOUT:         return " TIMEOUT  ";
+    case AGENT_EVENT_TURN_BEGIN: return "TURN_BEGIN";
+    case AGENT_EVENT_MODEL_BEGIN: return "MODEL_BEGIN";
+    case AGENT_EVENT_MODEL_END: return "MODEL_END";
+    case AGENT_EVENT_TOOL_BEGIN: return "TOOL_BEGIN";
+    case AGENT_EVENT_TOOL_END: return "TOOL_END";
+    case AGENT_EVENT_TURN_END: return "TURN_END";
     default:                          return " UNKNOWN  ";
     }
 }
@@ -162,7 +158,7 @@ typedef struct {
     size_t count;
 } node_status_writer_t;
 
-static int print_node_tool_status(const agent_tool_info_t *tool,
+static int print_node_tool_status(const smart_home_tool_info_t *tool,
                                   void *user_data)
 {
     node_status_writer_t *writer = user_data;
@@ -232,81 +228,18 @@ static int handle_node_command(smart_home_agent_app_t *app, const char *input)
 
 void smart_home_ui_event_cb(const agent_event_t *event, void *user_data)
 {
-    uint64_t *run_start_ms = (uint64_t *)user_data;
+    uint64_t *start = user_data;
     uint64_t elapsed = 0u;
-
-    if (!event) {
-        return;
+    if (!event) return;
+    if (start) {
+        if (event->type == AGENT_EVENT_TURN_BEGIN) *start = event->timestamp_ms;
+        if (event->timestamp_ms >= *start) elapsed = event->timestamp_ms - *start;
     }
-
-    if (run_start_ms) {
-        if (event->type == AGENT_EVENT_RUN_START) {
-            *run_start_ms = event->timestamp_ms;
-        }
-        elapsed = *run_start_ms ? event->timestamp_ms - *run_start_ms : 0u;
-    }
-
-    switch (event->type) {
-    case AGENT_EVENT_RUN_START:
-        fprintf(stderr,
-                "\n%10s | %-11s | iter=%-2" PRIu32 " | %s\n",
-                "+0ms",
-                event_type_name(event->type),
-                event->iteration,
-                event->message ? event->message : "");
-        break;
-
-    case AGENT_EVENT_ITERATION_START:
-    case AGENT_EVENT_MODEL_REQUEST:
-    case AGENT_EVENT_MODEL_RESPONSE:
-    case AGENT_EVENT_RUN_DONE:
-        fprintf(stderr,
-                "%8llums | %-11s | iter=%-2" PRIu32 " | err=%d | %s\n",
-                (unsigned long long)elapsed,
-                event_type_name(event->type),
-                event->iteration,
-                event->error_code,
-                event->message ? event->message : "");
-        break;
-
-    case AGENT_EVENT_TOOL_CALL:
-        fprintf(stderr,
-                "%8llums | %-11s | iter=%-2" PRIu32 " | tool=%-16s | id=%s\n",
-                (unsigned long long)elapsed,
-                event_type_name(event->type),
-                event->iteration,
-                event->tool_name ? event->tool_name : "-",
-                event->tool_call_id ? event->tool_call_id : "-");
-        break;
-
-    case AGENT_EVENT_TOOL_RESULT:
-        fprintf(stderr,
-                "%8llums | %-11s | iter=%-2" PRIu32
-                " | tool=%-16s | id=%s | err=%d\n",
-                (unsigned long long)elapsed,
-                event_type_name(event->type),
-                event->iteration,
-                event->tool_name ? event->tool_name : "-",
-                event->tool_call_id ? event->tool_call_id : "-",
-                event->error_code);
-        break;
-
-    case AGENT_EVENT_ERROR:
-    case AGENT_EVENT_CANCELLED:
-    case AGENT_EVENT_TIMEOUT:
-        fprintf(stderr,
-                "%8llums | %-11s |          | err=%d | %s\n",
-                (unsigned long long)elapsed,
-                event_type_name(event->type),
-                event->error_code,
-                event->message ? event->message : "");
-        break;
-
-    default:
-        break;
-    }
-
-    fflush(stderr);
+    fprintf(stderr, "%8llums | %-11s | model=%" PRIu32 " | status=%d | tool=%.*s | id=%.*s\n",
+            (unsigned long long)elapsed, event_type_name(event->type),
+            event->summary.model_calls, event->status,
+            (int)event->tool_call.name.size, event->tool_call.name.data ? event->tool_call.name.data : "",
+            (int)event->tool_call.id.size, event->tool_call.id.data ? event->tool_call.id.data : "");
 }
 
 int smart_home_ui_run_once(smart_home_agent_app_t *app, const char *input)
@@ -315,8 +248,8 @@ int smart_home_ui_run_once(smart_home_agent_app_t *app, const char *input)
     int ret;
 
     ret = smart_home_agent_run(app, input, output, sizeof(output));
-    if (ret == AGENT_OK) {
-        printf("\nassistant: %s\n", output);
+    if (ret == AGENT_OK || ret == AGENT_ERROR_TRUNCATED) {
+        printf("\nassistant: %s%s\n", output, ret == AGENT_ERROR_TRUNCATED ? " [reply truncated]" : "");
     } else {
         printf("\nERROR (%d): %s\n", ret, output[0] ? output : "no detail");
     }
@@ -344,6 +277,11 @@ int smart_home_ui_run(smart_home_agent_app_t *app)
 
         if (strcmp(input, "quit") == 0 || strcmp(input, "exit") == 0) {
             break;
+        }
+
+        if (strcmp(input, "clear") == 0) {
+            printf("clear session: %d\n", smart_home_agent_app_clear_session(app));
+            continue;
         }
 
         if (handle_env_command(app, input)) {

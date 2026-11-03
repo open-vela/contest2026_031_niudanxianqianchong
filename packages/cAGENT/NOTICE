@@ -1,9 +1,23 @@
-cAGENT
+cAGENT V2
+=========
+
+The V2 Core, model provider and most ports retain the MIT license in LICENSE.
+The bundled jsmn header retains its own MIT copyright and license notice.
+
+Apache-2.0 TLS runtime lineage
+-----------------------------
+ports/tls/src/tls_core.c is derived from openvela packages/ai_agent through
+the legacy contest cAGENT runtime. Its SPDX and contributor notices remain
+in the source file. The following attribution is retained from the legacy
+cAGENT NOTICE for that derived runtime code:
+
 Copyright 2024 Xiaomi Corporation
 
 This product includes software developed at
 Xiaomi Corporation (https://www.mi.com/).
 
-cAGENT is an in-tree embedded Agent core built for this project. Its
-architecture and selected runtime techniques reference the openvela
-packages/ai_agent project, which is distributed under the Apache License 2.0.
+When CAGENT_PORT_OPENVELA_TLS is enabled, the port links against mbedTLS:
+Copyright The Mbed TLS Contributors
+SPDX-License-Identifier: Apache-2.0
+
+The Apache License 2.0 is provided in the repository root LICENSE.

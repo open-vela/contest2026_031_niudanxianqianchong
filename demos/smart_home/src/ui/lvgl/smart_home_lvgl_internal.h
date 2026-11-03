@@ -15,9 +15,19 @@ extern "C" {
 
 #define SMART_HOME_SCR_W 1024
 #define SMART_HOME_SCR_H 600
-#define SMART_HOME_TOPBAR_H 64
+#define SMART_HOME_TOPBAR_H 56
+#define SMART_HOME_UI_DEFAULT_CLOCK "12:00"
+#define SMART_HOME_UI_DEFAULT_WEATHER "晴天"
 #define SMART_HOME_NAV_H 64
 #define SMART_HOME_NAV_BOTTOM_PAD 4
+
+/* V9 bottom navigation geometry (1024x600). */
+#define SMART_HOME_NAV_COUNT 3
+#define SMART_HOME_NAV_ITEM_W 216
+#define SMART_HOME_NAV_ITEM_H 52
+#define SMART_HOME_NAV_ITEM_Y 6
+#define SMART_HOME_NAV_X0 156
+#define SMART_HOME_NAV_STEP 248
 #define SMART_HOME_PAD_X 8
 #define SMART_HOME_PAD_Y 6
 
@@ -80,22 +90,45 @@ static inline int smart_home_lvgl_pad_x(void)
 
 enum {
     SMART_HOME_TAB_HOME = 0,
-    SMART_HOME_TAB_DEVICES,
     SMART_HOME_TAB_CHAT,
+    SMART_HOME_TAB_SETTINGS,
+    /* Legacy screens retained during the V9 migration.  They are not
+     * reachable from the three-item bottom bar. */
+    SMART_HOME_TAB_DEVICES,
     SMART_HOME_TAB_SECURITY,
     SMART_HOME_TAB_MORE,
     SMART_HOME_TAB_COUNT,
 };
 
-/* Legacy names keep the existing device and settings modules buildable
- * while their product entry points are migrated to the five-page shell. */
-#define SMART_HOME_TAB_PANEL    SMART_HOME_TAB_DEVICES
-#define SMART_HOME_TAB_SETTINGS SMART_HOME_TAB_MORE
+#define SMART_HOME_TAB_PANEL SMART_HOME_TAB_DEVICES
 
 lv_obj_t *smart_home_lvgl_build_nav_bar(lv_obj_t *screen,
                                         smart_home_lvgl_t *ui);
 
 void smart_home_lvgl_build_home_screen(smart_home_lvgl_t *ui);
+void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui);
+void smart_home_lvgl_open_scene_popup(smart_home_lvgl_t *ui);
+int smart_home_lvgl_v9_visible_card_count(void);
+void smart_home_lvgl_v9_refresh_views(smart_home_lvgl_t *ui);
+int smart_home_lvgl_v9_select_room(int index);
+void smart_home_lvgl_build_settings_screen_v9(smart_home_lvgl_t *ui);
+void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui);
+
+/* 语音服务独立面板（ASR/TTS 端点与独立密钥）。
+ * 只在 CONFIG_SMART_HOME_VOICE_ASR 或 CONFIG_SMART_HOME_VOICE_TTS 打开时编译。 */
+#if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_VOICE_TTS)
+void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui,
+                                          lv_obj_t *panel,
+                                          lv_obj_t *keyboard);
+int smart_home_lvgl_save_llm_key(smart_home_lvgl_t *ui, const char *backend,
+                                 const char *key, lv_obj_t *status,
+                                 lv_obj_t *input);
+void smart_home_lvgl_voice_settings_poll(smart_home_lvgl_t *ui);
+int smart_home_lvgl_voice_settings_busy(smart_home_lvgl_t *ui);
+void smart_home_lvgl_voice_settings_deinit(smart_home_lvgl_t *ui);
+#endif
+int smart_home_lvgl_v9_settings_category_count(void);
+int smart_home_lvgl_v9_settings_select_category(int index);
 void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_security_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui);
@@ -105,7 +138,10 @@ void smart_home_lvgl_miloco_poll_set_enabled(smart_home_lvgl_t *ui,
 void smart_home_lvgl_miloco_sheet_refresh(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_miloco_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui);
-void smart_home_lvgl_build_miloco_bind_screen(smart_home_lvgl_t *ui);
+/* 扫码绑定改为弹窗，叠在当前页面之上；close 幂等。 */
+void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui);
+void smart_home_lvgl_miloco_bind_close(smart_home_lvgl_t *ui);
+int smart_home_lvgl_miloco_bind_is_open(const smart_home_lvgl_t *ui);
 
 /* 页面公共 helper（pages.c 定义，多页复用）。 */
 lv_obj_t *page_screen(smart_home_lvgl_t *ui);
@@ -121,6 +157,7 @@ void smart_home_lvgl_refresh_home(smart_home_lvgl_t *ui);
 void smart_home_lvgl_set_camera_indicator(smart_home_lvgl_t *ui, int on);
 /* 统一时钟刷新：顶栏 + 首页卡 + 屏保（各定时器调用）。 */
 void smart_home_lvgl_update_clock(smart_home_lvgl_t *ui);
+void smart_home_lvgl_update_clock_at(smart_home_lvgl_t *ui, time_t utc);
 void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab);
 void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
                                    const char *title);
@@ -128,6 +165,8 @@ void smart_home_lvgl_refresh_network_indicators(smart_home_lvgl_t *ui);
 
 void smart_home_lvgl_build_panel_screen(smart_home_lvgl_t *ui);
 void smart_home_lvgl_build_chat_screen(smart_home_lvgl_t *ui);
+int smart_home_lvgl_chat_restore(smart_home_lvgl_t *ui);
+const char *smart_home_lvgl_tool_display_name(const char *name);
 void smart_home_lvgl_build_settings_screen(smart_home_lvgl_t *ui);
 /* 服务管理独立屏（更多页第二行卡片入口）。 */
 void smart_home_lvgl_build_model_screen(smart_home_lvgl_t *ui);
@@ -138,6 +177,7 @@ void smart_home_lvgl_refresh_tool_directory(smart_home_lvgl_t *ui);
 void smart_home_lvgl_settings_deinit(void);
 
 void smart_home_lvgl_chat_send_text(smart_home_lvgl_t *ui, const char *text);
+int smart_home_lvgl_chat_clear(smart_home_lvgl_t *ui);
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
 /* PTT 语音输入：LVGL 线程调用；finish 在 ASR 结果分发后复位按钮。 */
 void smart_home_lvgl_chat_asr_finish(smart_home_lvgl_t *ui);

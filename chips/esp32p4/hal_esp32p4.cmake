@@ -150,13 +150,13 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/log
     ${ESP_HAL_3RDPARTY_REPO}/components/log/include
     ${ESP_HAL_3RDPARTY_REPO}/components/log/src/log_level/tag_log_level
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include/aes
+    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/psa_driver/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/core
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/mbedtls/tf-psa-crypto/include
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/include/aes
-    ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/psa_driver/include
     ${ESP_HAL_3RDPARTY_REPO}/components/riscv/include
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/include
@@ -186,7 +186,7 @@ else()
        ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/register/hw_ver3)
 endif()
 
-target_include_directories(arch PRIVATE ${ESP32P4_INCLUDES})
+target_include_directories(arch BEFORE PRIVATE ${ESP32P4_INCLUDES})
 
 # ##############################################################################
 # Linker Scripts (from hal_esp32p4.mk)
@@ -557,6 +557,20 @@ if(CONFIG_ESPRESSIF_IDF_ENV_FPGA)
        ${ESP_HAL_3RDPARTY_REPO}/components/esp_system/fpga_overrides_rng.c)
   target_link_options(nuttx PRIVATE -u esp_common_include_fpga_overrides_clk -u
                       esp_common_include_fpga_overrides_rng)
+endif()
+
+if(CONFIG_ESP32P4_SMP)
+  list(APPEND HAL_SRCS
+       ${ESP_HAL_3RDPARTY_REPO}/nuttx/src/components/esp_system/esp_ipc.c)
+  # CPU retention requires a separate ISR IPC port; PM is disabled here.
+  list(REMOVE_ITEM HAL_SRCS
+       ${ESP_HAL_3RDPARTY_REPO}/components/esp_hw_support/lowpower/port/${CHIP_SERIES}/sleep_cpu.c)
+endif()
+
+if(CONFIG_ESP32P4_PPA)
+  target_include_directories(arch PRIVATE
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_ppa/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_ppa/esp32p4/include)
 endif()
 
 target_sources(arch PRIVATE ${HAL_SRCS})

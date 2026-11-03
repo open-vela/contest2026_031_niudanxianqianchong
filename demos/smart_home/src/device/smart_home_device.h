@@ -7,7 +7,10 @@
 
 #define SMART_HOME_MAX_DEVICES 8
 #define SMART_HOME_MAX_ROOMS 6
-#define SMART_HOME_ROOM_NAME_SIZE 16
+#define SMART_HOME_ROOM_NAME_SIZE 24
+#define SMART_HOME_ROOM_BINDINGS 17
+#define SMART_HOME_BOARD_CAMERA_KEY "board:camera:0"
+#define SMART_HOME_ROOM_KEY_SIZE 48
 #define SMART_HOME_DEVICE_NAME_SIZE 32
 
 typedef enum {
@@ -30,6 +33,8 @@ typedef struct {
 
 typedef struct {
     smart_home_device_t devices[SMART_HOME_MAX_DEVICES];
+    struct { char key[SMART_HOME_ROOM_KEY_SIZE]; char room[SMART_HOME_ROOM_NAME_SIZE]; }
+        room_bindings[SMART_HOME_ROOM_BINDINGS];
     char rooms[SMART_HOME_MAX_ROOMS][SMART_HOME_ROOM_NAME_SIZE];
     int room_count;
     int next_device_id;
@@ -39,6 +44,8 @@ typedef struct {
 } smart_home_state_t;
 
 void smart_home_device_init(smart_home_state_t *state);
+/** Remove only the two retired factory examples when loading older state. */
+void smart_home_device_remove_legacy_demos(smart_home_state_t *state);
 
 /* ── 序列化（state.json 持久化用） ── */
 
@@ -67,6 +74,9 @@ int smart_home_room_count(const smart_home_state_t *state);
 const char *smart_home_room_get(const smart_home_state_t *state, int index);
 int smart_home_room_index(const smart_home_state_t *state, const char *room);
 int smart_home_room_add(smart_home_state_t *state, const char *room);
+int smart_home_room_delete_and_reassign(smart_home_state_t *state,
+                                        const char *source_room,
+                                        const char *target_room);
 
 int smart_home_device_count(const smart_home_state_t *state);
 smart_home_device_t *smart_home_device_get_by_slot(smart_home_state_t *state,
@@ -102,6 +112,9 @@ int smart_home_device_set_ac(smart_home_state_t *state,
                              int mode,
                              int fan_speed,
                              int temperature);
+int smart_home_device_set_control_by_id(smart_home_state_t *state, int id,
+                                        int on, int value, int mode,
+                                        int fan_speed);
 
 int smart_home_device_set_environment(smart_home_state_t *state,
                                       int temperature,
@@ -117,5 +130,7 @@ int smart_home_device_build_status_json(const smart_home_state_t *state,
                                         char *buffer,
                                         size_t buffer_size);
 
-int smart_home_device_register_context(agent_t *agent,
-                                       smart_home_state_t *state);
+/* Stable remote keys are panel-local room overrides, independent of cloud rooms. */
+const char *smart_home_device_room_override(const smart_home_state_t *state, const char *key);
+int smart_home_device_assign_room(smart_home_state_t *state, const char *key,
+                                   const char *room);

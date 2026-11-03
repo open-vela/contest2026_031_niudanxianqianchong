@@ -20,6 +20,11 @@
 #
 ############################################################################
 
+ifeq ($(CONFIG_ESP32P4_PPA),y)
+INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)/chip/$(ESP_HAL_3RDPARTY_REPO)/components/esp_hal_ppa/include
+INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)/chip/$(ESP_HAL_3RDPARTY_REPO)/components/esp_hal_ppa/esp32p4/include
+endif
+
 # Include header paths
 
 INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)nuttx$(DELIM)$(CHIP_SERIES)$(DELIM)include
@@ -178,6 +183,19 @@ INCLUDES += $(INCDIR_PREFIX)$(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY
 ifneq ($(CONFIG_ESP32P4_SELECTS_REV_LESS_V3),y)
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.ld
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.libc.ld
+
+# The ROM libgcc table is linked unconditionally, including on soft-float
+# builds (CONFIG_ARCH_FPU unset).  Its float entries must therefore be kept
+# out by the "#ifndef __NuttX__" guards inside the script itself, not here:
+# see patches/0008-esp32p4-rom-libgcc-guard-float-symbols.patch.
+#
+# Without those guards the ROM implementations of __fixdfdi, __fixsfdi,
+# __powidf2 and the complex helpers were bound as absolute ROM symbols.  The
+# P4 ROM is built with hardware floating point, so calling one executes
+# "frrm" (CSRRS on frm) and traps as an illegal instruction on a soft-float
+# image.  Integer helpers (__divdi3, __mulsi3, __ashldi3, ...) stay bound to
+# ROM on purpose, so the ROM acceleration is retained.
+
 ARCHSCRIPT += $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_rom$(DELIM)$(CHIP_SERIES)$(DELIM)ld$(DELIM)$(CHIP_SERIES).rom.eco5.libgcc.ld
 ifeq ($(CONFIG_ESPRESSIF_DONT_USE_ROM_LIBC),y)
  # Use NuttX libc instead of ROM newlib functions
@@ -304,7 +322,9 @@ CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)periph_ctrl.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)ldo$(DELIM)esp_ldo_regulator.c
 CHIP_ASRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)lowpower$(DELIM)port$(DELIM)$(CHIP_SERIES)$(DELIM)sleep_cpu_asm.S
+ifneq ($(CONFIG_ESP32P4_SMP),y)
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)lowpower$(DELIM)port$(DELIM)$(CHIP_SERIES)$(DELIM)sleep_cpu.c
+endif
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)lowpower$(DELIM)port$(DELIM)$(CHIP_SERIES)$(DELIM)sleep_cpu_static.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)lowpower$(DELIM)port$(DELIM)$(CHIP_SERIES)$(DELIM)sleep_clock.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_hw_support$(DELIM)port$(DELIM)regdma_link.c
@@ -369,6 +389,10 @@ CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_security$(DELIM)src$(DELIM)esp_crypto_lock.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_security$(DELIM)src$(DELIM)esp_crypto_periph_clk.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_security$(DELIM)src$(DELIM)esp_hmac.c
+ifeq ($(CONFIG_ESP32P4_SMP),y)
+CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)nuttx$(DELIM)src$(DELIM)components$(DELIM)esp_system$(DELIM)esp_ipc.c
+endif
+
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_system$(DELIM)esp_err.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_system$(DELIM)esp_system.c
 CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_system$(DELIM)port$(DELIM)soc$(DELIM)$(CHIP_SERIES)$(DELIM)clk.c
