@@ -8,6 +8,7 @@ const char *smart_home_lvgl_room_display(const char *room) { return room; }
 static smart_home_miloco_device_t remote;
 static int online = 1, submit_result, completed, completion_result;
 static uint32_t request_id;
+static uint32_t dispatch_observation;
 static int32_t submitted_value;
 void *smart_home_bulk_alloc(size_t n) {
     return malloc(n);
@@ -41,6 +42,7 @@ int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
                            ? "action"
                            : "set"));
     submitted_value = value;
+    dispatch_observation = remote.controls[0].observation;
     *id = ++request_id;
     return submit_result;
 }
@@ -50,6 +52,12 @@ bool smart_home_miloco_control_result(const smart_home_miloco_t *service, uint32
     if (!completed || id != request_id)
         return false;
     *result = completion_result;
+    return true;
+}
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t id, int *result, uint32_t *observation) {
+    if (!smart_home_miloco_control_result(service, id, result)) return false;
+    *observation = dispatch_observation;
     return true;
 }
 static void flush(lv_display_t *d, const lv_area_t *a, uint8_t *p) {
@@ -245,11 +253,28 @@ int main(void) {
         "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":false,\"code\":0}]}}", &changed));
     poll(g_dialog->timer);
     assert(!c->pending && c->confirmed == 0);
+    completed = 0;
+    lv_obj_add_state(c->widget, LV_STATE_CHECKED);
+    lv_obj_send_event(c->widget, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(c->pending);
+    /* A poll while queued cannot prove a later POST reached the device. */
+    remote.controls[0].value = 1;
+    remote.controls[0].observation++;
+    dispatch_observation = remote.controls[0].observation;
+    completed = 1;
+    completion_result = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+    poll(g_dialog->timer);
+    assert(c->pending);
+    remote.controls[0].observation++;
+    poll(g_dialog->timer);
+    assert(!c->pending && c->confirmed == 1);
+    assert(strstr(lv_label_get_text(g_dialog->status), "设备当前状态已确认"));
+    completion_result = AGENT_OK;
     /* Per-property read errors disable controls without inventing a value. */
     assert(!smart_home_miloco_status_apply(&remote,
         "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":true,\"code\":-1}]}}", &changed));
     poll(g_dialog->timer);
-    assert(lv_obj_has_state(c->widget, LV_STATE_DISABLED) && c->confirmed == 0);
+    assert(lv_obj_has_state(c->widget, LV_STATE_DISABLED) && c->confirmed == 1);
     smart_home_lvgl_device_dialog_close();
     remote.control_count = 8;
     for (unsigned i = 1; i < remote.control_count; i++) {

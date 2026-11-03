@@ -176,6 +176,10 @@ int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
     uint32_t *request_id);
 bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
                                       uint32_t request_id, int *result);
+/* POST may have reached the gateway even if its response was lost or invalid. */
+#define SMART_HOME_MILOCO_RESULT_UNCONFIRMED (-10001)
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t request_id, int *result, uint32_t *dispatch_observation);
 
 /* ── 天气数据（wttr.in 文本格式，worker 每 10 分钟拉取） ────── */
 typedef struct {

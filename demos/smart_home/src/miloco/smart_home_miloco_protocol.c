@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <syslog.h>
 
 static bool integer(const cJSON *item, int32_t *value)
 {
@@ -21,6 +22,14 @@ static bool success(const cJSON *object)
     int32_t code;
     return cJSON_IsObject(object) &&
         integer(cJSON_GetObjectItemCaseSensitive(object, "code"), &code) && code == 0;
+}
+
+static bool control_success(const cJSON *object)
+{
+    int32_t code;
+    return cJSON_IsObject(object) &&
+        integer(cJSON_GetObjectItemCaseSensitive(object, "code"), &code) &&
+        (code == 0 || code == -702000000 || code == -702010000);
 }
 
 int smart_home_miloco_power_index(const smart_home_miloco_device_t *device)
@@ -145,7 +154,14 @@ int smart_home_miloco_control_reply(const char *body, const char *did,
             (s && (!integer(s, &number) || number < 0 || (unsigned)number != siid)) ||
             (p && (!integer(p, &number) || number < 0 || (unsigned)number != piid))) goto done;
     }
-    ret = success(result) ? AGENT_OK : AGENT_ERROR_TOOL_FAILED;
+    {
+        int32_t code;
+        if (!integer(cJSON_GetObjectItemCaseSensitive(result, "code"), &code))
+            goto done;
+        if (code != 0)
+            syslog(LOG_INFO, "[miloco] control item code=%ld\n", (long)code);
+        ret = control_success(result) ? AGENT_OK : AGENT_ERROR_TOOL_FAILED;
+    }
 done:
     cJSON_Delete(root);
     return ret;

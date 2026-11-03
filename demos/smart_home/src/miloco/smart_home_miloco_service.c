@@ -55,6 +55,7 @@ typedef struct {
     uint8_t is_action;                   /* 0=set_property 1=call_action */
     int32_t value;
     uint32_t request_id;
+    uint32_t dispatch_observation;
 } miloco_control_request_t;
 
 struct smart_home_miloco {
@@ -86,7 +87,8 @@ struct smart_home_miloco {
     miloco_control_request_t pending[MILOCO_CONTROL_QUEUE_DEPTH];
     size_t pending_count;
     uint32_t next_request_id;
-    struct { uint32_t id; int result; } results[MILOCO_CONTROL_QUEUE_DEPTH];
+    struct { uint32_t id; int result; uint32_t dispatch_observation; }
+        results[MILOCO_CONTROL_QUEUE_DEPTH];
     unsigned result_next;
     smart_home_miloco_device_t devices[SMART_HOME_MILOCO_MAX_DEVICES];
     size_t device_count;
@@ -227,12 +229,20 @@ bool smart_home_miloco_copy_device(const smart_home_miloco_t *service,
 bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
                                       uint32_t id, int *result)
 {
+    uint32_t observation;
+    return smart_home_miloco_control_result_detail(service, id, result, &observation);
+}
+
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t id, int *result, uint32_t *dispatch_observation)
+{
     bool found = false;
-    if (!service || !id || !result) return false;
+    if (!service || !id || !result || !dispatch_observation) return false;
     lock_state((smart_home_miloco_t *)service);
     for (unsigned i = 0; i < MILOCO_CONTROL_QUEUE_DEPTH; i++) {
         if (service->results[i].id == id) {
             *result = service->results[i].result;
+            *dispatch_observation = service->results[i].dispatch_observation;
             found = true;
             break;
         }
@@ -968,7 +978,7 @@ int smart_home_miloco_set_weather_city(smart_home_miloco_t *service,
 }
 
 static int execute_control(smart_home_miloco_t *service,
-                           const miloco_control_request_t *request,
+                           miloco_control_request_t *request,
                            char *body, size_t body_size)
 {
     char path[80];
@@ -998,6 +1008,7 @@ static int execute_control(smart_home_miloco_t *service,
                     iid_allowed = iid_allowed && smart_home_miloco_value_allowed(ctrl, request->value);
                 /* A previous cached value must not confirm this dispatch. */
                 if (iid_allowed && !request->is_action) {
+                    request->dispatch_observation = ctrl->observation;
                     service->devices[i].controls[k].value_valid = false;
                     if ((int)k == smart_home_miloco_power_index(dev))
                         service->devices[i].power_valid = false;
@@ -1011,9 +1022,7 @@ static int execute_control(smart_home_miloco_t *service,
     }
     unlock_state(service);
     if (!iid_allowed) {
-        syslog(LOG_WARNING,
-               "[milo] control rejected unknown iid %s did %s\n",
-               request->iid, request->did);
+        syslog(LOG_WARNING, "[miloco] control rejected by local validation\n");
         return -EINVAL;
     }
 
@@ -1038,17 +1047,28 @@ static int execute_control(smart_home_miloco_t *service,
                                       request_body, body, body_size,
                                       &http_status);
     if (ret < 0) {
-        return ret;
+        syslog(LOG_WARNING, "[miloco] control response: transport error=%d\n", ret);
+        ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+    } else if (http_status != 200) {
+        syslog(LOG_WARNING, "[miloco] control response: http=%d\n", http_status);
+        ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+    } else {
+        ret = smart_home_miloco_control_reply(body, request->did, request->iid,
+                                              request->is_action != 0);
+        if (ret == AGENT_ERROR_PARSE) {
+            syslog(LOG_WARNING, "[miloco] control response: invalid result\n");
+            ret = SMART_HOME_MILOCO_RESULT_UNCONFIRMED;
+        } else if (ret != AGENT_OK) {
+            syslog(LOG_WARNING, "[miloco] control response: rejected result=%d\n", ret);
+        }
     }
-    if (http_status != 200) {
-        return -EIO;
+    if (!request->is_action &&
+        (ret == AGENT_OK || ret == SMART_HOME_MILOCO_RESULT_UNCONFIRMED)) {
+        int read_ret = refresh_device_values(service, request->did, body, body_size);
+        if (read_ret != AGENT_OK)
+            syslog(LOG_WARNING, "[miloco] control readback: error=%d\n", read_ret);
     }
-    ret = smart_home_miloco_control_reply(body, request->did, request->iid,
-                                          request->is_action != 0);
-    if (ret != AGENT_OK) return ret;
-    /* 控制成功后回读真实状态，失败也接受（下轮轮询会补）。 */
-    (void)refresh_device_values(service, request->did, body, body_size);
-    return AGENT_OK;
+    return ret;
 }
 
 static void *miloco_worker(void *argument)
@@ -1157,12 +1177,12 @@ static void *miloco_worker(void *argument)
             lock_state(service);
             service->results[service->result_next].id = control.request_id;
             service->results[service->result_next].result = result;
+            service->results[service->result_next].dispatch_observation =
+                control.dispatch_observation;
             service->result_next = (service->result_next + 1) % MILOCO_CONTROL_QUEUE_DEPTH;
             unlock_state(service);
             if (result != AGENT_OK) {
-                syslog(LOG_WARNING,
-                       "WARNING: [miloco] control did=%s iid=%s failed\n",
-                       control.did, control.iid);
+                syslog(LOG_WARNING, "[miloco] control completed: result=%d\n", result);
             }
             continue; /* 立即处理后续排队的控制请求。 */
         }

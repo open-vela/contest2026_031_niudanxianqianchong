@@ -104,6 +104,9 @@ int main(void)
     many = parse(wide);
     assert(!many.control_count); /* Never silently cut enum options. */
     assert(!smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"did\":\"camera\",\"siid\":2,\"piid\":6,\"code\":0}]}}", "camera", "prop.2.6", false));
+    assert(!smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"siid\":2,\"piid\":6,\"code\":-702000000}]}}", "camera", "prop.2.6", false));
+    assert(!smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"siid\":2,\"piid\":6,\"code\":-702010000}]}}", "camera", "prop.2.6", false));
+    assert(smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"siid\":2,\"piid\":6}]}}", "camera", "prop.2.6", false) == AGENT_ERROR_PARSE);
     assert(smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"code\":-704220043}]}}", "camera", "prop.2.6", false) != 0);
     assert(smart_home_miloco_control_reply("{\"code\":0,\"data\":{\"results\":[{\"piid\":1,\"code\":0}]}}", "camera", "prop.2.6", false) != 0);
     assert(smart_home_miloco_control_reply("{\"code\":0}", "camera", "prop.2.6", false) != 0);

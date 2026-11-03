@@ -2,13 +2,14 @@
 #include "../../src/miloco/smart_home_miloco_service.c"
 #include <assert.h>
 static const char *read_body, *post_body;
-static int get_error, posts;
+static int get_error, post_error, posts, reads;
 static char sent[256];
 int smart_home_miloco_http_get(const smart_home_miloco_client_config_t *cfg,
     const char *path, char *body, size_t capacity, int *status)
 {
     (void)cfg;
     assert(strstr(path,"/status?iid=prop.9.6"));
+    reads++;
     *status=200;
     snprintf(body,capacity,"%s",read_body);
     return get_error;
@@ -22,7 +23,7 @@ int smart_home_miloco_http_post(const smart_home_miloco_client_config_t *cfg,
     posts++;
     *status=200;
     snprintf(body,capacity,"%s",post_body);
-    return 0;
+    return post_error;
 }
 int main(void)
 {
@@ -62,15 +63,27 @@ int main(void)
     assert(!execute_control(s,&s->pending[0],body,sizeof(body)));
     assert(posts==1 && strstr(sent,"\"value\":true"));
     assert(c->value_valid && c->value==1 && c->observation==2 && d->power_on);
+    assert(s->pending[0].dispatch_observation == 1);
     /* Unchanged cached desired value cannot confirm a failed post-write read. */
     get_error=-ETIMEDOUT;
     assert(!execute_control(s,&s->pending[0],body,sizeof(body)));
     assert(!c->value_valid && c->observation==2 && !d->power_valid);
     get_error=0;
     assert(!refresh_device_values(s,"test",body,sizeof(body)) && c->value_valid);
+    int previous_reads=reads;
+    post_body="{\"code\":0,\"data\":{\"results\":[{\"siid\":9,\"piid\":6,\"code\":-702000000}]}}";
+    assert(execute_control(s,&s->pending[0],body,sizeof(body))==AGENT_OK);
+    assert(reads==++previous_reads && c->value_valid);
+    post_body="{\"code\":0,\"data\":{\"results\":[{}]}}";
+    assert(execute_control(s,&s->pending[0],body,sizeof(body))==SMART_HOME_MILOCO_RESULT_UNCONFIRMED);
+    assert(reads==++previous_reads && c->value_valid && c->value==1);
+    post_error=-ETIMEDOUT;
+    assert(execute_control(s,&s->pending[0],body,sizeof(body))==SMART_HOME_MILOCO_RESULT_UNCONFIRMED);
+    assert(reads==++previous_reads && c->value_valid);
+    post_error=0;
     post_body="{\"code\":0,\"data\":{\"results\":[{\"code\":-1}]}}";
     assert(execute_control(s,&s->pending[0],body,sizeof(body))!=0);
-    assert(!c->value_valid);
+    assert(!c->value_valid && reads==previous_reads);
     int previous=posts;
     s->pending[0].value=3;
     assert(execute_control(s,&s->pending[0],body,sizeof(body))!=0 && posts==previous);

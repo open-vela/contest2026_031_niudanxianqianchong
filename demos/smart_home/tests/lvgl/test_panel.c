@@ -125,6 +125,9 @@ int smart_home_miloco_submit_control_tracked(smart_home_miloco_t *service,
 bool smart_home_miloco_control_result(const smart_home_miloco_t *service,
                                       uint32_t id, int *result)
 { (void)service; (void)id; (void)result; return false; }
+bool smart_home_miloco_control_result_detail(const smart_home_miloco_t *service,
+    uint32_t id, int *result, uint32_t *observation)
+{ (void)service; (void)id; (void)result; (void)observation; return false; }
 void *smart_home_bulk_alloc(size_t size) { return malloc(size); }
 void smart_home_bulk_free(void *ptr) { free(ptr); }
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service)

@@ -24,7 +24,6 @@ typedef struct {
     int32_t confirmed;
     int32_t desired;
     uint32_t request_id;
-    uint32_t baseline_observation;
     uint32_t started;
     int pending;
 } dialog_control_t;
@@ -194,8 +193,6 @@ static void submit_cb(lv_event_t *event) {
             feedback(ctx, "设备当前离线或控制能力已变化", 1);
             return;
         }
-        const smart_home_miloco_control_t *before = find_control(&device, control->spec.iid);
-        control->baseline_observation = before->observation;
         int result = smart_home_miloco_submit_control_tracked(
             service, device.did, control->spec.iid, is_action ? "action" : "set", value,
             &control->request_id);
@@ -250,21 +247,30 @@ static void poll(lv_timer_t *timer) {
         }
         if (c->pending) {
             int result = AGENT_ERROR_STATE;
-            int done = service && smart_home_miloco_control_result(
-                                      service, c->request_id, &result);
-            if (done && result != AGENT_OK) {
+            uint32_t dispatch_observation = 0;
+            int done = service && smart_home_miloco_control_result_detail(
+                service, c->request_id, &result, &dispatch_observation);
+            if (done && result != AGENT_OK &&
+                result != SMART_HOME_MILOCO_RESULT_UNCONFIRMED) {
                 c->pending = 0;
                 feedback(ctx, "操作未获成功确认，请检查网关或设备状态", 1);
-            } else if (done && (c->kind == SMART_HOME_MILOCO_CTRL_ACTION ||
-                                (actual && actual->write_only) ||
-                                (actual && actual->value_valid &&
-                                 actual->observation != c->baseline_observation &&
+            } else if (done && ((result == AGENT_OK &&
+                                 (c->kind == SMART_HOME_MILOCO_CTRL_ACTION ||
+                                  (actual && actual->write_only))) ||
+                                (actual && actual->type == c->kind &&
+                                 !actual->write_only && actual->value_valid &&
+                                 (int32_t)(actual->observation - dispatch_observation) > 0 &&
                                  current == c->desired))) {
                 c->pending = 0;
                 feedback(ctx, c->kind == SMART_HOME_MILOCO_CTRL_ACTION ?
                         "网关已确认动作" : actual && actual->write_only ?
-                        "网关已接受写入，此属性不支持回读" : "设备已确认本次操作", 0);
-            } else if ((uint32_t)(lv_tick_get() - c->started) >= 10000u) {
+                        "网关已接受写入，此属性不支持回读" :
+                        result == SMART_HOME_MILOCO_RESULT_UNCONFIRMED ?
+                        "设备当前状态已确认" : "设备已确认本次操作", 0);
+            } else if ((done && result == SMART_HOME_MILOCO_RESULT_UNCONFIRMED &&
+                        (c->kind == SMART_HOME_MILOCO_CTRL_ACTION ||
+                         (actual && actual->write_only))) ||
+                       (uint32_t)(lv_tick_get() - c->started) >= 10000u) {
                 c->pending = 0;
                 feedback(ctx, "未收到设备确认，请检查连接后重试", 1);
             }
