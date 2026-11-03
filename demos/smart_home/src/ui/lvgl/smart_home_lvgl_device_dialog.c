@@ -428,6 +428,12 @@ void smart_home_lvgl_device_dialog_open(smart_home_lvgl_t *ui,
     lv_obj_set_pos(ctx->body, 304, 66);
     lv_obj_set_scroll_dir(ctx->body, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(ctx->body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(ctx->body, 6, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_right(ctx->body, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(ctx->body, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(ctx->body, SMART_HOME_UI_COLOR_TEXT_MUTED,
+                              LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(ctx->body, LV_OPA_COVER, LV_PART_SCROLLBAR);
     ctx->status =
         smart_home_lvgl_label_create(panel, "", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
     lv_obj_set_width(ctx->status, 620);

@@ -141,6 +141,12 @@ int main(void) {
     strcpy(view.key, "milo:test");
     smart_home_lvgl_device_dialog_open(&ui, &view);
     c = &g_dialog->control[0];
+    {
+        lv_area_t horizontal, vertical;
+        lv_obj_update_layout(ui.screen_home);
+        lv_obj_get_scrollbar_area(g_dialog->body, &horizontal, &vertical);
+        assert(lv_area_get_width(&vertical) == 0);
+    }
     lv_slider_set_value(c->widget, 53, LV_ANIM_OFF);
     lv_obj_send_event(c->widget, LV_EVENT_RELEASED, NULL);
     assert(submitted_value == 50 && c->pending);
@@ -244,6 +250,25 @@ int main(void) {
         "{\"code\":0,\"data\":{\"properties\":[{\"iid\":\"prop.2.6\",\"value\":true,\"code\":-1}]}}", &changed));
     poll(g_dialog->timer);
     assert(lv_obj_has_state(c->widget, LV_STATE_DISABLED) && c->confirmed == 0);
+    smart_home_lvgl_device_dialog_close();
+    remote.control_count = 8;
+    for (unsigned i = 1; i < remote.control_count; i++) {
+        remote.controls[i] = remote.controls[0];
+        snprintf(remote.controls[i].iid, sizeof(remote.controls[i].iid),
+                 "prop.2.%u", i + 6);
+    }
+    smart_home_lvgl_device_dialog_open(&ui, &view);
+    {
+        lv_area_t horizontal, top, bottom;
+        lv_obj_update_layout(ui.screen_home);
+        lv_obj_get_scrollbar_area(g_dialog->body, &horizontal, &top);
+        assert(lv_area_get_width(&top) == 6 && lv_area_get_height(&top) > 0);
+        lv_obj_scroll_to_y(g_dialog->body, LV_COORD_MAX, LV_ANIM_OFF);
+        lv_obj_update_layout(ui.screen_home);
+        lv_obj_get_scrollbar_area(g_dialog->body, &horizontal, &bottom);
+        assert(bottom.y1 > top.y1);
+    }
+    puts("PASS: scrollbar appears for overflow and follows scroll position");
     lv_obj_delete(ui.screen_home);
     assert(!g_dialog);
     smart_home_device_service_deinit(&app.device_service);
