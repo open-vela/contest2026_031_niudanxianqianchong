@@ -67,6 +67,7 @@ typedef struct {
     lv_obj_t *miloco_port;
     lv_obj_t *miloco_token;
     lv_obj_t *miloco_modal_status;
+    lv_obj_t *miloco_service_status;
     lv_timer_t *miloco_save_timer;
 #endif
     lv_obj_t *model_dd;
@@ -103,6 +104,21 @@ typedef struct {
 
 static v9_settings_t g_settings;
 static void health_panel_refresh(smart_home_lvgl_t *ui);
+
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+static void miloco_service_status_refresh(smart_home_lvgl_t *ui)
+{
+    const char *status = "未连接";
+
+    if (!g_settings.miloco_service_status) return;
+    if (ui && ui->app && ui->app->miloco &&
+        smart_home_miloco_reachable(ui->app->miloco)) {
+        status = smart_home_miloco_bound(ui->app->miloco) ? "已绑定" : "待绑定";
+    }
+    if (strcmp(lv_label_get_text(g_settings.miloco_service_status), status))
+        lv_label_set_text(g_settings.miloco_service_status, status);
+}
+#endif
 
 #if defined(CONFIG_SMART_HOME_MCP_BRIDGE) || defined(CONFIG_SMART_HOME_NODE_GATEWAY)
 static void mcp_config_open(smart_home_lvgl_t *ui);
@@ -514,6 +530,9 @@ static void v9_net_timer_cb(lv_timer_t *timer)
         health_panel_refresh(ui);
     }
     v9_net_status_refresh(ui);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    miloco_service_status_refresh(ui);
+#endif
 }
 
 static void v9_net_connect(smart_home_lvgl_t *ui)
@@ -1572,6 +1591,9 @@ static void service_row(lv_obj_t *panel, smart_home_lvgl_t *ui,
     lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
     label = smart_home_lvgl_label_create(
         pill, status, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (index == 0) g_settings.miloco_service_status = label;
+#endif
     lv_obj_center(label);
 
     button = lv_button_create(panel);

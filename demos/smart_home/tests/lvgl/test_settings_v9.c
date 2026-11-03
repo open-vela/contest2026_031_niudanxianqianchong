@@ -21,6 +21,8 @@ static smart_home_model_config_t applied_model;
 static unsigned network_probe_calls;
 static int fake_save_status = AGENT_ERROR_NOT_FOUND;
 static int fake_bind_calls;
+static bool fake_reachable;
+static bool fake_bound;
 int smart_home_miloco_save_status(const smart_home_miloco_t *s)
 { (void)s; return fake_save_status; }
 int smart_home_secrets_get_wifi_credentials(char *ssid, size_t ssid_size,
@@ -122,10 +124,10 @@ bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
 }
 
 bool smart_home_miloco_reachable(const smart_home_miloco_t *service)
-{ (void)service; return false; }
+{ (void)service; return fake_reachable; }
 
 bool smart_home_miloco_bound(const smart_home_miloco_t *service)
-{ (void)service; return false; }
+{ (void)service; return fake_bound; }
 
 size_t smart_home_miloco_list(const smart_home_miloco_t *service,
                               smart_home_miloco_device_t *devices,
@@ -298,6 +300,20 @@ int main(void)
     app.mcp_bridge = (smart_home_mcp_bridge_t *)&app;
     ui = setup(&app);
     screen = g_settings.screen;
+    app.miloco = (smart_home_miloco_t *)&app;
+    build_services_panel(ui, screen);
+    assert(!strcmp(lv_label_get_text(g_settings.miloco_service_status), "未连接"));
+    fake_reachable = true;
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(!strcmp(lv_label_get_text(g_settings.miloco_service_status), "待绑定"));
+    fake_bound = true;
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(!strcmp(lv_label_get_text(g_settings.miloco_service_status), "已绑定"));
+    fake_reachable = false;
+    v9_net_timer_cb(ui->v9_network_timer);
+    assert(!strcmp(lv_label_get_text(g_settings.miloco_service_status), "未连接"));
+    fake_bound = false;
+    puts("PASS: gateway status follows connection and binding changes");
     /* 当前连接来自网络状态，不能随待连接 SSID 草稿一起改变。 */
     app.system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
     snprintf(app.system_status.network_status.ssid,
