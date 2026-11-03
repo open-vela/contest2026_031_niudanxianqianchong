@@ -84,6 +84,8 @@ add_test(NAME board_measure_check COMMAND "${Python3_EXECUTABLE}"
 set_tests_properties(board_measure_check PROPERTIES TIMEOUT 15)
 add_test(NAME pixel_assets_check COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../test_v9_visual_assets.py")
+add_test(NAME network_ssid_check COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../test_network_ssid.py")
 
 
 add_executable(chat_check test_chat.c "${UI}/smart_home_lvgl_chat.c"

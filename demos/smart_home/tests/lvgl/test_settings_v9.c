@@ -274,6 +274,27 @@ int main(void)
     ui = setup(&app);
     screen = g_settings.screen;
 
+    /* 当前连接来自网络状态，不能随待连接 SSID 草稿一起改变。 */
+    app.system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
+    snprintf(app.system_status.network_status.ssid,
+             sizeof(app.system_status.network_status.ssid), "家庭 Wi-Fi");
+    v9_net_status_refresh(ui);
+    assert(!strcmp(lv_label_get_text(g_settings.net_connected), "当前连接：家庭 Wi-Fi"));
+    lv_textarea_set_text(g_settings.net_ssid, "another-network");
+    v9_net_status_refresh(ui);
+    assert(!strcmp(lv_label_get_text(g_settings.net_connected), "当前连接：家庭 Wi-Fi"));
+    app.system_status.network_status.ip_status = SMART_HOME_NETWORK_ERR_NO_IP;
+    v9_net_status_refresh(ui);
+    assert(!strcmp(lv_label_get_text(g_settings.net_connected), "当前未连接 Wi-Fi"));
+    app.system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
+    v9_net_status_refresh(ui);
+    assert(strstr(lv_label_get_text(g_settings.net_connected), "家庭 Wi-Fi"));
+    app.system_status.network_status.ssid[0] = '\0';
+    v9_net_status_refresh(ui);
+    assert(strstr(lv_label_get_text(g_settings.net_connected), "名称暂不可用"));
+    lv_textarea_set_text(g_settings.net_ssid, "test-ssid");
+    puts("PASS: connected SSID is independent of connection drafts and hidden while disconnected");
+
     mcp_config_open(ui);
     assert(lv_dropdown_get_selected(g_settings.mcp_protocol) == 0);
     assert(lv_textarea_get_password_mode(g_settings.mcp_auth));

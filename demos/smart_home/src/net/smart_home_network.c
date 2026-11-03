@@ -429,6 +429,11 @@ int smart_home_network_connect_credentials(
     }
 
   ret = smart_home_network_init(status);
+  if (status->ip_status == SMART_HOME_NETWORK_OK &&
+      smart_home_network_link_up(SMART_HOME_WIFI_IFNAME))
+    {
+      snprintf(status->ssid, sizeof(status->ssid), "%s", ssid);
+    }
   /* A valid DHCP lease is sufficient to retain the user-selected AP even if
    * the internet/DNS probe is currently unavailable. */
   if (status->ip_status == SMART_HOME_NETWORK_OK)
@@ -478,6 +483,13 @@ int smart_home_network_prepare_setup(FAR smart_home_network_status_t *status)
   if (smart_home_network_has_ip(status->ifname))
     {
       ret = smart_home_network_probe(status);
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID
+      if (smart_home_network_link_up(status->ifname))
+        {
+          snprintf(status->ssid, sizeof(status->ssid), "%s",
+                   CONFIG_ESP32P4_FUNCTION_EV_BOARD_ESP_HOSTED_STA_SSID);
+        }
+#endif
     }
   else
     {
@@ -503,7 +515,9 @@ int smart_home_network_probe(FAR smart_home_network_status_t *status)
       return SMART_HOME_NETWORK_ERR_NO_IP;
     }
 
-  if (!smart_home_network_has_ip(status->ifname))
+  if (!smart_home_network_has_ip(status->ifname) ||
+      (status->backend == SMART_HOME_NETWORK_BACKEND_WIFI &&
+       !smart_home_network_link_up(status->ifname)))
     {
       status->ip_status = SMART_HOME_NETWORK_ERR_NO_IP;
       status->dns_status = SMART_HOME_NETWORK_STATUS_UNKNOWN;

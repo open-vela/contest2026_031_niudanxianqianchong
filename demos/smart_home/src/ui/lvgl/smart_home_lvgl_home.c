@@ -235,6 +235,8 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
     lv_obj_t *clock;
     lv_obj_t *icon;
     int width = smart_home_lvgl_disp_w();
+    bool home = ui && screen == ui->screen_home;
+    int clock_width = home ? 80 : 56;
     int i;
 
     if (!screen) {
@@ -269,10 +271,10 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
 
     clock = smart_home_lvgl_label_create(bar, SMART_HOME_UI_DEFAULT_CLOCK,
                                          SMART_HOME_UI_COLOR_TEXT_SECONDARY,
-                                         18);
-    lv_obj_set_width(clock, 56);
+                                         home ? 26 : 18);
+    lv_obj_set_width(clock, clock_width);
     lv_obj_set_style_text_align(clock, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -16, 16);
+    lv_obj_align(clock, LV_ALIGN_TOP_RIGHT, -16, home ? 6 : 16);
     if (ui && ui->topbar_clock_count <
                    (int)(sizeof(ui->topbar_clock_labels) /
                          sizeof(ui->topbar_clock_labels[0]))) {
@@ -300,8 +302,9 @@ void smart_home_lvgl_build_top_bar(lv_obj_t *screen, smart_home_lvgl_t *ui,
         }
         color = i == 3 ? topbar_network_color(ui) :
                          SMART_HOME_UI_COLOR_TEXT_SECONDARY;
-        /* 16 px right inset, 56 px clock, 12 px gaps and 20 px icons. */
-        lv_obj_align(icon, LV_ALIGN_TOP_RIGHT, -(16 + 56 + 12 + (3 - i) * 32), 18);
+        /* 为首页较大的时钟预留宽度，状态图标仍保持 12px 间隔。 */
+        lv_obj_align(icon, LV_ALIGN_TOP_RIGHT,
+                     -(16 + clock_width + 12 + (3 - i) * 32), 18);
         lv_obj_set_style_text_color(icon, color, 0);
         smart_home_lvgl_icon_color(icon, color);
         if (i == 3 && ui && ui->topbar_wifi_icon_count <

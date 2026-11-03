@@ -285,7 +285,7 @@ static void v9_update_card(int index)
     const char *state = v9_art_state(def, on, NULL);
 
     if (g_v9.status[index]) {
-        lv_label_set_text(g_v9.status[index], on ? def->status_on : def->status_off);
+        lv_label_set_text(g_v9.status[index], "");
     }
     if (g_v9.metric[index]) {
         lv_label_set_text(g_v9.metric[index], on ? def->metric_on : def->metric_off);
@@ -396,7 +396,7 @@ static const char *view_status(const smart_home_v9_device_view_t *view)
 {
     if (view->source == SMART_HOME_V9_SOURCE_MILOCO) {
         if (!view->online) return "离线";
-        if (!(view->capabilities & SMART_HOME_V9_CAP_POWER)) return "在线";
+        if (!(view->capabilities & SMART_HOME_V9_CAP_POWER)) return "";
     }
     if (!view->state_valid) return "状态待获取";
     if (view->source == SMART_HOME_V9_SOURCE_BOARD) {
@@ -405,19 +405,19 @@ static const char *view_status(const smart_home_v9_device_view_t *view)
         case SMART_HOME_V9_CAMERA_PREVIEWING: return "预览中";
         case SMART_HOME_V9_CAMERA_STOPPING: return "停止中";
         case SMART_HOME_V9_CAMERA_ERROR: return "操作失败";
-        default: return "预览关闭";
+        default: return "";
         }
     }
     switch (view->kind) {
     case SMART_HOME_V9_KIND_WASHER:
-        return view->on ? "洗涤中" : "待机";
+        return view->on ? "洗涤中" : "";
     case SMART_HOME_V9_KIND_ROBOT:
-        return view->on ? "清扫中" : "待机";
+        return view->on ? "清扫中" : "";
     case SMART_HOME_V9_KIND_CAMERA:
-        return view->source == SMART_HOME_V9_SOURCE_MILOCO ?
-            (view->on ? "已开启" : "已关闭") : (view->on ? "预览中" : "预览关闭");
+        return view->source == SMART_HOME_V9_SOURCE_MILOCO ? "" :
+            (view->on ? "预览中" : "");
     default:
-        return view->on ? "已开启" : "已关闭";
+        return "";
     }
 }
 
@@ -876,7 +876,7 @@ static lv_obj_t *v9_make_room_button(lv_obj_t *screen, int index,
 
     lv_obj_remove_style_all(button);
     lv_obj_set_size(button, 78, 40);
-    lv_obj_set_pos(button, index * 84, 0);
+    lv_obj_set_pos(button, index * 84, 4);
     lv_obj_set_style_radius(button, 20, 0);
     lv_obj_set_ext_click_area(button, 4);
     if (index == 0) {
@@ -921,7 +921,8 @@ static void v9_refresh_rooms(smart_home_lvgl_t *ui)
         if (!found && g_v9.room_text[i][0])
             snprintf(rooms[count++], SMART_HOME_ROOM_NAME_SIZE, "%s", g_v9.room_text[i]);
     }
-    if (count == g_v9.room_count && !memcmp(rooms, g_v9.rooms, sizeof rooms)) return;
+    if (g_v9.room_btn[0] && count == g_v9.room_count &&
+        !memcmp(rooms, g_v9.rooms, sizeof rooms)) return;
     char selected[SMART_HOME_ROOM_NAME_SIZE] = "";
     if (g_v9.room_filter > 0)
         snprintf(selected, sizeof selected, "%s", g_v9.rooms[g_v9.room_filter - 1]);
@@ -935,6 +936,20 @@ static void v9_refresh_rooms(smart_home_lvgl_t *ui)
         g_v9.room_btn[i + 1] = v9_make_room_button(g_v9.room_strip, i + 1, rooms[i]);
         if (!strcmp(rooms[i], selected)) g_v9.room_filter = i + 1;
     }
+    /* 与房间一起参与横向滚动，始终紧跟最后一个房间。 */
+    lv_obj_t *add = lv_button_create(g_v9.room_strip);
+    lv_obj_remove_style_all(add);
+    lv_obj_set_size(add, 48, 48);
+    lv_obj_set_pos(add, (count + 1) * 84, 0);
+    lv_obj_set_style_radius(add, 16, 0);
+    smart_home_lvgl_set_bg(add, SMART_HOME_UI_COLOR_SURFACE_ON);
+    lv_obj_set_ext_click_area(add, 4);
+    lv_obj_add_event_cb(add, v9_add_room_cb, LV_EVENT_CLICKED, ui);
+    smart_home_lvgl_press_feedback(add);
+    lv_obj_t *label = smart_home_lvgl_label_create(add, "+",
+        SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
+    lv_obj_center(label);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
     smart_home_lvgl_v9_select_room(g_v9.room_filter);
 }
 
@@ -965,7 +980,7 @@ static void v9_make_card(smart_home_lvgl_t *ui, int index)
              def->room);
     snprintf(g_v9.name_text[index], sizeof(g_v9.name_text[index]), "%s",
              def->name);
-    g_v9.status[index] = v9_text(card, def->status_on, 14, 79, 12,
+    g_v9.status[index] = v9_text(card, "", 14, 79, 12,
                                  SMART_HOME_UI_COLOR_TEXT_SECONDARY);
 
     g_v9.art[index] = lv_image_create(card);
@@ -1278,8 +1293,6 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     lv_obj_t *screen;
     lv_obj_t *badge;
     lv_obj_t *icon;
-    lv_obj_t *button;
-    lv_obj_t *label;
 
     if (!ui) {
         return;
@@ -1336,24 +1349,10 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
 
     g_v9.room_strip = lv_obj_create(screen);
     lv_obj_remove_style_all(g_v9.room_strip);
-    lv_obj_set_pos(g_v9.room_strip, 28, 204);
-    lv_obj_set_size(g_v9.room_strip, 500, 44);
+    lv_obj_set_pos(g_v9.room_strip, 28, 200);
+    lv_obj_set_size(g_v9.room_strip, 760, 48);
     lv_obj_set_scroll_dir(g_v9.room_strip, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(g_v9.room_strip, LV_SCROLLBAR_MODE_OFF);
-    button = lv_button_create(screen);
-    lv_obj_remove_style_all(button);
-    lv_obj_set_size(button, 48, 48);
-    lv_obj_set_pos(button, 532, 200);
-    lv_obj_set_style_radius(button, 16, 0);
-    lv_obj_set_style_bg_color(button, SMART_HOME_UI_COLOR_SURFACE_ON, 0);
-    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-    lv_obj_set_ext_click_area(button, 4);
-    lv_obj_add_event_cb(button, v9_add_room_cb, LV_EVENT_CLICKED, ui);
-    smart_home_lvgl_press_feedback(button);
-    label = smart_home_lvgl_label_create(button, "+",
-                                         SMART_HOME_UI_COLOR_TEXT_PRIMARY, 24);
-    lv_obj_center(label);
-
     v9_make_scene_button(screen, ui);
 
     g_v9.view = lv_obj_create(screen);

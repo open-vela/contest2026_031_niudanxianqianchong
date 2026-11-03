@@ -1,6 +1,7 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
 #include "smart_home_v9_device_view.h"
+#include "smart_home_lvgl_room_dialog.h"
 #ifdef CONFIG_SMART_HOME_ONBOARDING
 #include "smart_home_lvgl_onboarding.h"
 #endif
@@ -396,6 +397,11 @@ static void test_home(smart_home_lvgl_t *ui)
     test_v9_scene_switcher(ui);
     test_v9_room_catalog(ui);
 
+    snprintf(ui->app->system_status.network_status.ssid,
+             sizeof(ui->app->system_status.network_status.ssid), "家庭 Wi-Fi");
+    ui->app->system_status.network_status.backend = SMART_HOME_NETWORK_BACKEND_WIFI;
+    ui->app->system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
+    ui->app->system_status.network_status.online = true;
     smart_home_lvgl_build_settings_screen_v9(ui);
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
     assert(ui->screen_settings_v9 != NULL);
@@ -1310,7 +1316,7 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
             continue;
         snprintf(expected, sizeof(expected), "灯具-%u", cards++);
         assert(!strcmp(lv_label_get_text(lv_obj_get_child(card, 1)), expected));
-        assert(!strcmp(lv_label_get_text(lv_obj_get_child(card, 2)), "已开启"));
+        assert(!strcmp(lv_label_get_text(lv_obj_get_child(card, 2)), ""));
         lv_obj_send_event(card, LV_EVENT_CLICKED, NULL);
         assert(lv_obj_get_child_count(ui->screen_home) == before + 1);
         mask = lv_obj_get_child(ui->screen_home, -1);
@@ -1330,7 +1336,10 @@ static void test_v9_cards(smart_home_lvgl_t *ui)
     snapshot[11].power_on = false;
     snapshot[11].power_valid = true;
     smart_home_lvgl_v9_refresh_views(ui);
-    assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), "已关闭"));
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(last_card, 2)), ""));
+    snapshot[11].online = false;
+    smart_home_lvgl_v9_refresh_views(ui);
+    assert(find_v9_label(last_card, "离线"));
     snapshot_count = 0;
     smart_home_lvgl_v9_refresh_views(ui);
     puts("PASS: all 12 V9 card modals, real switches and readback");
@@ -1383,8 +1392,13 @@ static void wait_for_network_probe(smart_home_lvgl_t *ui)
 
 static void test_v9_room_catalog(smart_home_lvgl_t *ui)
 {
-    snapshot_count = 12;
+    snapshot_count = 0;
     smart_home_device_init(&ui->app->device_state);
+    ui->app->device_service.state = &ui->app->device_state;
+    local_state_enabled = 1;
+    smart_home_lvgl_v9_refresh_views(ui);
+    capture_screen(ui->screen_home, "SMART_HOME_ROOMS_TWO_CAPTURE");
+    snapshot_count = 12;
     memset(ui->app->device_state.devices, 0, sizeof ui->app->device_state.devices);
     assert(!smart_home_room_add(&ui->app->device_state, "书房"));
     assert(!smart_home_device_assign_room(&ui->app->device_state, "milo:v9-light-0", "书房"));
@@ -1396,6 +1410,37 @@ static void test_v9_room_catalog(smart_home_lvgl_t *ui)
     assert(bedroom);
     lv_obj_send_event(lv_obj_get_parent(bedroom), LV_EVENT_CLICKED, NULL);
     assert(smart_home_lvgl_v9_visible_card_count() == 0);
+    lv_obj_t *add_label = find_v9_label(ui->screen_home, "+");
+    assert(add_label);
+    lv_obj_t *add = lv_obj_get_parent(add_label);
+    lv_obj_t *strip = lv_obj_get_parent(add);
+    /* Room labels, including the add button, share one horizontal strip. */
+    lv_obj_t *last = lv_obj_get_child(strip, lv_obj_get_child_count(strip) - 2);
+    lv_obj_update_layout(strip);
+    assert(lv_obj_get_x(add) == lv_obj_get_x(last) + lv_obj_get_width(last) + 6);
+    int old_x = lv_obj_get_x(add);
+    assert(!smart_home_room_add(&ui->app->device_state, "厕所"));
+    local_revision++;
+    smart_home_lvgl_v9_refresh_views(ui);
+    add = lv_obj_get_parent(find_v9_label(ui->screen_home, "+"));
+    strip = lv_obj_get_parent(add);
+    last = lv_obj_get_child(strip, lv_obj_get_child_count(strip) - 2);
+    lv_obj_update_layout(strip);
+    assert(find_v9_label(last, "厕所"));
+    assert(lv_obj_get_x(add) == old_x + 84);
+    assert(lv_obj_get_x(add) == lv_obj_get_x(last) + lv_obj_get_width(last) + 6);
+    capture_screen(ui->screen_home, "SMART_HOME_ROOMS_ADDED_CAPTURE");
+    ui->app->device_service.mutex_initialized = 1;
+    lv_obj_send_event(add, LV_EVENT_CLICKED, NULL);
+    assert(find_v9_label(ui->screen_home, "房间管理"));
+    smart_home_lvgl_room_dialog_close();
+    ui->app->device_service.mutex_initialized = 0;
+    assert(!smart_home_room_delete_and_reassign(&ui->app->device_state, "厕所", "living_room"));
+    local_revision++;
+    smart_home_lvgl_v9_refresh_views(ui);
+    add = lv_obj_get_parent(find_v9_label(ui->screen_home, "+"));
+    lv_obj_update_layout(ui->screen_home);
+    assert(lv_obj_get_x(add) == old_x);
     smart_home_lvgl_v9_select_room(3);
     assert(!smart_home_room_delete_and_reassign(&ui->app->device_state, "书房", "living_room"));
     smart_home_lvgl_v9_refresh_views(ui);
@@ -1666,7 +1711,11 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
         lv_obj_update_layout(top);
         lv_obj_get_coords(clock, &clock_bounds);
         assert(!strcmp(lv_label_get_text(clock), "12:00"));
-        assert(clock_bounds.x2 == 1007 && lv_obj_get_width(clock) == 56);
+        bool home = lv_obj_get_parent(top) == ui->screen_home;
+        assert(clock_bounds.x2 == 1007);
+        assert(lv_obj_get_width(clock) == (home ? 80 : 56));
+        assert(clock_bounds.y1 == (home ? 6 : 16));
+        assert(lv_obj_get_style_text_font(clock, 0) == smart_home_lvgl_font(home ? 26 : 18));
         for (int j = 0; j < 4; j++) {
             lv_obj_t *icon = lv_obj_get_child(top, 3 + j);
             lv_area_t icon_bounds;

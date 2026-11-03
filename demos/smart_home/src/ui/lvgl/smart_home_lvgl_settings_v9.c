@@ -75,6 +75,7 @@ typedef struct {
     lv_obj_t *model_status;
     lv_obj_t *model_apply;
     lv_obj_t *net_ssid;
+    lv_obj_t *net_connected;
     lv_obj_t *net_password;
     lv_obj_t *net_status;
     lv_obj_t *health_badge;
@@ -403,6 +404,17 @@ static void v9_net_status_refresh(smart_home_lvgl_t *ui)
         return;
     }
     status = ui->app->system_status.network_status;
+    if (g_settings.net_connected) {
+        if ((status.online || status.ip_status == SMART_HOME_NETWORK_OK) &&
+            status.ssid[0]) {
+            lv_label_set_text_fmt(g_settings.net_connected,
+                                   "当前连接：%s", status.ssid);
+        } else {
+            lv_label_set_text(g_settings.net_connected,
+                status.online || status.ip_status == SMART_HOME_NETWORK_OK ?
+                "当前连接：网络名称暂不可用" : "当前未连接 Wi-Fi");
+        }
+    }
     if (status.online) {
         lv_label_set_text(g_settings.net_status, "已连接互联网");
         lv_obj_set_style_text_color(g_settings.net_status,
@@ -551,6 +563,18 @@ static void build_network_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     g_settings.net_status = smart_home_lvgl_label_create(
         panel, "未连接", SMART_HOME_UI_COLOR_TEXT_MUTED, 14);
     lv_obj_set_pos(g_settings.net_status, 0, 196);
+    g_settings.net_connected = smart_home_lvgl_label_create(
+        panel, "当前未连接 Wi-Fi", SMART_HOME_UI_COLOR_TEXT_SECONDARY, 16);
+    lv_obj_set_pos(g_settings.net_connected, 0, 236);
+    lv_obj_set_width(g_settings.net_connected, 704);
+    lv_label_set_long_mode(g_settings.net_connected, LV_LABEL_LONG_WRAP);
+    if (ui && ui->app) {
+        const smart_home_network_status_t *status =
+            &ui->app->system_status.network_status;
+        if ((status->online || status->ip_status == SMART_HOME_NETWORK_OK) &&
+            status->ssid[0]) lv_textarea_set_text(g_settings.net_ssid, status->ssid);
+    }
+    v9_net_status_refresh(ui);
 
     button = lv_button_create(panel);
     lv_obj_remove_style_all(button);
