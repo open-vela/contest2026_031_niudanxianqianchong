@@ -4,15 +4,23 @@
  * Smart Home SC2336 preview service.
  *
  * This is the sole /dev/video0 consumer.  Its worker owns the V4L2 USERPTR
- * ring; it copies each completed frame into a service-owned double preview
- * buffer before immediately returning the DMA buffer to V4L2.  LVGL only
- * receives a copy through smart_home_camera_copy_latest().
+ * ring; it scales selected frames into a service-owned double preview buffer
+ * and returns the DMA buffer to V4L2 only after scaling has completed.
+ * LVGL receives a copy through smart_home_camera_copy_latest().
  */
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
 #include "smart_home_camera_service.h"
 #include "../smart_home_memory.h"
+
+#ifdef CONFIG_SMART_HOME_CAMERA_PPA
+#  include <arch/chip/esp_graphics.h>
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -29,6 +37,10 @@
 #include <time.h>
 #include <unistd.h>
 
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
 #define SMART_HOME_CAMERA_PATH              "/dev/video0"
 #define SMART_HOME_CAMERA_SOURCE_WIDTH      1024u
 #define SMART_HOME_CAMERA_SOURCE_HEIGHT     600u
@@ -41,6 +53,8 @@
 #define SMART_HOME_CAMERA_BUFFER_ALIGNMENT  64u
 #define SMART_HOME_CAMERA_STACK_SIZE        8192u
 #define SMART_HOME_CAMERA_POLL_TIMEOUT_MS   200
+#define SMART_HOME_CAMERA_PPA_TIMEOUT_MS    200
+#define SMART_HOME_CAMERA_SCALE_LOG_FRAMES  150u
 
 struct smart_home_camera_service_s
 {
@@ -54,11 +68,15 @@ struct smart_home_camera_service_s
 
   void *capture_alloc[SMART_HOME_CAMERA_BUFFER_COUNT];
   uint8_t *capture[SMART_HOME_CAMERA_BUFFER_COUNT];
+  void *preview_alloc[2];
   uint8_t *preview[2];
+  bool ppa_ready;
   int published_preview;
   struct smart_home_camera_status_s status;
   uint64_t fps_window_us;
   uint32_t fps_window_frames;
+  uint64_t preview_window_us;
+  uint32_t preview_window_frames;
 };
 
 static struct smart_home_camera_service_s g_camera =
@@ -118,7 +136,8 @@ static void smart_home_camera_free_buffers(void)
 
   for (index = 0; index < 2; index++)
     {
-      smart_home_bulk_free(g_camera.preview[index]);
+      smart_home_bulk_free(g_camera.preview_alloc[index]);
+      g_camera.preview_alloc[index] = NULL;
       g_camera.preview[index] = NULL;
     }
 }
@@ -173,6 +192,8 @@ static int smart_home_camera_configure(int fd)
   if (format.fmt.pix.width != SMART_HOME_CAMERA_SOURCE_WIDTH ||
       format.fmt.pix.height != SMART_HOME_CAMERA_SOURCE_HEIGHT ||
       format.fmt.pix.pixelformat != V4L2_PIX_FMT_RGB565 ||
+      format.fmt.pix.bytesperline != SMART_HOME_CAMERA_SOURCE_WIDTH *
+                                     SMART_HOME_CAMERA_SOURCE_BPP ||
       format.fmt.pix.sizeimage != SMART_HOME_CAMERA_SOURCE_BYTES)
     {
       return -ENOTSUP;
@@ -216,11 +237,15 @@ static int smart_home_camera_configure(int fd)
         }
     }
 
-  g_camera.preview[0] = smart_home_bulk_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES);
-  g_camera.preview[1] = smart_home_bulk_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES);
-  if (g_camera.preview[0] == NULL || g_camera.preview[1] == NULL)
+  for (index = 0; index < 2; index++)
     {
-      return -ENOMEM;
+      g_camera.preview[index] =
+        smart_home_camera_aligned_alloc(SMART_HOME_CAMERA_PREVIEW_BYTES,
+                                        &g_camera.preview_alloc[index]);
+      if (g_camera.preview[index] == NULL)
+        {
+          return -ENOMEM;
+        }
     }
 
   return OK;
@@ -247,6 +272,102 @@ static void smart_home_camera_downscale_rgb565(const uint8_t *source,
                                           SMART_HOME_CAMERA_PREVIEW_WIDTH];
         }
     }
+}
+
+#ifdef CONFIG_SMART_HOME_CAMERA_PPA
+static int smart_home_camera_ppa_scale(const uint8_t *source,
+                                       uint8_t *destination)
+{
+  struct esp_graphics_job_s job;
+  uint32_t ticket;
+  int release;
+  int ret;
+
+  memset(&job, 0, sizeof(job));
+  job.operation = ESP_GRAPHICS_SRM;
+  job.src.data = (void *)source;
+  job.src.size = SMART_HOME_CAMERA_SOURCE_BYTES;
+  job.src.stride = SMART_HOME_CAMERA_SOURCE_WIDTH *
+                   SMART_HOME_CAMERA_SOURCE_BPP;
+  job.src.height = SMART_HOME_CAMERA_SOURCE_HEIGHT;
+  job.src.format = ESP_GRAPHICS_RGB565;
+  job.dst.data = destination;
+  job.dst.size = SMART_HOME_CAMERA_PREVIEW_BYTES;
+  job.dst.stride = SMART_HOME_CAMERA_PREVIEW_WIDTH * 2u;
+  job.dst.height = SMART_HOME_CAMERA_PREVIEW_HEIGHT;
+  job.dst.format = ESP_GRAPHICS_RGB565;
+  job.width = SMART_HOME_CAMERA_SOURCE_WIDTH;
+  job.height = SMART_HOME_CAMERA_SOURCE_HEIGHT;
+  job.scale_x_q4 = 8;
+  job.scale_y_q4 = 8;
+
+  ret = esp_graphics_submit(&job, &ticket);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = esp_graphics_wait(ticket, SMART_HOME_CAMERA_PPA_TIMEOUT_MS);
+  if (ret < 0)
+    {
+      /* Confirm ownership before CPU fallback or V4L2 QBUF.  Normally wait
+       * already quiesced DMA, so cancel returns ENOENT.  Never release a
+       * frame on an unexpected pre-completion error from wait/cancel.
+       */
+
+      release = esp_graphics_cancel(ticket);
+      if (release != -ECANCELED && release != -ENOENT)
+        {
+          printf("[smart_home_camera] awaiting PPA release: %d\n", release);
+          do
+            {
+              usleep(1000);
+              release = esp_graphics_cancel(ticket);
+            }
+          while (release != -ECANCELED && release != -ENOENT);
+        }
+    }
+
+  return ret;
+}
+#endif
+
+static void smart_home_camera_accel_initialize(void)
+{
+#ifdef CONFIG_SMART_HOME_CAMERA_PPA
+  int ret;
+#endif
+
+  g_camera.ppa_ready = false;
+#ifdef CONFIG_SMART_HOME_CAMERA_PPA
+  ret = esp_graphics_initialize();
+  g_camera.ppa_ready = ret == 0;
+  if (ret < 0)
+    {
+      pthread_mutex_lock(&g_camera.lock);
+      g_camera.status.ppa_errors++;
+      g_camera.status.ppa_last_error = ret;
+      pthread_mutex_unlock(&g_camera.lock);
+      printf("[smart_home_camera] PPA init failed=%d; using CPU\n", ret);
+    }
+#endif
+}
+
+static void smart_home_camera_log_scale(void)
+{
+  struct smart_home_camera_status_s status;
+
+  smart_home_camera_get_status(&status);
+  printf("[smart_home_camera] scale ppa=%lu cpu=%lu errors=%lu last=%d "
+         "avg_ppa_us=%lu avg_cpu_us=%lu max_us=%lu\n",
+         (unsigned long)status.ppa_frames,
+         (unsigned long)status.cpu_frames,
+         (unsigned long)status.ppa_errors, status.ppa_last_error,
+         (unsigned long)(status.ppa_frames == 0 ? 0 :
+                         status.ppa_total_us / status.ppa_frames),
+         (unsigned long)(status.cpu_frames == 0 ? 0 :
+                         status.cpu_total_us / status.cpu_frames),
+         (unsigned long)status.scale_max_us);
 }
 
 static bool smart_home_camera_stop_requested(void)
@@ -284,19 +405,88 @@ static void smart_home_camera_record_capture(uint32_t capture_sequence)
 
 static void smart_home_camera_publish_preview(const uint8_t *source)
 {
+  uint64_t started = smart_home_camera_now_us();
+  uint64_t cpu_started = 0;
+  uint64_t elapsed;
+  uint64_t finished;
+  bool hardware = false;
+  bool report;
+  int ppa_error = 0;
   int write_index;
 
   pthread_mutex_lock(&g_camera.lock);
   write_index = 1 - g_camera.published_preview;
   pthread_mutex_unlock(&g_camera.lock);
 
-  smart_home_camera_downscale_rgb565(source, g_camera.preview[write_index]);
+#ifdef CONFIG_SMART_HOME_CAMERA_PPA
+  if (g_camera.ppa_ready)
+    {
+      ppa_error = smart_home_camera_ppa_scale(source,
+                                            g_camera.preview[write_index]);
+      hardware = ppa_error == 0;
+    }
+#endif
 
+  if (!hardware)
+    {
+      cpu_started = smart_home_camera_now_us();
+      smart_home_camera_downscale_rgb565(
+        source, g_camera.preview[write_index]);
+    }
+
+  finished = smart_home_camera_now_us();
+  elapsed = finished >= started ? finished - started : 0;
   pthread_mutex_lock(&g_camera.lock);
+  if (hardware)
+    {
+      g_camera.status.ppa_frames++;
+      g_camera.status.ppa_total_us += elapsed;
+    }
+  else
+    {
+      g_camera.status.cpu_frames++;
+      g_camera.status.cpu_total_us += finished >= cpu_started ?
+                                     finished - cpu_started : 0;
+    }
+
+  if (ppa_error < 0)
+    {
+      g_camera.status.ppa_errors++;
+      g_camera.status.ppa_last_error = ppa_error;
+    }
+
+  if (elapsed > g_camera.status.scale_max_us)
+    {
+      g_camera.status.scale_max_us = elapsed > UINT32_MAX ?
+                                     UINT32_MAX : (uint32_t)elapsed;
+    }
+
   g_camera.published_preview = write_index;
   g_camera.status.preview_sequence++;
-  g_camera.status.preview_fps_x100 = 1500;
+  g_camera.preview_window_frames++;
+  if (g_camera.preview_window_us == 0)
+    {
+      g_camera.preview_window_us = finished;
+      g_camera.preview_window_frames = 0;
+    }
+  else if (finished > g_camera.preview_window_us + 1000000u)
+    {
+      g_camera.status.preview_fps_x100 =
+        (uint32_t)((uint64_t)g_camera.preview_window_frames * 100000000u /
+                   (finished - g_camera.preview_window_us));
+      g_camera.preview_window_frames = 0;
+      g_camera.preview_window_us = finished;
+    }
+
+  report = g_camera.status.preview_sequence == 1 ||
+           (g_camera.status.preview_sequence %
+            SMART_HOME_CAMERA_SCALE_LOG_FRAMES) == 0 ||
+           (ppa_error < 0 && g_camera.status.ppa_errors == 1);
   pthread_mutex_unlock(&g_camera.lock);
+  if (report)
+    {
+      smart_home_camera_log_scale();
+    }
 }
 
 static int smart_home_camera_capture_loop(int fd)
@@ -412,11 +602,17 @@ static void *smart_home_camera_worker(void *arg)
   pthread_mutex_lock(&g_camera.lock);
   g_camera.status.state = SMART_HOME_CAMERA_RUNNING;
   pthread_mutex_unlock(&g_camera.lock);
-  printf("[smart_home_camera] start path=%s source=1024x600 rgb565 preview=%ux%u target=15fps\n",
+  smart_home_camera_accel_initialize();
+  printf("[smart_home_camera] start path=%s source=1024x600 rgb565 "
+         "preview=%ux%u target=15fps backend=%s\n",
          SMART_HOME_CAMERA_PATH, SMART_HOME_CAMERA_PREVIEW_WIDTH,
-         SMART_HOME_CAMERA_PREVIEW_HEIGHT);
+         SMART_HOME_CAMERA_PREVIEW_HEIGHT,
+         g_camera.ppa_ready ? "ppa" : "cpu");
+  printf("[smart_home_camera] buffers src=%p preview0=%p preview1=%p\n",
+         g_camera.capture[0], g_camera.preview[0], g_camera.preview[1]);
 
   ret = smart_home_camera_capture_loop(fd);
+  smart_home_camera_log_scale();
   (void)smart_home_camera_ioctl(fd, VIDIOC_STREAMOFF, &type);
 
 close_fd:
@@ -475,6 +671,8 @@ int smart_home_camera_start(void)
   g_camera.published_preview = 0;
   g_camera.fps_window_us = 0;
   g_camera.fps_window_frames = 0;
+  g_camera.preview_window_us = 0;
+  g_camera.preview_window_frames = 0;
   pthread_mutex_unlock(&g_camera.lock);
 
   ret = pthread_attr_init(&attr);

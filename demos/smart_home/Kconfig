@@ -698,6 +698,16 @@ config SMART_HOME_CAMERA_PREVIEW
       512x300 preview to the LVGL device popup at a maximum of 15 FPS.
       It is intentionally independent of cAGENT and network services.
 
+config SMART_HOME_CAMERA_PPA
+    bool "Scale camera previews with ESP32-P4 PPA"
+    depends on SMART_HOME_CAMERA_PREVIEW && ESP32P4_PPA
+    default n
+    help
+      Scale RGB565 frames from 1024x600 to 512x300 using PPA on CPU0.
+      Keep capture buffers until DMA completes; use CPU scaling if PPA
+      initialization or a job fails after safe buffer ownership recovery.
+      Print hardware/CPU frame counts and scaling times for board checks.
+
 config SMART_HOME_CAMERA_TOOL
     bool "Agent camera tool (power + snapshot)"
     depends on SMART_HOME_CAMERA_PREVIEW

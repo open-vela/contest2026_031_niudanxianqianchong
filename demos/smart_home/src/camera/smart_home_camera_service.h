@@ -10,8 +10,9 @@
 /* The source is fixed by the current SC2336 V4L2 profile.  The preview is
  * deliberately smaller than the screen: it keeps the first LVGL integration
  * at 15 FPS while the sensor still captures at 30 FPS.  512x300 is exactly
- * half the source in both axes, so the nearest-neighbour downscale stays
- * free of aspect distortion. */
+ * half the source in both axes, preserving aspect ratio for PPA scaling
+ * and the nearest-neighbour CPU fallback.
+ */
 
 #define SMART_HOME_CAMERA_PREVIEW_WIDTH   512u
 #define SMART_HOME_CAMERA_PREVIEW_HEIGHT  300u
@@ -35,6 +36,13 @@ struct smart_home_camera_status_s
   uint32_t capture_fps_x100;
   uint32_t preview_fps_x100;
   uint32_t dropped_frames;
+  uint32_t ppa_frames;
+  uint32_t cpu_frames;
+  uint32_t ppa_errors;
+  int ppa_last_error;
+  uint64_t ppa_total_us;
+  uint64_t cpu_total_us;
+  uint32_t scale_max_us;
 };
 
 int smart_home_camera_start(void);
