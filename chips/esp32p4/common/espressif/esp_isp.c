@@ -15,6 +15,40 @@
 
 #include <arch/chip/esp_isp.h>
 
+/* The HAL exposes isp_ll_awb_set_wb_gain() and isp_ll_awb_enable_wb_gain()
+ * only for CHIP_SUPPORT_MIN_REV >= 300.  That condition expands to
+ * CONFIG_ESP_REV_MIN_FULL, which the ESP32-P4 sdkconfig does not define (it
+ * only defines CONFIG_ESP32P4_REV_MIN_FULL), so both helpers compile to empty
+ * stubs on this target.  Program the WBG registers directly instead.
+ *
+ * The WBG gain registers are 12 bits wide with a hardware default of 256,
+ * i.e. 8.4 fixed point where 256 is unity.
+ */
+
+#define ESP_ISP_WBG_COEF_MAX  0xfff
+
+static void esp_isp_set_wbg(FAR isp_dev_t *hw,
+                            FAR const struct esp_isp_config_s *config)
+{
+  if (config->wbg_gain_r == 0 || config->wbg_gain_g == 0 ||
+      config->wbg_gain_b == 0)
+    {
+      hw->cntl.wbg_en = 0;
+      return;
+    }
+
+  hw->wbg_coef_r.wbg_r = config->wbg_gain_r & ESP_ISP_WBG_COEF_MAX;
+  hw->wbg_coef_g.wbg_g = config->wbg_gain_g & ESP_ISP_WBG_COEF_MAX;
+  hw->wbg_coef_b.wbg_b = config->wbg_gain_b & ESP_ISP_WBG_COEF_MAX;
+
+  /* The shadow mode is set to UPDATE_ONLY_NEXT_VSYNC, so the coefficients
+   * become active on the next frame.  Request that update explicitly.
+   */
+
+  hw->shadow_reg_ctrl.wbg_update = 1;
+  hw->cntl.wbg_en = 1;
+}
+
 int esp_isp_initialize(FAR struct esp_isp_s *state,
                        FAR const struct esp_isp_config_s *config)
 {
@@ -72,6 +106,7 @@ int esp_isp_initialize(FAR struct esp_isp_s *state,
         }
 
       isp_ll_set_intput_data_h_pixel_num(hw, config->width);
+      esp_isp_set_wbg(hw, config);
       isp_ll_enable(hw, true);
     }
 

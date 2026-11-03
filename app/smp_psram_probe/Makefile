@@ -1,0 +1,10 @@
+include $(APPDIR)/Make.defs
+
+PROGNAME  = smp_psram
+PRIORITY  = SCHED_PRIORITY_DEFAULT
+STACKSIZE = 4096
+MODULE    = $(CONFIG_LVX_USE_DEMO_CONTEST2026_031_SMP_PSRAM_PROBE)
+
+MAINSRC = smp_psram_main.c
+
+include $(APPDIR)/Application.mk

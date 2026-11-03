@@ -22,7 +22,7 @@ static int snapshot_from_service(smart_home_device_service_t *service,
     light = smart_home_device_find_first(&state, "living_room",
                                          SMART_HOME_DEVICE_LIGHT);
     if (!light) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
 
     out_snapshot->online = 1;

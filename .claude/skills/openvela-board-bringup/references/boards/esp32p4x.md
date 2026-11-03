@@ -30,7 +30,7 @@
 | ES8311 音频 | codec 适配与 GDMA 问题 | `docs/硬件适配/ESP32-P4X-Function-EV-Board-ES8311音频适配方案.md`、`docs/开发日志/ESP32-P4X-ES8311-Codec适配与GDMA问题复盘.md` |
 | C6 WiFi | ESP-Hosted 控制面/数据面、SDIO 枚举 | `docs/开发日志/ESP32-P4X-C6-ESP-Hosted控制面与WLAN数据面开发记录.md`、`ESP32-P4X-C6-SDIO基础枚举阶段记录.md` |
 | EK79007 DSI | 关闭 Bridge underrun 中断,消除 flash 擦写冲突 | git log `fix(dsi)`;README 显示链路章节 |
-| GT911 触摸 | 单指已验证,多点/校准待验证 | `docs/硬件适配/gt911适配.md` |
+| GT911 触摸 | 单指已验证;INT/RST 不在 HMI 子板,经适配板 J6 引出;中断模式需自行接线 | `docs/硬件适配/gt911适配.md` |
 | LittleFS | 挂载失败与修复 | `docs/开发日志/ESP32-P4X-LittleFS挂载失败与修复.md` |
 | PSRAM/字体 | MiSans 完整字体 PSRAM 预加载 | `docs/开发日志/ESP32-P4X-SmartHome-完整MiSans-PSRAM预加载修复.md` |
 | HTTP | 发送阻塞修复 | `docs/开发日志/ESP32-P4X-SmartHome-HTTP发送阻塞修复.md` |

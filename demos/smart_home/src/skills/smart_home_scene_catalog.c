@@ -179,7 +179,7 @@ int smart_home_scene_catalog_load(const char *skill_text,
     memset(catalog, 0, sizeof(*catalog));
     block_start = strstr(skill_text, SCENE_CATALOG_START);
     if (!block_start) {
-        return AGENT_ERROR_NOTFOUND;
+        return AGENT_ERROR_NOT_FOUND;
     }
     block_start += strlen(SCENE_CATALOG_START);
     block_end = strstr(block_start, SCENE_CATALOG_END);

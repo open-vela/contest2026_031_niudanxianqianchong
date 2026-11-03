@@ -31,12 +31,14 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <math.h>
 #include <syslog.h>
 
 #include <nuttx/nuttx.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
@@ -106,6 +108,27 @@
 /* I2S DMA RX/TX description number */
 
 #define I2S_DMADESC_NUM                 (CONFIG_I2S_DMADESC_NUM)
+
+/* Bounded wait for a free buffer container.  The codec worker must never
+ * block
+ * forever on an internal resource: losing one completion would otherwise
+ * wedge
+ * the stream permanently.
+ */
+
+#define I2S_BUF_WAIT_TIMEOUT_MS         2000
+
+/* Bring-up tracing.  up_putc() writes straight to the UART without syslog,
+ * locks or interrupts, so the marks survive a hang that silences the shell.
+ * Enable only while debugging: the single characters interleave with log
+ * lines.
+ */
+
+#ifdef CONFIG_ESPRESSIF_I2S_TRACE
+#  define I2S_TRACE(c) up_putc(c)
+#else
+#  define I2S_TRACE(c)
+#endif
 
 /* I2S DMA channel number */
 
@@ -183,6 +206,26 @@
 #  define I2S_DMA_BUFFER_MAX_SIZE   DMA_DESCRIPTOR_BUFFER_MAX_SIZE_64B_ALIGNED
 #else
 #  define I2S_DMA_BUFFER_MAX_SIZE   DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED
+#endif
+
+/* Bytes that may be deferred to the next audio buffer.  Only an incomplete
+ * frame is carried, so the useful bound is one frame; a frame cannot exceed
+ * the widest supported sample (32-bit) times the two I2S slots.  The storage
+ * is rounded up to the cache line so the field itself stays aligned, and the
+ * DMA length is independently aligned before submission.  Both facts are
+ * checked at run time rather than assumed.
+ */
+
+#define I2S_CARRY_MAX_BYTES         (8)
+
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+#  define I2S_CARRY_STORAGE_SIZE    (64)
+#else
+#  define I2S_CARRY_STORAGE_SIZE    (I2S_CARRY_MAX_BYTES)
+#endif
+
+#if I2S_CARRY_STORAGE_SIZE < I2S_CARRY_MAX_BYTES
+#  error "Carry storage must be able to hold a full frame"
 #endif
 
 /****************************************************************************
@@ -275,8 +318,8 @@ struct esp_buffer_s
 
 struct esp_buffer_carry_s
 {
-  uint32_t value;
-  size_t bytes;
+  uint8_t value[I2S_CARRY_STORAGE_SIZE];  /* Deferred partial frame */
+  size_t  bytes;                          /* Valid bytes in value[] */
 };
 
 /* This structure describes the state of one receiver or transmitter
@@ -530,39 +573,41 @@ static struct esp_buffer_s *i2s_buf_allocate(struct esp_i2s_s *priv)
   struct esp_buffer_s *bfcontainer;
   irqstate_t flags;
   int ret;
-  int alignment;
   int i;
 
   /* Set aside a buffer container.  By doing this, we guarantee that we will
-   * have at least one free buffer container.
+   * have at least one free buffer container.  The wait is bounded because
+   * this
+   * runs on the codec worker thread: an unbounded wait would hang playback
+   * and
+   * capture forever if a completion were ever lost.
    */
 
-  ret = nxsem_wait_uninterruptible(&priv->bufsem);
+  ret = nxsem_tickwait_uninterruptible(&priv->bufsem,
+                                       MSEC2TICK(I2S_BUF_WAIT_TIMEOUT_MS));
   if (ret < 0)
     {
+      i2serr("Timed out waiting for a buffer container\n");
       return NULL;
     }
 
-  /* Get the buffer from the head of the free list */
+  /* Get the buffer from the head of the free list.  Only pointer
+   * manipulation
+   * happens inside the critical section: the descriptors are part of the
+   * container and were allocated by i2s_buf_initialize().  Allocating them
+   * here
+   * would take the heap mutex with interrupts disabled, which deadlocks the
+   * whole system once another CPU holds that mutex.
+   */
 
   flags = spin_lock_irqsave(&priv->slock);
   bfcontainer = priv->bf_freelist;
   DEBUGASSERT(bfcontainer);
 
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  alignment = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM,
-                                            CACHE_TYPE_DATA);
-#else
-  alignment = sizeof(uint32_t);
-#endif
-
   for (i = 0; i < I2S_DMADESC_NUM; i++)
     {
-      size_t size = ALIGN_UP(sizeof(lldesc_t), alignment);
-      bfcontainer->dma_link[i] = (lldesc_t *)kmm_memalign(alignment, size);
+      DEBUGASSERT(bfcontainer->dma_link[i] != NULL);
     }
-
-  /* Unlink the buffer from the freelist */
 
   priv->bf_freelist = bfcontainer->flink;
   spin_unlock_irqrestore(&priv->slock, flags);
@@ -593,14 +638,20 @@ static int i2s_buf_free(struct esp_i2s_s *priv,
   irqstate_t flags;
   int i;
 
-  /* Put the buffer container back on the free list (circbuf) */
+  /* Put the buffer container back on the free list (circbuf).  The
+   * descriptors
+   * belong to the container and stay allocated for the lifetime of the
+   * driver,
+   * so nothing is freed here: releasing them under the spinlock would take
+   * the
+   * heap mutex with interrupts disabled.
+   */
 
   flags = spin_lock_irqsave(&priv->slock);
 
   for (i = 0; i < I2S_DMADESC_NUM; i++)
     {
-      kmm_free(bfcontainer->dma_link[i]);
-      bfcontainer->dma_link[i] = NULL;
+      DEBUGASSERT(bfcontainer->dma_link[i] != NULL);
     }
 
   bfcontainer->apb = NULL;
@@ -637,15 +688,57 @@ static int i2s_buf_free(struct esp_i2s_s *priv,
 
 static int i2s_buf_initialize(struct esp_i2s_s *priv)
 {
-  int ret;
+  lldesc_t *descriptor;
+  size_t size;
+  int alignment;
+  int container;
+  int i;
+
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  alignment = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM,
+                                            CACHE_TYPE_DATA);
+#else
+  alignment = sizeof(uint32_t);
+#endif
+
+  size = ALIGN_UP(sizeof(lldesc_t), alignment);
 
   priv->tx.carry.bytes = 0;
-  priv->tx.carry.value = 0;
+  memset(priv->tx.carry.value, 0, sizeof(priv->tx.carry.value));
 
   priv->bf_freelist = NULL;
-  for (int i = 0; i < CONFIG_ESPRESSIF_I2S_MAXINFLIGHT; i++)
+
+  /* Allocate every DMA descriptor once, up front.  Descriptors are part of
+   * the
+   * buffer container from here on, which keeps the steady-state
+   * allocate/free
+   * path free of heap calls - and therefore free of the heap mutex - so it
+   * can
+   * run inside a spinlocked section safely.
+   */
+
+  for (container = 0;
+       container < CONFIG_ESPRESSIF_I2S_MAXINFLIGHT; container++)
     {
-      ret = i2s_buf_free(priv, &priv->containers[i]);
+      for (i = 0; i < I2S_DMADESC_NUM; i++)
+        {
+          descriptor = kmm_memalign(alignment, size);
+          if (descriptor == NULL)
+            {
+              i2serr("Failed to allocate descriptor %d of container %d\n",
+                     i, container);
+              return -ENOMEM;
+            }
+
+          memset(descriptor, 0, size);
+          priv->containers[container].dma_link[i] = descriptor;
+        }
+    }
+
+  for (container = 0;
+       container < CONFIG_ESPRESSIF_I2S_MAXINFLIGHT; container++)
+    {
+      int ret = i2s_buf_free(priv, &priv->containers[container]);
       if (ret < 0)
         {
           i2serr("Failed to free buffer container: %d\n", ret);
@@ -770,14 +863,30 @@ static uint32_t i2s_common_dma_setup(struct esp_buffer_s *bfcontainer,
 static int IRAM_ATTR i2s_txdma_start(struct esp_i2s_s *priv)
 {
   struct esp_buffer_s *bfcontainer;
+  irqstate_t flags;
   esp_err_t err;
 
-  /* If there is already an active transmission in progress, then bail
-   * returning success.
+  /* This function talks to the GDMA driver, which takes its own spinlock
+   * with
+   * interrupts disabled (esp_os_enter_critical_safe).  It must therefore
+   * never
+   * be called with priv->slock held: nesting a GDMA spinlock inside ours
+   * lets
+   * the two CPUs deadlock with interrupts off on both, which hangs the whole
+   * system silently (no shell, no watchdog).  Callers queue the buffer under
+   * priv->slock and then call this function with interrupts enabled.
    */
+
+  /* Move one pending buffer to the active queue.  This is the only part that
+   * touches the queues, so it is the only part that needs priv->slock; the
+   * GDMA calls below must stay outside it.
+   */
+
+  flags = spin_lock_irqsave(&priv->slock);
 
   if (!sq_empty(&priv->tx.act))
     {
+      spin_unlock_irqrestore(&priv->slock, flags);
       return OK;
     }
 
@@ -785,27 +894,48 @@ static int IRAM_ATTR i2s_txdma_start(struct esp_i2s_s *priv)
 
   if (sq_empty(&priv->tx.pend))
     {
+      spin_unlock_irqrestore(&priv->slock, flags);
       return OK;
     }
 
-  i2s_hal_tx_reset(priv->config->ctx);
+  bfcontainer = (struct esp_buffer_s *)sq_remfirst(&priv->tx.pend);
+  sq_addlast((sq_entry_t *)bfcontainer, &priv->tx.act);
 
-  /* Reset the DMA operation */
+  spin_unlock_irqrestore(&priv->slock, flags);
 
-  err = gdma_reset(priv->dma_channel_tx);
-  if (err != ESP_OK)
+  /* Reset the transmitter, the FIFO and the DMA channel only when the stream
+   * is starting.  This function also runs from the DMA completion interrupt
+   * to
+   * feed the next buffer of an already running stream; resetting there stops
+   * BCLK/WS mid-frame once per buffer period (4096 bytes at 16 kHz mono is
+   * 128 ms), which is audible as a repeating click.  While the stream is
+   * live
+   * the hardware is already configured, so only the descriptor pointer needs
+   * to be advanced.
+   */
+
+  if (!priv->tx_started)
     {
-      i2serr("Failed to reset DMA channel: %d\n", err);
-      return -EINVAL;
+      i2s_hal_tx_reset(priv->config->ctx);
+
+      /* Reset the DMA operation */
+
+      err = gdma_reset(priv->dma_channel_tx);
+      if (err != ESP_OK)
+        {
+          i2serr("Failed to reset DMA channel: %d\n", err);
+          return -EINVAL;
+        }
+
+      /* Reset TX FIFO */
+
+      i2s_hal_tx_reset_fifo(priv->config->ctx);
     }
 
-  /* Reset TX FIFO */
-
-  i2s_hal_tx_reset_fifo(priv->config->ctx);
-
-  /* Start transmission if no data is already being transmitted */
-
-  bfcontainer = (struct esp_buffer_s *)sq_remfirst(&priv->tx.pend);
+  /* Point the channel at the new descriptor chain.  Each chain ends with a
+   * NULL next pointer, so the descriptor FSM is parked between buffers even
+   * though the transmitter keeps clocking.
+   */
 
   err = gdma_start(priv->dma_channel_tx, (intptr_t)bfcontainer->dma_link[0]);
   if (err != ESP_OK)
@@ -814,11 +944,22 @@ static int IRAM_ATTR i2s_txdma_start(struct esp_i2s_s *priv)
       return -EINVAL;
     }
 
-  i2s_hal_tx_start(priv->config->ctx);
+  /* Only the first buffer starts the transmitter.  i2s_ll_tx_start() begins
+   * with i2s_ll_tx_update(), which spins on a self-clearing bit; running
+   * that
+   * from the completion ISR on an already running stream is both unnecessary
+   * and risky if the bit does not clear.  The configuration keeps TX
+   * clocking
+   * through an empty FIFO (tx_stop_en == 0), so the transmitter is still
+   * alive
+   * when the next descriptor arrives.
+   */
 
-  priv->tx_started = true;
-
-  sq_addlast((sq_entry_t *)bfcontainer, &priv->tx.act);
+  if (!priv->tx_started)
+    {
+      i2s_hal_tx_start(priv->config->ctx);
+      priv->tx_started = true;
+    }
 
   return OK;
 }
@@ -844,24 +985,37 @@ static int IRAM_ATTR i2s_txdma_start(struct esp_i2s_s *priv)
 static int i2s_rxdma_start(struct esp_i2s_s *priv)
 {
   struct esp_buffer_s *bfcontainer;
+  irqstate_t flags;
   size_t eof_nbytes;
   esp_err_t err;
 
-  /* If there is already an active transmission in progress, then bail
-   * returning success.
+  /* Like the TX path, this must not run with priv->slock held: the GDMA
+   * driver takes its own spinlock with interrupts disabled, and nesting the
+   * two hangs both CPUs silently.
    */
+
+  /* Move one pending buffer to the active queue under priv->slock. */
+
+  flags = spin_lock_irqsave(&priv->slock);
 
   if (!sq_empty(&priv->rx.act))
     {
+      spin_unlock_irqrestore(&priv->slock, flags);
       return OK;
     }
-
-  /* If there are no pending transfer, then bail returning success */
 
   if (sq_empty(&priv->rx.pend))
     {
+      spin_unlock_irqrestore(&priv->slock, flags);
       return OK;
     }
+
+  bfcontainer = (struct esp_buffer_s *)sq_remfirst(&priv->rx.pend);
+  sq_addlast((sq_entry_t *)bfcontainer, &priv->rx.act);
+
+  spin_unlock_irqrestore(&priv->slock, flags);
+
+  I2S_TRACE('K');
 
   i2s_hal_rx_reset(priv->config->ctx);
 
@@ -878,7 +1032,7 @@ static int i2s_rxdma_start(struct esp_i2s_s *priv)
 
   i2s_hal_rx_reset_fifo(priv->config->ctx);
 
-  bfcontainer = (struct esp_buffer_s *)sq_remfirst(&priv->rx.pend);
+  I2S_TRACE('R');
 
   eof_nbytes = MIN(bfcontainer->nbytes, I2S_DMA_BUFFER_MAX_SIZE);
 
@@ -888,6 +1042,8 @@ static int i2s_rxdma_start(struct esp_i2s_s *priv)
    * then start it.
    */
 
+  I2S_TRACE('G');
+
   err = gdma_start(priv->dma_channel_rx, (intptr_t)bfcontainer->dma_link[0]);
   if (err != ESP_OK)
     {
@@ -895,11 +1051,25 @@ static int i2s_rxdma_start(struct esp_i2s_s *priv)
       return -EINVAL;
     }
 
+  I2S_TRACE('g');
+
+  /* Full-duplex master mode clocks RX from TX.  Capture may be the first
+   * operation after boot, so no TX DMA has started that clock yet.
+   */
+
+  if (priv->config->role == I2S_ROLE_MASTER && priv->config->tx_en &&
+      !priv->tx_started)
+    {
+      i2s_tx_channel_start(priv);
+    }
+
+  I2S_TRACE('T');
+
   i2s_hal_rx_start(priv->config->ctx);
 
-  priv->rx_started = true;
+  I2S_TRACE('X');
 
-  sq_addlast((sq_entry_t *)bfcontainer, &priv->rx.act);
+  priv->rx_started = true;
 
   return OK;
 }
@@ -926,21 +1096,20 @@ static IRAM_ATTR int i2s_txdma_setup(struct esp_i2s_s *priv,
                                      struct esp_buffer_s *bfcontainer)
 {
   int ret = OK;
-  size_t carry_size;
   uint32_t bytes_queued;
   uint32_t data_copied;
   struct ap_buffer_s *apb;
-  apb_samp_t samp_size;
   apb_samp_t bytes_per_sample;
+  uint32_t nbytes;             /* Valid PCM bytes in this buffer */
+  uint32_t samp_size;          /* nbytes plus the deferred partial frame */
+  uint32_t dma_size;           /* Bytes actually handed to the DMA chain */
+  uint32_t alloc_size;         /* Cache line aligned DMA allocation */
+  uint32_t carry_size;         /* Bytes deferred to the next buffer */
   uint16_t bytes_per_frame;
   irqstate_t flags;
   uint8_t *buf;
-  uint8_t padding;
   uint8_t *samp;
   uint32_t alignment;
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  uint32_t bufsize;
-#endif
 
   DEBUGASSERT(bfcontainer && bfcontainer->apb);
 
@@ -951,55 +1120,93 @@ static IRAM_ATTR int i2s_txdma_setup(struct esp_i2s_s *priv,
   bytes_per_sample = (priv->data_width + 7) / 8;
   bytes_per_frame = bytes_per_sample * priv->channels;
 
-  samp = &apb->samp[apb->curbyte];
-  samp_size = (apb->nbytes - apb->curbyte) + priv->tx.carry.bytes;
-
+  alignment = sizeof(uint32_t);
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  /* bufsize need to align with cache line size */
-
-  bufsize = samp_size;
   alignment = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM,
                                             CACHE_TYPE_DATA);
-
-  /* First, calculate if the buffer contains a complete sample */
-
-  carry_size = samp_size % bytes_per_frame;
-
-  bufsize -= carry_size;
-
-  /* Now, the buffer contains complete samples */
-
-  uint32_t aligned_frame_num = bufsize / bytes_per_frame;
-
-  /* To make the buffer aligned with the cache line size, search for the ceil
-   * aligned size first. If the buffer size exceed the max DMA buffer size,
-   * toggle the sign to search for the floor aligned size.
-   */
-
-  for (; bufsize % alignment != 0; aligned_frame_num--)
-    {
-      bufsize = aligned_frame_num * bytes_per_frame;
-      carry_size += bytes_per_frame;
-    }
-
-  DEBUGASSERT((samp_size - carry_size) % alignment == 0);
-
-#else
-  alignment = sizeof(uint32_t);
-  carry_size = samp_size % bytes_per_frame;
 #endif
 
-  DEBUGASSERT((samp_size - carry_size) % bytes_per_frame == 0);
+  /* The bytes carried over from the previous buffer must be an incomplete
+   * frame that still fits the carry storage.  Anything else means the
+   * bookkeeping is already corrupt, so fail instead of copying an unbounded
+   * length.
+   */
+
+  if (priv->tx.carry.bytes >= bytes_per_frame ||
+      priv->tx.carry.bytes > I2S_CARRY_MAX_BYTES)
+    {
+      i2serr("Corrupt TX carry state: %zu bytes, frame %u\n",
+             priv->tx.carry.bytes, bytes_per_frame);
+      priv->tx.carry.bytes = 0;
+      return -EIO;
+    }
+
+  nbytes = apb->nbytes - apb->curbyte;
+  if (nbytes == 0 && priv->tx.carry.bytes == 0)
+    {
+      i2serr("Refusing to submit an empty TX buffer\n");
+      return -EINVAL;
+    }
+
+  /* Reassembling the previous partial frame must not overflow the sample
+   * counter, which is only 16 bits wide unless large buffers are enabled.
+   */
+
+  if (nbytes > (uint32_t)UINT16_MAX - (uint32_t)priv->tx.carry.bytes)
+    {
+      i2serr("TX buffer too large to reassemble: %" PRIu32
+             " bytes, carry %zu\n", nbytes, priv->tx.carry.bytes);
+      return -EFBIG;
+    }
+
+  samp = &apb->samp[apb->curbyte];
+  samp_size = nbytes + priv->tx.carry.bytes;
+
+  /* Split samp_size into the part handed to the DMA and the incomplete
+   * trailing frame that waits for the next buffer.  Only a partial frame is
+   * carried; cache line alignment is a property of the allocation, not a
+   * reason to defer more audio than one frame.
+   */
+
+  carry_size = samp_size % bytes_per_frame;
+  dma_size = samp_size - carry_size;
+
+  if (carry_size > I2S_CARRY_MAX_BYTES)
+    {
+      i2serr("Carry of %" PRIu32 " bytes exceeds %u bytes of storage\n",
+             carry_size, I2S_CARRY_MAX_BYTES);
+      return -EFBIG;
+    }
+
+  /* A request that does not complete a single frame cannot be submitted: the
+   * DMA has nothing to move.  Report it instead of queueing a zero length
+   * transfer that would never produce a completion.
+   */
+
+  if (dma_size == 0)
+    {
+      i2serr("Buffer of %" PRIu32 " bytes is shorter than one frame of %u "
+             "bytes\n", samp_size, bytes_per_frame);
+      return -EINVAL;
+    }
+
+  DEBUGASSERT(dma_size + carry_size == samp_size);
+  DEBUGASSERT(dma_size % bytes_per_frame == 0);
 
   /* Allocate the current audio buffer considering the remaining bytes
    * carried from the last upper half audio buffer.
    */
 
-  bfcontainer->buf = kmm_memalign(alignment, bfcontainer->nbytes);
+  /* The DMA buffer only has to hold dma_size bytes.  Allocating exactly that
+   * keeps the copy arithmetic below bounded by the allocation.
+   */
+
+  alloc_size = ALIGN_UP(dma_size, alignment);
+  bfcontainer->buf = kmm_memalign(alignment, alloc_size);
   if (bfcontainer->buf == NULL)
     {
       i2serr("Failed to allocate the DMA internal buffer "
-             "[%" PRIu32 " bytes]", bfcontainer->nbytes);
+             "[%" PRIu32 " bytes]\n", alloc_size);
       return -ENOMEM;
     }
 
@@ -1015,57 +1222,89 @@ static IRAM_ATTR int i2s_txdma_setup(struct esp_i2s_s *priv,
 
   if (priv->tx.carry.bytes)
     {
-      memcpy(buf, &priv->tx.carry.value, priv->tx.carry.bytes);
+      uint32_t need = bytes_per_frame - priv->tx.carry.bytes;
+
+      /* The carried bytes plus the ones taken from the new buffer must not
+       * run past the valid data of that buffer.  carry.bytes <
+       * bytes_per_frame
+       * was checked above, so this only fails for a genuinely short buffer.
+       */
+
+      if (need > nbytes)
+        {
+          i2serr("Buffer of %" PRIu32 " bytes cannot complete the carried "
+                 "frame (%" PRIu32 " bytes needed)\n", nbytes, need);
+          kmm_free(bfcontainer->buf);
+          bfcontainer->buf = NULL;
+          return -EINVAL;
+        }
+
+      memcpy(buf, priv->tx.carry.value, priv->tx.carry.bytes);
       buf += priv->tx.carry.bytes;
       data_copied += priv->tx.carry.bytes;
-      memcpy(buf, samp, (bytes_per_frame - priv->tx.carry.bytes));
-      buf += (bytes_per_frame - priv->tx.carry.bytes);
-      samp += (bytes_per_frame - priv->tx.carry.bytes);
-      data_copied += (bytes_per_frame - priv->tx.carry.bytes);
+      memcpy(buf, samp, need);
+      buf += need;
+      samp += need;
+      data_copied += need;
     }
 
-  /* Copy the upper half buffer to the internal buffer considering that
-   * the current upper half buffer may not contain a complete sample at
-   * the end of the buffer (and those bytes needs to be carried to the
-   * next audio buffer).
+  /* Copy the whole frames that stay in this buffer.  The trailing partial
+   * frame is kept in the carry storage and prepended to the next buffer.
    */
 
-  memcpy(buf, samp, samp_size - (data_copied + carry_size));
-  buf += samp_size - (data_copied + carry_size);
-  samp += samp_size - (data_copied + carry_size);
-  data_copied += samp_size - (data_copied + carry_size);
+  if (dma_size > data_copied)
+    {
+      uint32_t whole = dma_size - data_copied;
 
-  /* If the audio buffer's size is not a multiple of the sample size,
-   * it's necessary to carry the remaining bytes that are part of what
-   * would be the last sample on this buffer. These bytes will then be
-   * saved and inserted at the beginning of the next DMA buffer to
-   * rebuild the sample correctly.
+      DEBUGASSERT(whole <= nbytes - (data_copied - priv->tx.carry.bytes));
+      memcpy(buf, samp, whole);
+      buf += whole;
+      samp += whole;
+      data_copied += whole;
+    }
+
+  DEBUGASSERT(data_copied == dma_size);
+  DEBUGASSERT((uint32_t)(samp - apb->samp) + carry_size ==
+              nbytes + apb->curbyte);
+
+  /* Save the bytes that make up the trailing partial frame so that they can
+   * be prepended to the next buffer.  This is bounded by I2S_CARRY_MAX_BYTES
+   * and was validated before the copy.
    */
 
   priv->tx.carry.bytes = carry_size;
-  if (priv->tx.carry.bytes)
+  if (carry_size > 0)
     {
-      memcpy((uint8_t *)&priv->tx.carry.value, samp, priv->tx.carry.bytes);
+      memcpy(priv->tx.carry.value, samp, carry_size);
     }
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  /* The DMA reads dma_size bytes, but the cache is maintained over whole
+   * lines; the allocation was aligned and sized so this stays in bounds.
+   */
+
   esp_cache_msync((void *)bfcontainer->buf,
-                  bfcontainer->nbytes,
+                  ALIGN_UP(dma_size, alignment),
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 #endif
 
-  /* Configure DMA stream */
+  /* Configure DMA stream.  Only the whole, cache aligned part is submitted;
+   * the rest stays in the carry storage.
+   */
 
+  bfcontainer->nbytes = dma_size;
   bytes_queued = i2s_common_dma_setup(bfcontainer,
                                       true,
-                                      bfcontainer->nbytes);
+                                      dma_size);
 
-  if (bytes_queued != bfcontainer->nbytes)
+  if (bytes_queued != dma_size)
     {
       i2serr("Failed to enqueue I2S buffer "
              "(%" PRIu32 " bytes of %" PRIu32 ")\n",
-             bytes_queued, bfcontainer->nbytes);
-      return -bytes_queued;
+             bytes_queued, dma_size);
+      kmm_free(bfcontainer->buf);
+      bfcontainer->buf = NULL;
+      return -EFBIG;
     }
 
   flags = spin_lock_irqsave(&priv->slock);
@@ -1074,11 +1313,14 @@ static IRAM_ATTR int i2s_txdma_setup(struct esp_i2s_s *priv,
 
   sq_addlast((sq_entry_t *)bfcontainer, &priv->tx.pend);
 
-  /* Trigger DMA transfer if no transmission is in progress */
+  spin_unlock_irqrestore(&priv->slock, flags);
+
+  /* Start the DMA with interrupts enabled: i2s_txdma_start() enters the GDMA
+   * driver, which takes its own spinlock with interrupts disabled.  Nesting
+   * that inside priv->slock is what deadlocks both CPUs with interrupts off.
+   */
 
   ret = i2s_txdma_start(priv);
-
-  spin_unlock_irqrestore(&priv->slock, flags);
 
   return ret;
 }
@@ -1106,30 +1348,45 @@ static IRAM_ATTR int i2s_rxdma_setup(struct esp_i2s_s *priv,
 {
   int ret = OK;
   uint32_t bytes_queued;
+  uint32_t alloc_size;
   irqstate_t flags;
   uint32_t alignment;
 
   DEBUGASSERT(bfcontainer && bfcontainer->apb);
 
+  alignment = sizeof(uint32_t);
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  /* bufsize need to align with cache line size */
-
   alignment = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM,
                                             CACHE_TYPE_DATA);
-#else
-  alignment = sizeof(uint32_t);
 #endif
 
-  bfcontainer->buf = kmm_memalign(alignment, bfcontainer->nbytes);
+  /* The receiving buffer must be large enough to hold one descriptor chunk,
+   * and its allocation must be checked before the descriptor chain is built:
+   * a NULL here would otherwise be programmed into a DMA inlink.
+   */
 
-#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
-  esp_cache_msync((void *)bfcontainer,
-                  sizeof(struct esp_buffer_s),
-                  (ESP_CACHE_MSYNC_FLAG_DIR_C2M |
-                   ESP_CACHE_MSYNC_FLAG_UNALIGNED));
-#endif
+  if (bfcontainer->nbytes == 0 ||
+      bfcontainer->nbytes > I2S_DMA_BUFFER_MAX_SIZE * I2S_DMADESC_NUM)
+    {
+      i2serr("RX request of %" PRIu32 " bytes exceeds %d descriptors of "
+             "%u bytes\n", bfcontainer->nbytes, I2S_DMADESC_NUM,
+             I2S_DMA_BUFFER_MAX_SIZE);
+      return -EFBIG;
+    }
 
-  /* Configure DMA stream */
+  alloc_size = ALIGN_UP(bfcontainer->nbytes, alignment);
+  bfcontainer->buf = kmm_memalign(alignment, alloc_size);
+  if (bfcontainer->buf == NULL)
+    {
+      i2serr("Failed to allocate the RX DMA buffer [%" PRIu32 " bytes]\n",
+             alloc_size);
+      return -ENOMEM;
+    }
+
+  /* Prepare the descriptor chain for the CPU to hand to the DMA, and make
+   * the
+   * buffers the DMA will write into visible to the DMA engine.
+   */
 
   bytes_queued = i2s_common_dma_setup(bfcontainer,
                                       false,
@@ -1140,8 +1397,33 @@ static IRAM_ATTR int i2s_rxdma_setup(struct esp_i2s_s *priv,
       i2serr("Failed to enqueue I2S buffer "
              "(%" PRIu32 " bytes of %" PRIu32 ")\n",
              bytes_queued, bfcontainer->nbytes);
-      return -bytes_queued;
+      kmm_free(bfcontainer->buf);
+      bfcontainer->buf = NULL;
+      return -EFBIG;
     }
+
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  /* Invalidate the receive buffer so that stale cache lines cannot mask the
+   * data the DMA is about to write, and flush the descriptors the software
+   * just filled in.
+   */
+
+  esp_cache_msync((void *)bfcontainer->buf, alloc_size,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+  for (int i = 0; i < I2S_DMADESC_NUM; i++)
+    {
+      if (bfcontainer->dma_link[i] != NULL)
+        {
+          esp_cache_msync((void *)bfcontainer->dma_link[i],
+                          ALIGN_UP(sizeof(lldesc_t), alignment),
+                          (ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                           ESP_CACHE_MSYNC_FLAG_UNALIGNED));
+        }
+    }
+#endif
+
+  I2S_TRACE('s');
 
   flags = spin_lock_irqsave(&priv->slock);
 
@@ -1149,11 +1431,18 @@ static IRAM_ATTR int i2s_rxdma_setup(struct esp_i2s_s *priv,
 
   sq_addlast((sq_entry_t *)bfcontainer, &priv->rx.pend);
 
-  /* Trigger DMA transfer if no transmission is in progress */
+  spin_unlock_irqrestore(&priv->slock, flags);
+
+  I2S_TRACE('S');
+
+  /* Start the DMA with interrupts enabled, for the same reason as the TX
+   * path:
+   * i2s_rxdma_start() enters the GDMA driver, which takes its own spinlock.
+   */
 
   ret = i2s_rxdma_start(priv);
 
-  spin_unlock_irqrestore(&priv->slock, flags);
+  I2S_TRACE('D');
 
   return ret;
 }
@@ -1182,13 +1471,23 @@ static void IRAM_ATTR i2s_tx_schedule(struct esp_i2s_s *priv,
 {
   struct esp_buffer_s *bfcontainer;
   lldesc_t *bfdesc;
+  irqstate_t flags;
+  bool restart;
   int ret;
 
   /* Upon entry, the transfer(s) that just completed are the ones in the
    * priv->tx.act queue.
    */
 
-  /* Move all entries from the tx.act queue to the tx.done queue */
+  /* Move all entries from the tx.act queue to the tx.done queue.  The queues
+   * are also touched by i2s_txdma_start() from thread context, so this runs
+   * under priv->slock.  The restart below must happen after the lock is
+   * released: i2s_txdma_start() takes the same lock and also enters the GDMA
+   * driver, so calling it here would self-deadlock.
+   */
+
+  restart = false;
+  flags = spin_lock_irqsave(&priv->slock);
 
   if (!sq_empty(&priv->tx.act))
     {
@@ -1228,11 +1527,18 @@ static void IRAM_ATTR i2s_tx_schedule(struct esp_i2s_s *priv,
 
           if (sq_empty(&priv->tx.act))
             {
-              /* Then start the next DMA. */
+              /* Then start the next DMA after dropping the lock. */
 
-              i2s_txdma_start(priv);
+              restart = true;
             }
         }
+    }
+
+  spin_unlock_irqrestore(&priv->slock, flags);
+
+  if (restart)
+    {
+      i2s_txdma_start(priv);
 
       /* If the worker has completed running, then reschedule the working
        * thread.
@@ -1277,13 +1583,23 @@ static void i2s_rx_schedule(struct esp_i2s_s *priv,
 {
   struct esp_buffer_s *bfcontainer;
   lldesc_t *bfdesc;
+  irqstate_t flags;
+  bool restart;
   int ret;
 
   /* Upon entry, the transfer(s) that just completed are the ones in the
    * priv->rx.act queue.
    */
 
-  /* Move all entries from the rx.act queue to the rx.done queue */
+  /* Move all entries from the rx.act queue to the rx.done queue.  The queues
+   * are also touched by i2s_rxdma_start() from thread context, so this runs
+   * under priv->slock; the restart itself must wait until the lock is
+   * dropped
+   * because it takes the same lock and enters the GDMA driver.
+   */
+
+  restart = false;
+  flags = spin_lock_irqsave(&priv->slock);
 
   if (!sq_empty(&priv->rx.act))
     {
@@ -1291,11 +1607,18 @@ static void i2s_rx_schedule(struct esp_i2s_s *priv,
 
       bfcontainer = (struct esp_buffer_s *)sq_peek(&priv->rx.act);
 
-      /* Find the last descriptor of the current buffer container */
+      /* Find the last descriptor of the current buffer container.  The
+       * receive inlink is built with END-OF-FRAME clear on every descriptor
+       * (see i2s_common_dma_setup()), so the chain terminator - not the eof
+       * flag - identifies the descriptor the completion interrupt reports.
+       * Testing eof here left bfdesc at dma_link[0], which never matched the
+       * last-descriptor address passed by i2s_rx_interrupt(); rx.done stayed
+       * empty and the capture stream never completed.
+       */
 
       bfdesc = bfcontainer->dma_link[0];
 
-      while (bfdesc->eof == 1 && STAILQ_NEXT(bfdesc, qe) != NULL)
+      while (STAILQ_NEXT(bfdesc, qe) != NULL)
         {
           bfdesc = STAILQ_NEXT(bfdesc, qe);
         }
@@ -1318,11 +1641,18 @@ static void i2s_rx_schedule(struct esp_i2s_s *priv,
 
           if (sq_empty(&priv->rx.act))
             {
-              /* Then start the next DMA. */
+              /* Then start the next DMA after dropping the lock. */
 
-              i2s_rxdma_start(priv);
+              restart = true;
             }
         }
+    }
+
+  spin_unlock_irqrestore(&priv->slock, flags);
+
+  if (restart)
+    {
+      i2s_rxdma_start(priv);
 
       /* If the worker has completed running, then reschedule the working
        * thread.
@@ -1396,6 +1726,13 @@ static void i2s_tx_worker(void *arg)
       DEBUGASSERT(bfcontainer && bfcontainer->callback);
       bfcontainer->callback(&priv->dev, bfcontainer->apb,
                             bfcontainer->arg, bfcontainer->result);
+
+      /* Release the reference taken when the buffer was submitted.  The
+       * callback above delivers the buffer to the upper half, which holds
+       * its own reference; without this the buffer would never be freed.
+       */
+
+      apb_free(bfcontainer->apb);
 
       /* Release the internal buffer used by the DMA outlink */
 
@@ -1481,17 +1818,37 @@ static void i2s_rx_worker(void *arg)
 
       bfcontainer->apb->nbytes = 0;
 
-      dmadesc = bfcontainer->dma_link[0];
+      /* Walk the whole inlink and copy every segment the DMA filled in.  The
+       * traversal is bounded by the number of bytes that were requested, not
+       * by the END-OF-FRAME flag: on this peripheral that flag is not a
+       * reliable "last segment" indicator for receive descriptors, and
+       * relying on it silently dropped every segment after the first.
+       */
 
-      do
+      dmadesc = bfcontainer->dma_link[0];
+      while (dmadesc != NULL &&
+             bfcontainer->apb->nbytes < bfcontainer->nbytes)
         {
+          uint32_t seg = dmadesc->length;
+
+          /* A segment that would overrun the buffer means the descriptor
+           * chain no longer matches the request; stop rather than write past
+           * the end of the application buffer.
+           */
+
+          if (seg > bfcontainer->nbytes - bfcontainer->apb->nbytes)
+            {
+              i2serr("RX segment of %" PRIu32 " bytes overruns the %" PRIu32
+                     " byte buffer\n", seg, bfcontainer->nbytes);
+              seg = bfcontainer->nbytes - bfcontainer->apb->nbytes;
+            }
+
           memcpy(bfcontainer->apb->samp + bfcontainer->apb->nbytes,
                  (const void *)dmadesc->buf,
-                 dmadesc->length);
-          bfcontainer->apb->nbytes += dmadesc->length;
+                 seg);
+          bfcontainer->apb->nbytes += seg;
           dmadesc = STAILQ_NEXT(dmadesc, qe);
         }
-      while (dmadesc != NULL && dmadesc->eof == 1);
 
       /* Perform the RX transfer done callback */
 
@@ -1505,6 +1862,10 @@ static void i2s_rx_worker(void *arg)
       bfcontainer->callback(&priv->dev, bfcontainer->apb,
                             bfcontainer->arg, bfcontainer->result);
 
+      /* Release the reference taken when the buffer was submitted. */
+
+      apb_free(bfcontainer->apb);
+
       /* Release the internal buffer used by the DMA inlink */
 
       kmm_free(bfcontainer->buf);
@@ -1514,13 +1875,20 @@ static void i2s_rx_worker(void *arg)
       VERIFY(i2s_buf_free(priv, bfcontainer));
     }
 
-  /* RX channel can only be stopped here if either 1) the TX channel is
-   * disabled or 2) the I2S is in master role. If the I2S is in slave role,
-   * the RX channel can only be stopped after the TX channel has finished
-   * because the WS and BCLK are shared with the TX.
+  /* Stop the RX channel only when the stream is actually finished.  This
+   * used
+   * to run whenever both queues happened to be empty, which also happens in
+   * the
+   * normal streaming case between the completion of one buffer and the
+   * submission of the next.  The result was a permanently idle channel: the
+   * completion that the application was waiting for never arrived and
+   * capture
+   * hung on the first buffer.  Codec drivers can call receive() directly,
+   * so streaming defaults to true until an explicit I2S AUDIOIOC_STOP.
    */
 
-  if ((!priv->config->tx_en || priv->config->role == I2S_ROLE_MASTER) &&
+  if (!priv->streaming &&
+      (!priv->config->tx_en || priv->config->role == I2S_ROLE_MASTER) &&
       (sq_empty(&priv->rx.act) && sq_empty(&priv->rx.pend)))
     {
       i2s_rx_channel_stop(priv);
@@ -1722,6 +2090,18 @@ static int i2s_configure(struct esp_i2s_s *priv)
 
   i2s_ll_share_bck_ws(priv->config->ctx->dev,
                       priv->config->tx_en && priv->config->rx_en);
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  /* RX is a slave of TX in full-duplex master mode.  Keep its shared clocks
+   * running when capture has no TX samples to put into the transmit FIFO.
+   */
+
+  if (priv->config->role == I2S_ROLE_MASTER && priv->config->tx_en &&
+      priv->config->rx_en)
+    {
+      priv->config->ctx->dev->tx_conf.tx_stop_en = 0;
+    }
+#endif
 
   priv->data_width = priv->config->data_width;
   priv->channels = priv->config->total_slot;
@@ -2523,6 +2903,8 @@ static bool IRAM_ATTR i2s_rx_interrupt(gdma_channel_handle_t dma_chan,
   int alignment = cache_hal_get_cache_line_size(CACHE_LL_LEVEL_INT_MEM,
                                                 CACHE_TYPE_DATA);
 #endif
+  I2S_TRACE('i');
+
   if (event_data->flags.normal_eof)
     {
       cur = (lldesc_t *)(event_data->rx_eof_desc_addr);
@@ -2535,17 +2917,35 @@ static bool IRAM_ATTR i2s_rx_interrupt(gdma_channel_handle_t dma_chan,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
 
-      /* If the current descriptor is the last one, schedule the transfer */
+      /* If the current descriptor is the structural end of the inlink, the
+       * whole request has been received.  Scheduling must not additionally
+       * require the END-OF-FRAME bit: the descriptor chain is built with
+       * that
+       * bit clear for receive transfers, so testing it here meant the
+       * completion worker was never scheduled and playback worked while
+       * capture produced no data at all.  Ownership returning to the CPU is
+       * the condition the DMA guarantees when it is done with the segment.
+       */
 
       if (STAILQ_NEXT(cur, qe) == NULL)
         {
-          if (cur->eof == 1 && cur->owner == 0)
+          if (cur->owner == 0)
             {
+              I2S_TRACE('Z');
               i2s_rx_schedule(priv, cur);
+            }
+          else
+            {
+              I2S_TRACE('o');
             }
         }
       else
         {
+          I2S_TRACE('m');
+          I2S_TRACE('0' + (STAILQ_NEXT(cur, qe)->size / 1000) % 10);
+          I2S_TRACE('0' + (STAILQ_NEXT(cur, qe)->size / 100) % 10);
+          I2S_TRACE('0' + (STAILQ_NEXT(cur, qe)->size / 10) % 10);
+          I2S_TRACE('0' + STAILQ_NEXT(cur, qe)->size % 10);
           i2s_ll_rx_set_eof_num(priv->config->ctx->dev,
                                 STAILQ_NEXT(cur, qe)->size);
         }
@@ -2713,6 +3113,9 @@ static int i2s_txchannels(struct i2s_dev_s *dev, uint8_t channels)
 static int i2s_rxchannels(struct i2s_dev_s *dev, uint8_t channels)
 {
   struct esp_i2s_s *priv = (struct esp_i2s_s *)dev;
+  bool is_started;
+  bool is_mono;
+  uint32_t channel_mask;
 
   if (priv->config->rx_en)
     {
@@ -2726,8 +3129,35 @@ static int i2s_rxchannels(struct i2s_dev_s *dev, uint8_t channels)
           return 0;
         }
 
+      is_started = priv->rx_started;
+      if (is_started)
+        {
+          i2s_rx_channel_stop(priv);
+        }
+
+      /* Standard I2S keeps two wire slots even for a mono DMA stream.
+       * Select only the first slot for mono so the empty codec slot does
+       * not appear as an extra zero sample in the application buffer.
+       */
+
+      is_mono = channels == 1;
+      channel_mask = I2S_TDM_SLOT0;
+      if (!is_mono)
+        {
+          channel_mask |= I2S_TDM_SLOT1;
+        }
+
+      i2s_ll_rx_set_chan_num(priv->config->ctx->dev, 2);
+      i2s_ll_rx_enable_mono_mode(priv->config->ctx->dev, is_mono);
+      i2s_ll_rx_set_active_chan_mask(priv->config->ctx->dev, channel_mask);
       priv->channels = channels;
-      return priv->channels;
+
+      if (is_started)
+        {
+          i2s_rx_channel_start(priv);
+        }
+
+      return channels;
     }
 
   return 0;
@@ -2985,7 +3415,6 @@ static int i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       struct esp_buffer_s *bfcontainer;
       int ret = OK;
       uint32_t nbytes;
-      uint32_t nsamp;
 
       /* Check audio buffer data size from the upper half. If the buffer
        * size is not a multiple of the data width, the remaining bytes
@@ -2996,12 +3425,17 @@ static int i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
       nbytes -= (nbytes % (priv->data_width / 8));
 
+      /* Reject oversized requests before anything is allocated or queued.
+       * The limit is the total descriptor capacity of one outlink; exceeding
+       * it cannot be repaired later in the pipeline.
+       */
+
       if (nbytes > (I2S_DMA_BUFFER_MAX_SIZE * I2S_DMADESC_NUM))
         {
           i2serr("Required buffer size can't fit into DMA outlink "
-                 "(exceeds in %" PRIu32 " bytes). Try to increase the "
-                 "number of the DMA descriptors (CONFIG_I2S_DMADESC_NUM).",
-                 nbytes - (I2S_DMA_BUFFER_MAX_SIZE * I2S_DMADESC_NUM));
+                 "(%" PRIu32 " bytes, capacity %u). Increase "
+                 "CONFIG_I2S_DMADESC_NUM or lower the audio buffer size.\n",
+                 nbytes, I2S_DMA_BUFFER_MAX_SIZE * I2S_DMADESC_NUM);
           return -EFBIG;
         }
 
@@ -3019,14 +3453,10 @@ static int i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       ret = nxmutex_lock(&priv->lock);
       if (ret < 0)
         {
-          goto errout_with_buf;
+          goto errout_without_lock;
         }
 
-      /* Add a reference to the audio buffer */
-
-      apb_reference(apb);
-
-      /* Initialize the buffer container structure */
+      /* Initialize the buffer container before taking the DMA reference. */
 
       bfcontainer->callback = callback;
       bfcontainer->timeout  = timeout;
@@ -3035,10 +3465,14 @@ static int i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       bfcontainer->nbytes   = nbytes;
       bfcontainer->result   = -EBUSY;
 
+      /* Take the DMA reference before submission can complete. */
+
+      apb_reference(apb);
       ret = i2s_txdma_setup(priv, bfcontainer);
 
       if (ret != OK)
         {
+          apb_free(apb);
           goto errout_with_buf;
         }
 
@@ -3052,6 +3486,8 @@ static int i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
 errout_with_buf:
       nxmutex_unlock(&priv->lock);
+
+errout_without_lock:
       if (i2s_buf_free(priv, bfcontainer) != OK)
         {
           i2serr("Failed to free buffer container\n");
@@ -3096,7 +3532,6 @@ static int i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       struct esp_buffer_s *bfcontainer;
       int ret = OK;
       uint32_t nbytes;
-      uint32_t nsamp;
 
       /* Check max audio buffer data size from the upper half and align the
        * receiving buffer according to the data width.
@@ -3106,28 +3541,57 @@ static int i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
       nbytes -= (nbytes % (priv->data_width / 8));
 
+      /* Reject requests that cannot be represented by one inlink before
+       * anything is allocated or queued, so the caller gets a legal error
+       * instead of a partially described transfer.
+       */
+
+      if (nbytes == 0 ||
+          nbytes > (I2S_DMA_BUFFER_MAX_SIZE * I2S_DMADESC_NUM))
+        {
+          i2serr("Receive request of %" PRIu32 " bytes does not fit %d "
+                 "descriptors of %u bytes\n", nbytes, I2S_DMADESC_NUM,
+                 I2S_DMA_BUFFER_MAX_SIZE);
+          return -EFBIG;
+        }
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+      /* Match the vendor's cache-aligned RX frame limit.  A larger request
+       * is split into descriptors, but changing the peripheral EOF count
+       * after the first completion does not complete the trailing segment.
+       * Reject that unsupported request instead of waiting forever.
+       */
+
+      if (nbytes > I2S_DMA_BUFFER_MAX_SIZE)
+        {
+          i2serr("RX request exceeds the P4 frame limit of %u bytes\n",
+                 I2S_DMA_BUFFER_MAX_SIZE);
+          return -EFBIG;
+        }
+#endif
+
+      I2S_TRACE('r');
+
       /* Allocate a buffer container in advance */
 
       bfcontainer = i2s_buf_allocate(priv);
       if (bfcontainer == NULL)
         {
-          i2serr("Failed to allocate the buffer container");
+          i2serr("Failed to allocate the buffer container\n");
           return -ENOMEM;
         }
+
+      I2S_TRACE('a');
 
       /* Get exclusive access to the I2S driver data */
 
       ret = nxmutex_lock(&priv->lock);
       if (ret < 0)
         {
-          goto errout_with_buf;
+          goto errout_without_lock;
         }
 
-      /* Add a reference to the audio buffer */
-
-      apb_reference(apb);
-
-      /* Initialize the buffer container structure */
+      /* Initialize the buffer container before taking the DMA reference. */
 
       bfcontainer->callback = callback;
       bfcontainer->timeout  = timeout;
@@ -3136,10 +3600,14 @@ static int i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       bfcontainer->nbytes   = nbytes;
       bfcontainer->result   = -EBUSY;
 
+      /* Take the DMA reference before submission can complete. */
+
+      apb_reference(apb);
       ret = i2s_rxdma_setup(priv, bfcontainer);
 
       if (ret != OK)
         {
+          apb_free(apb);
           goto errout_with_buf;
         }
 
@@ -3154,6 +3622,8 @@ static int i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
 errout_with_buf:
       nxmutex_unlock(&priv->lock);
+
+errout_without_lock:
       if (i2s_buf_free(priv, bfcontainer) != OK)
         {
           i2serr("Failed to free buffer container\n");
@@ -3590,6 +4060,12 @@ struct i2s_dev_s *esp_i2sbus_initialize(int port)
     {
       priv->rx_started = false;
     }
+
+  /* Codec drivers can use receive() without issuing AUDIOIOC_START to the
+   * I2S device.  Their buffers are not final until an explicit I2S STOP.
+   */
+
+  priv->streaming = true;
 
   /* Success exit */
 

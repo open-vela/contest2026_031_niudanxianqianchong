@@ -1,0 +1,7 @@
+config LVX_USE_DEMO_CONTEST2026_031_SMP_PSRAM_PROBE
+	bool "ESP32-P4X SMP PSRAM probe"
+	depends on ESP32P4_SMP_PSRAM && ESPRESSIF_SPIRAM_USER_HEAP
+	default n
+	---help---
+		Build smp_psram, which allocates an external-memory buffer and
+		checks concurrent writes and cross-core reads on both HP CPUs.

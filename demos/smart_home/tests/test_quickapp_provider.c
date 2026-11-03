@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <cagent/types.h>
+#include <agent.h>
+#include <agent/context.h>
 #include <smart_home_device.h>
 #include <smart_home_device_service.h>
 #include <smart_home_quickapp_provider.h>
@@ -102,7 +103,7 @@ int main(void)
 }
 
 /* device.c registers a cAGENT context provider; host tests only need a stub. */
-int agent_register_context_provider(agent_t *agent,
+agent_error_t agent_register_context(agent_t *agent,
                                     const agent_context_provider_t *provider)
 {
     (void)agent;

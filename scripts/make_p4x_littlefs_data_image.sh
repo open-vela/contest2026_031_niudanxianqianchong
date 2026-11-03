@@ -9,7 +9,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-OPENVELA_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
+# worktree 中 PROJECT_ROOT/.. 是 worktrees 目录，不是 openvela 根；
+# 允许显式覆盖，默认仍按仓库布局推导。
+OPENVELA_ROOT="${OPENVELA_ROOT:-$(cd "${PROJECT_ROOT}/.." && pwd)}"
 SMART_HOME_DIR="${PROJECT_ROOT}/demos/smart_home"
 
 OUT_DIR="${OUT_DIR:-${OPENVELA_ROOT}/out/p4x_littlefs_data}"
@@ -103,6 +105,12 @@ if [[ "${WITH_ICONS}" == "1" ]]; then
   mkdir -p "${STAGING_DIR}/res/icons"
   find "${SMART_HOME_DIR}/res/icons" -maxdepth 1 -type f -name '*.png' \
     -exec cp {} "${STAGING_DIR}/res/icons/" \;
+
+  if [[ -d "${SMART_HOME_DIR}/res/devices" ]]; then
+    mkdir -p "${STAGING_DIR}/res/devices"
+    find "${SMART_HOME_DIR}/res/devices" -maxdepth 1 -type f -name '*.png' \
+      -exec cp {} "${STAGING_DIR}/res/devices/" \;
+  fi
 fi
 
 if [[ "${WITH_FONTS}" == "1" ]]; then

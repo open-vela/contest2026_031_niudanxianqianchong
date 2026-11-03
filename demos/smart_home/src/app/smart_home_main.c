@@ -2,11 +2,11 @@
 #include "../net/smart_home_network.h"
 #include "../config/smart_home_secrets.h"
 #include "../smart_home_cpu_debug.h"
+#include "../smart_home_memory.h"
 #include "../ui/smart_home_ui.h"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 #include "../miloco/smart_home_miloco.h"
 #endif
-#include <cagent/runtime_openvela.h>
 #ifdef CONFIG_SMART_HOME_APP_BRIDGE
 #include "../addons/smart_home_app_bridge.h"
 #endif
@@ -19,12 +19,89 @@
 #ifdef CONFIG_SMART_HOME_DEMO_UI_LVGL
 #include "../ui/lvgl/smart_home_lvgl.h"
 #endif
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+#include "../camera/smart_home_camera_service.h"
+#include "../camera/smart_home_camera_control.h"
+#endif
+#ifdef CONFIG_SMART_HOME_CAMERA_TOOL
+#include "../tools/smart_home_camera_tools.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+
+static int smart_home_selftest_miloco_write(void)
+{
+    int ret = smart_home_secrets_set_miloco("127.0.0.1", 1, "selftest");
+
+    printf("smart_home_selftest: miloco write %s (%d)\n",
+           ret == AGENT_OK ? "PASS" : "FAIL", ret);
+    return ret == AGENT_OK ? 0 : 1;
+}
+
+static int smart_home_selftest_miloco_read(void)
+{
+    char host[64] = "";
+    char token[64] = "";
+    uint16_t port = 0;
+    int ret = smart_home_secrets_get_miloco(host, sizeof(host), &port,
+                                            token, sizeof(token));
+    int pass = ret == AGENT_OK && strcmp(host, "127.0.0.1") == 0 &&
+               port == 1 && strcmp(token, "selftest") == 0;
+
+    memset(token, 0, sizeof(token));
+    printf("smart_home_selftest: miloco read %s host=%s port=%u\n",
+           pass ? "PASS" : "FAIL", host, port);
+    return pass ? 0 : 1;
+}
+
+#if defined(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+static int smart_home_selftest_camera(void)
+{
+    struct smart_home_camera_status_s status;
+    int ret = smart_home_camera_start();
+
+    if (ret < 0)
+    {
+        printf("smart_home_selftest: camera start failed %d\n", ret);
+        return 1;
+    }
+
+    for (int i = 0; i < 50; i++)
+    {
+        if (smart_home_camera_get_status(&status) == 0 &&
+            status.state == SMART_HOME_CAMERA_RUNNING &&
+            status.preview_sequence > 0)
+        {
+            printf("smart_home_selftest: camera PASS preview=%u capture=%u\n",
+                   status.preview_sequence, status.capture_sequence);
+            smart_home_camera_stop();
+            return 0;
+        }
+
+        usleep(200 * 1000);
+    }
+
+    smart_home_camera_get_status(&status);
+    printf("smart_home_selftest: camera FAIL state=%d err=%d preview=%u\n",
+           status.state, status.last_error, status.preview_sequence);
+    smart_home_camera_stop();
+    return 1;
+}
+
+static int smart_home_selftest_camera_tool(const char *action)
+{
+    return smart_home_camera_tool_selftest(action);
+}
+#elif defined(CONFIG_SMART_HOME_CAMERA_TOOL)
+static int smart_home_selftest_camera_tool(const char *action)
+{
+    return smart_home_camera_tool_selftest(action);
+}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -35,6 +112,32 @@ int main(int argc, char *argv[])
     int network_ret;
 #endif
     int ret;
+
+    /* Board self-tests run before network and agent initialization. */
+
+    if (argc > 1 && strcmp(argv[1], "--selftest-miloco-write") == 0)
+    {
+        return smart_home_selftest_miloco_write();
+    }
+
+    if (argc > 1 && strcmp(argv[1], "--selftest-miloco-read") == 0)
+    {
+        return smart_home_selftest_miloco_read();
+    }
+
+#if defined(CONFIG_SMART_HOME_CAMERA_PREVIEW)
+    if (argc > 1 && strcmp(argv[1], "--selftest-camera") == 0)
+    {
+        return smart_home_selftest_camera();
+    }
+#endif
+
+#if defined(CONFIG_SMART_HOME_CAMERA_TOOL)
+    if (argc > 2 && strcmp(argv[1], "--selftest-camera-tool") == 0)
+    {
+        return smart_home_selftest_camera_tool(argv[2]);
+    }
+#endif
 
     printf("=== Smart Home Agent Demo ===\n");
     if (argc > 1) {
@@ -91,8 +194,8 @@ int main(int argc, char *argv[])
     }
 #endif
     smart_home_cpu_debug_log("main-network-ready");
-    ov_mem_region_log("main-stack", &stack_marker);
-    ov_mem_region_log("smart-home-app", &app);
+    smart_home_memory_log_region("main-stack", &stack_marker);
+    smart_home_memory_log_region("smart-home-app", &app);
 
     ret = smart_home_agent_app_init(&app);
     if (ret != AGENT_OK) {
@@ -177,6 +280,9 @@ int main(int argc, char *argv[])
 #if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_KWS)
     /* 采集服务懒启动；退出时统一释放录音设备。 */
     voice_capture_deinit();
+#endif
+#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
+    (void)smart_home_camera_control_shutdown();
 #endif
     smart_home_agent_app_deinit(&app);
     return ret == AGENT_OK ? EXIT_SUCCESS : EXIT_FAILURE;

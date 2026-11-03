@@ -1,0 +1,57 @@
+diff --git a/components/esp_system/port/soc/esp32p4/system_internal.c b/components/esp_system/port/soc/esp32p4/system_internal.c
+--- a/components/esp_system/port/soc/esp32p4/system_internal.c
++++ b/components/esp_system/port/soc/esp32p4/system_internal.c
+@@ -34,7 +34,7 @@
+ #include "hal/dma2d_ll.h"
+ #include "hal/efuse_hal.h"
+ 
+-void esp_system_reset_modules_on_exit(void)
++void IRAM_ATTR esp_system_reset_modules_on_exit(void)
+ {
+     // Flush any data left in UART FIFOs
+     for (int i = 0; i < SOC_UART_HP_NUM; ++i) {
+@@ -153,7 +153,7 @@
+  * core are already stopped. Stalls other core, resets hardware,
+  * triggers restart.
+ */
+-void esp_restart_noos(void)
++void IRAM_ATTR esp_restart_noos(void)
+ {
+     // Disable interrupts
+     rv_utils_intr_global_disable();
+@@ -168,8 +168,10 @@
+     wdt_hal_set_flashboot_en(&rtc_wdt_ctx, true);
+     wdt_hal_write_protect_enable(&rtc_wdt_ctx);
+ 
++    /* NuttX owns CPU1 startup; SMP restart must still stop both CPUs. */
++
+     const uint32_t core_id = esp_cpu_get_core_id();
+-#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE
++#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE || defined(CONFIG_SMP)
+     const uint32_t other_core_id = (core_id == 0) ? 1 : 0;
+     esp_cpu_reset(other_core_id);
+     esp_cpu_stall(other_core_id);
+@@ -199,7 +201,7 @@
+     rtc_clk_cpu_set_to_default_config();
+ #endif
+ 
+-#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE
++#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE || defined(CONFIG_SMP)
+     // clear entry point for APP CPU
+     ets_set_appcpu_boot_addr(0);
+ #endif
+@@ -212,12 +214,12 @@
+     // Reset CPUs
+     if (core_id == 0) {
+         // Running on PRO CPU: APP CPU is stalled. Can reset both CPUs.
+-#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE
++#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE || defined(CONFIG_SMP)
+         esp_cpu_reset(1);
+ #endif
+         esp_cpu_reset(0);
+     }
+-#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE
++#if !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE || defined(CONFIG_SMP)
+     else {
+         // Running on APP CPU: need to reset PRO CPU and unstall it,
+         // then reset APP CPU

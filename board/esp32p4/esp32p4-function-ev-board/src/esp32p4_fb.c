@@ -46,6 +46,50 @@
  * Private Types
  ****************************************************************************/
 
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+/* 帧缓冲 cache 维护统计：分别记录 updatearea 与 pandisplay 两条路径，
+ * 每 200 次 flush 打印平均/最大 clean 字节数。用于确认"整页 clean"是否
+ * 真的是每帧固定开销（真机实测该路径在 P4 上接近零成本）。
+ */
+
+struct esp32p4_dsi_fb_clean_stat_s
+{
+  uint32_t flushes;
+  uint32_t bytes;
+  uint32_t max_bytes;
+};
+
+struct esp32p4_dsi_fb_clean_stats_s
+{
+  struct esp32p4_dsi_fb_clean_stat_s update;
+  struct esp32p4_dsi_fb_clean_stat_s pan;
+};
+
+static struct esp32p4_dsi_fb_clean_stats_s g_fb_clean_stats;
+
+static void esp32p4_dsi_fb_clean_stat_add(
+  FAR struct esp32p4_dsi_fb_clean_stat_s *stat, size_t bytes)
+{
+  stat->flushes++;
+  stat->bytes += (uint32_t)bytes;
+  if ((uint32_t)bytes > stat->max_bytes)
+    {
+      stat->max_bytes = (uint32_t)bytes;
+    }
+
+  if (stat->flushes >= 200u)
+    {
+      syslog(LOG_INFO, "INFO: FB clean path=%s flushes=%u avg_bytes=%u "
+             "max_bytes=%u\n",
+             stat == &g_fb_clean_stats.update ? "update" : "pan",
+             (unsigned)stat->flushes,
+             (unsigned)(stat->bytes / stat->flushes),
+             (unsigned)stat->max_bytes);
+      memset(stat, 0, sizeof(*stat));
+    }
+}
+#endif
+
 struct esp32p4_dsi_fb_s
 {
   struct fb_vtable_s vtable;
@@ -134,6 +178,9 @@ static int esp32p4_dsi_fb_updatearea(FAR struct fb_vtable_s *vtable,
   uint8_t page;
   FAR uint8_t *page_buffer;
   int ret;
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+  size_t stat_bytes = 0;
+#endif
 
   if (fb == NULL || area == NULL || fb->planeinfo.fbmem == NULL ||
       area->x > fb->videoinfo.xres ||
@@ -171,7 +218,14 @@ static int esp32p4_dsi_fb_updatearea(FAR struct fb_vtable_s *vtable,
         {
           return ret;
         }
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+      stat_bytes += fb->frame_buffer_bytes;
+#endif
     }
+
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+  esp32p4_dsi_fb_clean_stat_add(&g_fb_clean_stats.update, stat_bytes);
+#endif
 
   return OK;
 }
@@ -213,6 +267,9 @@ static int esp32p4_dsi_fb_pandisplay(FAR struct fb_vtable_s *vtable,
     {
       return ret;
     }
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+  esp32p4_dsi_fb_clean_stat_add(&g_fb_clean_stats.pan, fb->frame_buffer_bytes);
+#endif
 
   return esp_mipi_dsi_video_dma_queue_frame_buffer(
     fb->host, page_buffer, fb->frame_buffer_bytes);
@@ -383,6 +440,7 @@ int board_mipi_dsi_fb_initialize(int display)
 #ifdef CONFIG_FB_UPDATE
   fb->vtable.updatearea = esp32p4_dsi_fb_updatearea;
 #endif
+
 
   ret = esp_mipi_dsi_video_dma_set_frame_done_callback(
     fb->host, esp32p4_dsi_fb_frame_done, fb);

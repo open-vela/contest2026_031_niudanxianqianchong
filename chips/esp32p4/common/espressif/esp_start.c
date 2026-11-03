@@ -61,6 +61,8 @@
 #ifdef CONFIG_ARCH_CHIP_ESP32P4
 #  include "soc/hp_peri_pms_reg.h"
 #  include "soc/lp_peri_pms_reg.h"
+#  include "soc/timer_group_reg.h"
+#  include "soc/lp_wdt_reg.h"
 #endif
 #include "soc/rtc.h"
 
@@ -94,6 +96,40 @@
 #else
 #  define showprogress(c)
 #endif
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  define ESP32P4_WDT_WKEY  0x50d83aa1
+
+/* The ESP32-P4 ROM arms the timer-group and LP flashboot watchdogs before
+ * entering the application.  The Simple Boot path takes longer than their
+ * default timeout and would otherwise reset with HP_SYS_HP_WDT_RESET before
+ * producing any console output.
+ */
+
+static inline void esp32p4_disable_flashboot_wdts(void)
+{
+  REG_WRITE(TIMG_WDTWPROTECT_REG(0), ESP32P4_WDT_WKEY);
+  REG_CLR_BIT(TIMG_WDTCONFIG0_REG(0), TIMG_WDT_FLASHBOOT_MOD_EN);
+  REG_CLR_BIT(TIMG_WDTCONFIG0_REG(0), TIMG_WDT_EN);
+  REG_WRITE(TIMG_WDTWPROTECT_REG(0), 0);
+
+  REG_WRITE(LP_WDT_WPROTECT_REG, ESP32P4_WDT_WKEY);
+  REG_CLR_BIT(LP_WDT_CONFIG0_REG, LP_WDT_WDT_FLASHBOOT_MOD_EN);
+  REG_CLR_BIT(LP_WDT_CONFIG0_REG, LP_WDT_WDT_EN);
+  REG_WRITE(LP_WDT_WPROTECT_REG, 0);
+
+  REG_WRITE(LP_WDT_SWD_WPROTECT_REG, ESP32P4_WDT_WKEY);
+  REG_SET_BIT(LP_WDT_SWD_CONFIG_REG, LP_WDT_SWD_AUTO_FEED_EN);
+  REG_WRITE(LP_WDT_SWD_WPROTECT_REG, 0);
+}
+#endif
+
+/* Provided by the project's esp-hal patch: makes the RTC calibration timer
+ * resource setup explicit instead of relying on constructors, which a NuttX
+ * flat image never invokes.
+ */
+
+void rtc_clk_calibration_init(void);
 
 #if defined(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT) || \
     defined (CONFIG_ESPRESSIF_SIMPLE_BOOT)
@@ -482,6 +518,11 @@ void __esp_start(void)
 {
   esp_err_t ret;
 
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) && \
+    defined(CONFIG_ESPRESSIF_SIMPLE_BOOT)
+  esp32p4_disable_flashboot_wdts();
+#endif
+
   esp_cpu_intr_set_ivt_addr(&_vector_table);
 
 #if SOC_INT_CLIC_SUPPORTED
@@ -593,6 +634,7 @@ void __esp_start(void)
    * RTC slow clock calibration.
    */
 
+  rtc_clk_calibration_init();
   esp_clk_init();
 
   esp_mspi_pin_reserve();

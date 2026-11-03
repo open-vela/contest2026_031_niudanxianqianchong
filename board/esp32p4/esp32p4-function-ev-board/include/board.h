@@ -55,10 +55,20 @@
 #define BOARD_MIPI_DSI_PANEL_RESET_GPIO  27
 #define BOARD_MIPI_DSI_BACKLIGHT_GPIO     26
 
-/* GT911 shares I2C0 with the P4X LCD adapter.  The official adapter does
- * not route the GT911 reset or interrupt pins to the SoC, so board bring-up
- * deliberately uses the driver's polling mode rather than inventing GPIO
- * ownership for those signals.
+/* GT911 shares I2C0 with the P4X LCD adapter.
+ *
+ * The HMI subboard itself does not route GT911 INT/RST to the ESP32-P4; both
+ * signals terminate on the LCD adapter's J6 header instead.  Per the adapter
+ * schematic (ESP32-P4-Function-EV-Board LCD subboard):
+ *
+ *   J6 pin 5  LED_CTRL   (panel backlight PWM, wired to J1 GPIO26)
+ *   J6 pin 6  RESET_LCD  (panel reset, wired to J1 GPIO27)
+ *   J6 pin 7  INT_TP     (GT911 interrupt)
+ *   J6 pin 8  RESET_TP   (GT911 reset)
+ *
+ * INT_TP and RESET_TP are therefore only reachable by adding Dupont wires
+ * from J6 to spare J1 GPIOs.  Polling stays the default so the board works
+ * out of the box; interrupt mode is opt-in and both jumpers must be present.
  */
 
 #define BOARD_GT911_I2C_BUS               0
@@ -68,6 +78,24 @@
 #define BOARD_GT911_POLL_INTERVAL_MS       20
 #define BOARD_GT911_X_RESOLUTION            1024
 #define BOARD_GT911_Y_RESOLUTION             600
+
+/* Interrupt-mode wiring, only valid when the user actually runs the Dupont
+ * wires described above.  Both jumpers are required: without RESET_TP the
+ * GT911 address selection is not under software control, and without INT_TP
+ * there is no interrupt source at all.
+ *
+ * The default J1 landing pins below are free on this board: GPIO32/GPIO33
+ * are plain header pins with no on-board peripheral, and GPIO26/GPIO27 stay
+ * assigned to the LCD adapter's PWM/RST_LCD wires.  Both are overridable
+ * from Kconfig.
+ */
+
+#ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_IRQ
+#  define BOARD_GT911_INT_GPIO \
+    CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_INT_GPIO
+#  define BOARD_GT911_RESET_GPIO \
+    CONFIG_ESP32P4_FUNCTION_EV_BOARD_GT911_RESET_GPIO
+#endif
 
 /* SC2336 camera control bus.  The P4X camera module uses the shared I2C0
  * controller on GPIO8/GPIO7.  Keep the initial SCCB probe at 100 kHz until

@@ -47,6 +47,7 @@ config ESPRESSIF_DONT_USE_ROM_LIBC
 menuconfig ESPRESSIF_SPIRAM
 	bool "External SPI RAM (SPIRAM)"
 	depends on ARCH_CHIP_ESP32P4
+	depends on !SMP || ESP32P4_SMP_PSRAM
 	default n
 	---help---
 		Enable external PSRAM support through the ESP HAL component.
@@ -1872,6 +1873,7 @@ config ESPRESSIF_SPI_BITBANG
 
 config ESPRESSIF_SPIFLASH
 	bool "SPI Flash (User Storage)"
+	depends on !SMP || ESP32P4_SMP_SPIFLASH
 	default n
 	---help---
 		Enable SPI Flash driver for general storage support. This allows
@@ -4384,6 +4386,14 @@ endmenu # Touch Sensor Configuration
 
 menu "I2S Configuration"
 	depends on ESPRESSIF_I2S
+
+config ESPRESSIF_I2S_TRACE
+	bool "I2S bring-up tracing to the raw console"
+	default n
+	---help---
+		Emit single characters directly through up_putc() at the I2S DMA start
+		points.  Unlike syslog this needs no locks or interrupts, so the marks
+		survive a hang that silences the shell.  Debugging aid only.
 
 config ESPRESSIF_I2S_MAXINFLIGHT
 	int "I2S queue size"

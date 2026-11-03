@@ -1,4 +1,5 @@
 #include "smart_home_tools.h"
+#include "smart_home_tool_io.h"
 #include "../agent/smart_home_tool_metadata.h"
 
 #include <stdio.h>
@@ -33,12 +34,14 @@
 
 #define SCHEMA_SET_LIGHT                                                   \
     "{\"type\":\"object\",\"properties\":{\"room\":{\"type\":\"string\"},"  \
+    "\"device_id\":{\"type\":\"integer\",\"description\":\"Exact demo device_id from get_device_inventory\"}," \
     "\"on\":{\"type\":\"boolean\"},\"brightness\":{\"type\":\"integer\"}}," \
-    "\"required\":[\"room\",\"on\",\"brightness\"],"                       \
+    "\"required\":[\"device_id\",\"room\",\"on\",\"brightness\"],"                       \
     "\"additionalProperties\":false}"
 
 #define SCHEMA_SET_AC                                                      \
     "{\"type\":\"object\",\"properties\":{"                                \
+    "\"device_id\":{\"type\":\"integer\",\"description\":\"Exact demo device_id from get_device_inventory\"}," \
     "\"room\":{\"type\":\"string\",\"description\":\"Room name: bedroom\"}," \
     "\"on\":{\"type\":\"boolean\",\"description\":\"Whether AC is on\"},"   \
     "\"temperature\":{\"type\":\"integer\",\"description\":"               \
@@ -49,7 +52,7 @@
     "\"fan_speed\":{\"type\":\"string\",\"enum\":"                         \
         "[\"low\",\"medium\",\"high\",\"auto\"],"                         \
         "\"description\":\"Fan speed. Defaults to current value or auto\"}}," \
-    "\"required\":[\"room\",\"on\"],"                                      \
+    "\"required\":[\"device_id\",\"room\",\"on\"],"                                      \
     "\"additionalProperties\":false}"
 
 #define SCHEMA_RUN_SCENE                                                   \
@@ -94,107 +97,6 @@ typedef struct {
 static smart_home_timer_t g_timers[SMART_HOME_MAX_TIMERS];
 static int g_next_timer_id = 1;
 
-static const char *find_json_value(const char *json, const char *key)
-{
-    const char *p;
-
-    if (!json || !key) {
-        return NULL;
-    }
-
-    p = strstr(json, key);
-    if (!p) {
-        return NULL;
-    }
-
-    p = strchr(p + strlen(key), ':');
-    if (!p) {
-        return NULL;
-    }
-
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
-        p++;
-    }
-
-    return p;
-}
-
-static int json_get_int(const char *json, const char *key, int *out)
-{
-    const char *p = find_json_value(json, key);
-    char *end = NULL;
-    long value;
-
-    if (!p || !out) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    value = strtol(p, &end, 10);
-    if (end == p) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    *out = (int)value;
-    return AGENT_OK;
-}
-
-static int json_get_bool(const char *json, const char *key, int *out)
-{
-    const char *p = find_json_value(json, key);
-
-    if (!p || !out) {
-        return AGENT_ERROR_INVALID;
-    }
-
-    if (strncmp(p, "true", 4) == 0) {
-        *out = 1;
-        return AGENT_OK;
-    }
-
-    if (strncmp(p, "false", 5) == 0) {
-        *out = 0;
-        return AGENT_OK;
-    }
-
-    return AGENT_ERROR_INVALID;
-}
-
-static int json_get_string(const char *json,
-                           const char *key,
-                           char *out,
-                           size_t out_size)
-{
-    const char *p = find_json_value(json, key);
-    size_t used = 0u;
-
-    if (!p || !out || out_size == 0u || *p != '"') {
-        return AGENT_ERROR_INVALID;
-    }
-
-    p++;
-    while (*p && *p != '"' && used + 1u < out_size) {
-        if (*p == '\\' && p[1]) {
-            p++;
-            if (*p == 'n') {
-                out[used++] = '\n';
-            } else if (*p == 'r') {
-                out[used++] = '\r';
-            } else if (*p == 't') {
-                out[used++] = '\t';
-            } else {
-                out[used++] = *p;
-            }
-            p++;
-            continue;
-        }
-        out[used++] = *p++;
-    }
-    out[used] = '\0';
-
-    return *p == '"' ? AGENT_OK : AGENT_ERROR_LIMIT;
-}
-
 static void json_escape_string(const char *in, char *out, size_t out_size)
 {
     size_t used = 0u;
@@ -206,7 +108,13 @@ static void json_escape_string(const char *in, char *out, size_t out_size)
     while (in && *in && used + 1u < out_size) {
         if ((*in == '"' || *in == '\\') && used + 2u < out_size) {
             out[used++] = '\\';
-            out[used++] = *in++;
+            if ((unsigned char)*in < 0x20u) {
+            if (used + 6u >= out_size) break;
+            snprintf(out + used, out_size - used, "\\u%04x", (unsigned char)*in++);
+            used += 6u;
+            continue;
+        }
+        out[used++] = *in++;
             continue;
         }
         if (*in == '\n' && used + 2u < out_size) {
@@ -225,6 +133,12 @@ static void json_escape_string(const char *in, char *out, size_t out_size)
             out[used++] = '\\';
             out[used++] = 't';
             in++;
+            continue;
+        }
+        if ((unsigned char)*in < 0x20u) {
+            if (used + 6u >= out_size) break;
+            snprintf(out + used, out_size - used, "\\u%04x", (unsigned char)*in++);
+            used += 6u;
             continue;
         }
         out[used++] = *in++;
@@ -318,29 +232,37 @@ static int timer_find_by_id(int id)
     return -1;
 }
 
-static int status_tool(const agent_tool_call_t *call,
-                       agent_tool_result_t *result,
-                       void *user_data)
+static agent_error_t status_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
     static char output[1024];
     smart_home_device_service_t *service =
         (smart_home_device_service_t *)user_data;
 
-    (void)call;
+    int ret;
 
-    result->status =
-        smart_home_device_service_build_snapshot_json(service,
-                                                      output,
-                                                      sizeof(output));
-    result->content_json = output;
-    result->error_message = result->status == AGENT_OK ? NULL : "status failed";
-    return result->status;
+    (void)context;
+    ret = smart_home_device_service_build_snapshot_json(service,
+                                                            output, sizeof(output));
+    if (ret != AGENT_OK) return smart_home_tool_reply(sink, "{\"ok\":false,\"source\":\"demo\"}", (agent_error_t)ret);
+    cJSON *root = cJSON_Parse(output);
+    if (!root || !cJSON_AddStringToObject(root, "source", "demo")) {
+        cJSON_Delete(root);
+        return AGENT_ERROR_NOMEM;
+    }
+    char *text = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!text) return AGENT_ERROR_NOMEM;
+    ret = smart_home_tool_reply(sink, text, AGENT_OK);
+    cJSON_free(text);
+    return (agent_error_t)ret;
 }
 
 #ifdef CONFIG_SMART_HOME_AHT30_TOOL
-static int indoor_environment_tool(const agent_tool_call_t *call,
-                                   agent_tool_result_t *result,
-                                   void *user_data)
+static agent_error_t indoor_environment_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
     static char output[256];
     struct box3_aht30_data_s data;
@@ -349,7 +271,7 @@ static int indoor_environment_tool(const agent_tool_call_t *call,
     int fd;
     int ret;
 
-    (void)call;
+    (void)context;
     (void)user_data;
 
     fd = open("/dev/aht0", O_RDONLY);
@@ -359,10 +281,7 @@ static int indoor_environment_tool(const agent_tool_call_t *call,
                  "{\"ok\":false,\"source\":\"box3_sensor_01_aht30\","
                  "\"error\":\"sensor_unavailable\",\"errno\":%d}",
                  saved_errno);
-        result->status = AGENT_ERROR;
-        result->content_json = output;
-        result->error_message = "AHT30 sensor unavailable";
-        return result->status;
+        return smart_home_tool_reply(sink, output, AGENT_ERROR);
     }
 
     ret = ioctl(fd, SNIOC_READ_CONVERT_DATA,
@@ -374,10 +293,7 @@ static int indoor_environment_tool(const agent_tool_call_t *call,
                  "{\"ok\":false,\"source\":\"box3_sensor_01_aht30\","
                  "\"error\":\"sensor_read_failed\",\"errno\":%d}",
                  saved_errno);
-        result->status = AGENT_ERROR;
-        result->content_json = output;
-        result->error_message = "AHT30 sensor read failed";
-        return result->status;
+        return smart_home_tool_reply(sink, output, AGENT_ERROR);
     }
 
     close(fd);
@@ -390,10 +306,7 @@ static int indoor_environment_tool(const agent_tool_call_t *call,
              data.temperature < 0 ? "-" : "", temperature_abs / 1000,
              temperature_abs % 1000, data.humidity / 1000,
              data.humidity % 1000);
-    result->status = AGENT_OK;
-    result->content_json = output;
-    result->error_message = NULL;
-    return AGENT_OK;
+    return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 #endif
 
@@ -404,25 +317,23 @@ static int indoor_environment_tool(const agent_tool_call_t *call,
 smart_home_miloco_t *g_weather_miloco_service;
 #endif
 
-static int weather_tool(const agent_tool_call_t *call,
-                        agent_tool_result_t *result,
-                        void *user_data)
+static agent_error_t weather_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[320];
+    static char output[640];
     char location[64] = "";
-    char escaped_location[128];
+    char escaped_location[384];
     int ret;
 
-    ret = json_get_string(call->arguments_json,
-                          "\"location\"",
+    (void)user_data;
+    ret = smart_home_tool_get_string(context->call.arguments_json,
+                          "location",
                           location,
                           sizeof(location));
     if (ret != AGENT_OK) {
         snprintf(output, sizeof(output), "{\"ok\":false}");
-        result->status = ret;
-        result->content_json = output;
-        result->error_message = "get_weather failed";
-        return ret;
+        return smart_home_tool_reply(sink, output, ret);
     }
     json_escape_string(location, escaped_location, sizeof(escaped_location));
 
@@ -440,10 +351,7 @@ static int weather_tool(const agent_tool_call_t *call,
                      ",\"humidity\":%d,\"wind_kmph\":%d}",
                      wx.city, wx.condition_en, wx.condition_cn,
                      wx.temperature, wx.humidity, wx.wind_kmph);
-            result->status = AGENT_OK;
-            result->content_json = output;
-            result->error_message = NULL;
-            return AGENT_OK;
+            return smart_home_tool_reply(sink, output, AGENT_OK);
         }
     }
 #endif
@@ -459,148 +367,146 @@ static int weather_tool(const agent_tool_call_t *call,
                  ",\"wind\":\"%s\"}",
                  escaped_location, weather.condition,
                  weather.temperature, weather.humidity, weather.wind);
-        result->status = AGENT_OK;
-        result->content_json = output;
-        result->error_message = NULL;
-        return AGENT_OK;
+        return smart_home_tool_reply(sink, output, AGENT_OK);
     }
 }
 
-static int set_light_tool(const agent_tool_call_t *call,
-                          agent_tool_result_t *result,
-                          void *user_data)
+static agent_error_t set_light_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[192];
+    static char output[320];
     smart_home_device_service_t *service =
         (smart_home_device_service_t *)user_data;
     char room[32] = "";
+    char escaped_room[192];
     int brightness = 0;
     int on = 0;
+    int device_id;
+    smart_home_device_t target;
     int ret;
 
-    ret = json_get_string(call->arguments_json, "\"room\"", room, sizeof(room));
+    ret = smart_home_tool_get_string(context->call.arguments_json, "room", room, sizeof(room));
+    if (ret == AGENT_OK)
+        ret = smart_home_tool_get_int(context->call.arguments_json, "device_id", &device_id);
+    if (ret == AGENT_OK)
+        ret = smart_home_device_service_get_device(service, device_id, &target);
+    if (ret == AGENT_OK && (target.type != SMART_HOME_DEVICE_LIGHT || strcmp(target.room, room)))
+        ret = AGENT_ERROR_TOOL_ARGUMENT;
     if (ret == AGENT_OK) {
-        ret = json_get_bool(call->arguments_json, "\"on\"", &on);
+        ret = smart_home_tool_get_bool(context->call.arguments_json, "on", &on);
     }
     if (ret == AGENT_OK) {
-        ret = json_get_int(call->arguments_json, "\"brightness\"", &brightness);
+        ret = smart_home_tool_get_int(context->call.arguments_json, "brightness", &brightness);
     }
     if (ret == AGENT_OK) {
-        ret = smart_home_device_service_set_light(service, room, on, brightness);
+        ret = smart_home_device_service_set_device_control(service, device_id, on, brightness,
+                                                           target.ac_mode, target.ac_fan_speed);
     }
 
+    json_escape_string(room, escaped_room, sizeof(escaped_room));
     snprintf(output,
              sizeof(output),
-             "{\"ok\":%s,\"room\":\"%s\",\"on\":%s,\"brightness\":%d}",
+             "{\"ok\":%s,\"source\":\"demo\",\"room\":\"%s\",\"on\":%s,\"brightness\":%d}",
              ret == AGENT_OK ? "true" : "false",
-             room[0] ? room : "",
+             escaped_room,
              on ? "true" : "false",
              brightness);
 
-    result->status = ret;
-    result->content_json = output;
-    result->error_message = ret == AGENT_OK ? NULL : "set_light failed";
-    return ret;
+    return smart_home_tool_reply(sink, output, ret);
 }
 
-static int set_ac_tool(const agent_tool_call_t *call,
-                       agent_tool_result_t *result,
-                       void *user_data)
+static agent_error_t set_ac_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[256];
+    static char output[448];
     smart_home_device_service_t *service =
         (smart_home_device_service_t *)user_data;
     smart_home_device_t ac = {0};
     char room[32] = "";
+    char escaped_room[192];
     char mode_str[16] = "";
     char fan_speed_str[16] = "";
     int temperature;
     int mode;
     int fan_speed;
     int on = 0;
+    int device_id;
     int ret;
 
     if (!service) {
-        result->status = AGENT_ERROR_INVALID;
-        result->content_json = "{\"ok\":false}";
-        result->error_message = "set_ac failed";
-        return result->status;
+        return smart_home_tool_reply(sink, "{\"ok\":false}", AGENT_ERROR_INVALID);
     }
 
-    ret = json_get_string(call->arguments_json, "\"room\"", room, sizeof(room));
+    ret = smart_home_tool_get_string(context->call.arguments_json, "room", room, sizeof(room));
     if (ret == AGENT_OK) {
-        ret = smart_home_device_service_find_first(service,
-                                                   room,
-                                                   SMART_HOME_DEVICE_AC,
-                                                   &ac);
+        ret = smart_home_tool_get_int(context->call.arguments_json, "device_id", &device_id);
     }
+    if (ret == AGENT_OK)
+        ret = smart_home_device_service_get_device(service, device_id, &ac);
+    if (ret == AGENT_OK && (ac.type != SMART_HOME_DEVICE_AC || strcmp(ac.room, room)))
+        ret = AGENT_ERROR_TOOL_ARGUMENT;
     temperature = ret == AGENT_OK ? ac.temperature : 26;
     mode = ret == AGENT_OK ? ac.ac_mode : 0;
     fan_speed = ret == AGENT_OK ? ac.ac_fan_speed : 3;
 
     if (ret == AGENT_OK) {
-        ret = json_get_bool(call->arguments_json, "\"on\"", &on);
+        ret = smart_home_tool_get_bool(context->call.arguments_json, "on", &on);
     }
     if (ret == AGENT_OK) {
-        if (json_get_int(call->arguments_json,
-                         "\"temperature\"",
-                         &temperature) != AGENT_OK) {
-            temperature = ac.temperature;
-        }
-        if (json_get_string(call->arguments_json,
-                            "\"mode\"",
-                            mode_str,
-                            sizeof(mode_str)) == AGENT_OK) {
+        int optional;
+        optional = smart_home_tool_get_int(context->call.arguments_json,
+                                           "temperature", &temperature);
+        if (optional != AGENT_OK && optional != AGENT_ERROR_NOT_FOUND) ret = optional;
+        optional = smart_home_tool_get_string(context->call.arguments_json,
+                                               "mode", mode_str, sizeof(mode_str));
+        if (optional == AGENT_OK) {
             mode = smart_home_ac_parse_mode(mode_str);
-        }
-        if (json_get_string(call->arguments_json,
-                            "\"fan_speed\"",
-                            fan_speed_str,
-                            sizeof(fan_speed_str)) == AGENT_OK) {
+            if (mode < 0) ret = AGENT_ERROR_TOOL_ARGUMENT;
+        } else if (optional != AGENT_ERROR_NOT_FOUND) ret = optional;
+        optional = smart_home_tool_get_string(context->call.arguments_json,
+                                               "fan_speed", fan_speed_str, sizeof(fan_speed_str));
+        if (optional == AGENT_OK) {
             fan_speed = smart_home_ac_parse_fan_speed(fan_speed_str);
-        }
-        ret = smart_home_device_service_set_ac(service,
-                                               room,
-                                               on,
-                                               mode,
-                                               fan_speed,
-                                               temperature);
+            if (fan_speed < 0) ret = AGENT_ERROR_TOOL_ARGUMENT;
+        } else if (optional != AGENT_ERROR_NOT_FOUND) ret = optional;
+        if (ret == AGENT_OK)
+            ret = smart_home_device_service_set_device_control(service, device_id, on,
+                                                                 temperature, mode, fan_speed);
         if (ret == AGENT_OK) {
-            (void)smart_home_device_service_find_first(service,
-                                                       room,
-                                                       SMART_HOME_DEVICE_AC,
-                                                       &ac);
+            (void)smart_home_device_service_get_device(service, device_id, &ac);
         }
     }
 
+    json_escape_string(room, escaped_room, sizeof(escaped_room));
     snprintf(output,
              sizeof(output),
-             "{\"ok\":%s,\"room\":\"%s\",\"on\":%s,"
+             "{\"ok\":%s,\"source\":\"demo\",\"room\":\"%s\",\"on\":%s,"
              "\"temperature\":%d,\"mode\":\"%s\",\"fan_speed\":\"%s\"}",
              ret == AGENT_OK ? "true" : "false",
-             room[0] ? room : "",
+             escaped_room,
              on ? "true" : "false",
              ac.temperature,
              smart_home_ac_mode_name(ac.ac_mode),
              smart_home_ac_fan_speed_name(ac.ac_fan_speed));
 
-    result->status = ret;
-    result->content_json = output;
-    result->error_message = ret == AGENT_OK ? NULL : "set_ac failed";
-    return ret;
+    return smart_home_tool_reply(sink, output, ret);
 }
 
-static int run_scene_tool(const agent_tool_call_t *call,
-                          agent_tool_result_t *result,
-                          void *user_data)
+static agent_error_t run_scene_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[1024];
+    static char output[1280];
     smart_home_device_service_t *service =
         (smart_home_device_service_t *)user_data;
     char scene[32] = "";
+    char escaped_scene[192];
     int ret;
 
-    ret = json_get_string(call->arguments_json, "\"scene\"", scene, sizeof(scene));
+    ret = smart_home_tool_get_string(context->call.arguments_json, "scene", scene, sizeof(scene));
+    json_escape_string(scene, escaped_scene, sizeof(escaped_scene));
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     if (ret == AGENT_OK) {
         /* 场景只面向真实米家设备：动作以 type_name 语义锚点在各
@@ -619,13 +525,10 @@ static int run_scene_tool(const agent_tool_call_t *call,
         json_escape_string(report[0] ? report : "miloco gateway unavailable",
                            escaped_report, sizeof(escaped_report));
         snprintf(output, sizeof(output),
-                 "{\"ok\":%s,\"scene\":\"%s\",\"report\":\"%s\"}",
-                 scene_ret == 0 ? "true" : "false", scene, escaped_report);
-        result->status = scene_ret == 0 ? AGENT_OK : AGENT_ERROR;
-        result->content_json = output;
-        result->error_message = scene_ret == 0 ? NULL :
-                                "run_scene failed on real devices";
-        return scene_ret == 0 ? AGENT_OK : AGENT_ERROR;
+                 "{\"ok\":%s,\"source\":\"mijia\",\"scene\":\"%s\",\"report\":\"%s\"}",
+                 scene_ret == 0 ? "true" : "false", escaped_scene, escaped_report);
+        return smart_home_tool_reply(sink, output,
+                                     scene_ret == 0 ? AGENT_OK : AGENT_ERROR_TOOL_FAILED);
     }
 #endif
     if (ret == AGENT_OK) {
@@ -639,25 +542,22 @@ static int run_scene_tool(const agent_tool_call_t *call,
         snprintf(output,
                  sizeof(output),
                  "{\"ok\":false,\"scene\":\"%s\"}",
-                 scene[0] ? scene : "");
+                 escaped_scene);
     }
 
-    result->status = ret;
-    result->content_json = output;
-    result->error_message = ret == AGENT_OK ? NULL : "run_scene failed";
-    return ret;
+    return smart_home_tool_reply(sink, output, ret);
 }
 
-static int set_timer_tool(const agent_tool_call_t *call,
-                          agent_tool_result_t *result,
-                          void *user_data)
+static agent_error_t set_timer_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[512];
+    static char output[1280];
     smart_home_timer_t *timer;
     char message[128] = "";
-    char escaped_message[256];
+    char escaped_message[768];
     char name[32] = "";
-    char escaped_name[64];
+    char escaped_name[192];
     int delay_seconds = 0;
     int slot;
     int ret;
@@ -665,12 +565,12 @@ static int set_timer_tool(const agent_tool_call_t *call,
 
     (void)user_data;
 
-    ret = json_get_int(call->arguments_json,
-                       "\"delay_seconds\"",
+    ret = smart_home_tool_get_int(context->call.arguments_json,
+                       "delay_seconds",
                        &delay_seconds);
     if (ret == AGENT_OK) {
-        ret = json_get_string(call->arguments_json,
-                              "\"message\"",
+        ret = smart_home_tool_get_string(context->call.arguments_json,
+                              "message",
                               message,
                               sizeof(message));
     }
@@ -678,8 +578,8 @@ static int set_timer_tool(const agent_tool_call_t *call,
         ret = AGENT_ERROR_INVALID;
     }
     if (ret == AGENT_OK) {
-        if (json_get_string(call->arguments_json,
-                            "\"name\"",
+        if (smart_home_tool_get_string(context->call.arguments_json,
+                            "name",
                             name,
                             sizeof(name)) != AGENT_OK ||
             name[0] == '\0') {
@@ -689,7 +589,7 @@ static int set_timer_tool(const agent_tool_call_t *call,
 
     slot = ret == AGENT_OK ? timer_find_slot() : -1;
     if (ret == AGENT_OK && slot < 0) {
-        ret = AGENT_ERROR_LIMIT;
+        ret = AGENT_ERROR_CAPACITY;
     }
 
     if (ret == AGENT_OK) {
@@ -722,31 +622,28 @@ static int set_timer_tool(const agent_tool_call_t *call,
         snprintf(output, sizeof(output), "{\"ok\":false}");
     }
 
-    result->status = ret;
-    result->content_json = output;
-    result->error_message = ret == AGENT_OK ? NULL : "set_timer failed";
-    return ret;
+    return smart_home_tool_reply(sink, output, ret);
 }
 
-static int list_timers_tool(const agent_tool_call_t *call,
-                            agent_tool_result_t *result,
-                            void *user_data)
+static agent_error_t list_timers_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
-    static char output[768];
+    static char output[4096];
     size_t off = 0u;
     int count = 0;
     int i;
     time_t now;
 
-    (void)call;
+    (void)context;
     (void)user_data;
 
     now = time(NULL);
     off += snprintf(output + off, sizeof(output) - off, "{\"timers\":[");
     for (i = 0; i < SMART_HOME_MAX_TIMERS && off < sizeof(output); i++) {
         const smart_home_timer_t *timer = &g_timers[i];
-        char escaped_name[64];
-        char escaped_message[256];
+        char escaped_name[192];
+        char escaped_message[768];
         long long remaining;
 
         if (!timer->active) {
@@ -780,16 +677,14 @@ static int list_timers_tool(const agent_tool_call_t *call,
                         count);
     }
 
-    result->status = off < sizeof(output) ? AGENT_OK : AGENT_ERROR_LIMIT;
-    result->content_json = output;
-    result->error_message =
-        result->status == AGENT_OK ? NULL : "list_timers failed";
-    return result->status;
+    if (off >= sizeof(output))
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"timer_list_capacity\"}", AGENT_ERROR_CAPACITY);
+    return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 
-static int cancel_timer_tool(const agent_tool_call_t *call,
-                             agent_tool_result_t *result,
-                             void *user_data)
+static agent_error_t cancel_timer_tool(void *user_data,
+                                   const agent_tool_context_t *context,
+                                   const agent_text_sink_t *sink)
 {
     static char output[96];
     int id = 0;
@@ -798,10 +693,10 @@ static int cancel_timer_tool(const agent_tool_call_t *call,
 
     (void)user_data;
 
-    ret = json_get_int(call->arguments_json, "\"id\"", &id);
+    ret = smart_home_tool_get_int(context->call.arguments_json, "id", &id);
     slot = ret == AGENT_OK ? timer_find_by_id(id) : -1;
     if (ret == AGENT_OK && slot < 0) {
-        ret = AGENT_ERROR_NOTFOUND;
+        ret = AGENT_ERROR_NOT_FOUND;
     }
     if (ret == AGENT_OK) {
         memset(&g_timers[slot], 0, sizeof(g_timers[slot]));
@@ -813,28 +708,27 @@ static int cancel_timer_tool(const agent_tool_call_t *call,
              ret == AGENT_OK ? "true" : "false",
              id);
 
-    result->status = ret;
-    result->content_json = output;
-    result->error_message = ret == AGENT_OK ? NULL : "cancel_timer failed";
-    return ret;
+    return smart_home_tool_reply(sink, output, ret);
 }
 
-static int register_local_tool(agent_t *agent,
+int smart_home_tool_register_local(agent_t *agent,
                                const char *name,
                                const char *description,
                                const char *input_schema_json,
                                smart_home_tool_category_t category,
-                               agent_tool_fn execute,
+                               agent_tool_execute_fn execute,
                                void *user_data,
                                uint32_t flags)
 {
     agent_tool_t tool = {0};
 
-    tool.name = name;
-    tool.group_id = SMART_HOME_TOOL_GROUP_LOCAL;
-    tool.category_id = (uint16_t)category;
-    tool.description = description;
-    tool.input_schema_json = input_schema_json;
+    tool.name = agent_string_view(name, strlen(name));
+    tool.group = agent_string_view("local", 5u);
+    tool.category = category == SMART_HOME_TOOL_CATEGORY_QUERY ?
+        agent_string_view("query", 5u) : agent_string_view("control", 7u);
+    tool.description = agent_string_view(description, strlen(description));
+    tool.input_schema_json = agent_string_view(input_schema_json, strlen(input_schema_json));
+    tool.validate = smart_home_tool_validate_object;
     tool.execute = execute;
     tool.user_data = user_data;
     tool.flags = flags;
@@ -850,119 +744,114 @@ int smart_home_tools_register(agent_t *agent,
         return AGENT_ERROR_INVALID;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_home_status",
-                              "Get current virtual smart home status.",
+                              "[demo] Get virtual device state only; not a whole-home hardware inventory. Use get_device_inventory to discover origins.",
                               SCHEMA_GET_HOME_STATUS,
                               SMART_HOME_TOOL_CATEGORY_QUERY,
                               status_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_READ_ONLY);
+                              AGENT_TOOL_READ_ONLY);
     if (ret != AGENT_OK) {
         return ret;
     }
 
 #ifdef CONFIG_SMART_HOME_AHT30_TOOL
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_indoor_environment",
                               "Read current indoor temperature and humidity from the Box3 AHT30 sensor.",
                               SCHEMA_GET_INDOOR_ENVIRONMENT,
                               SMART_HOME_TOOL_CATEGORY_QUERY,
                               indoor_environment_tool,
                               NULL,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_READ_ONLY);
+                              AGENT_TOOL_READ_ONLY);
     if (ret != AGENT_OK) {
         return ret;
     }
 #endif
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "get_weather",
                               "Get simulated outdoor weather for a location.",
                               SCHEMA_GET_WEATHER,
                               SMART_HOME_TOOL_CATEGORY_QUERY,
                               weather_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_READ_ONLY);
+                              AGENT_TOOL_READ_ONLY);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_light",
-                              "Set a room light. Rooms: living_room, bedroom.",
+                              "[demo] Change only a virtual light by its discovered device_id and room. No physical Mi Home, board or Node control.",
                               SCHEMA_SET_LIGHT,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               set_light_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_SIDE_EFFECT);
+                              AGENT_TOOL_SIDE_EFFECT);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_ac",
-                              "Set bedroom air conditioner.",
+                              "[demo] Change only a virtual AC by its discovered device_id and room. No physical Mi Home, board or Node control.",
                               SCHEMA_SET_AC,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               set_ac_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_SIDE_EFFECT);
+                              AGENT_TOOL_SIDE_EFFECT);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "run_scene",
-                              "Run a smart home scene: sleep, movie, away, home.",
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+                              "[mijia] Submit an explicit scene to real Mi Home devices only: sleep, movie, away, home. Never use to probe an ambiguous request.",
+#else
+                              "[demo] Change only virtual scene state: sleep, movie, away, home.",
+#endif
                               SCHEMA_RUN_SCENE,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               run_scene_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_SIDE_EFFECT);
+                              AGENT_TOOL_SIDE_EFFECT);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "set_timer",
                               "Create a demo timer or reminder.",
                               SCHEMA_SET_TIMER,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               set_timer_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_SIDE_EFFECT);
+                              AGENT_TOOL_SIDE_EFFECT);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    ret = register_local_tool(agent,
+    ret = smart_home_tool_register_local(agent,
                               "list_timers",
                               "List active demo timers.",
                               SCHEMA_LIST_TIMERS,
                               SMART_HOME_TOOL_CATEGORY_QUERY,
                               list_timers_tool,
                               device_service,
-                              AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                  AGENT_TOOL_FLAG_READ_ONLY);
+                              AGENT_TOOL_READ_ONLY);
     if (ret != AGENT_OK) {
         return ret;
     }
 
-    return register_local_tool(agent,
+    return smart_home_tool_register_local(agent,
                                "cancel_timer",
                                "Cancel a demo timer by id.",
                                SCHEMA_CANCEL_TIMER,
                                SMART_HOME_TOOL_CATEGORY_CONTROL,
                                cancel_timer_tool,
                                device_service,
-                               AGENT_TOOL_FLAG_LLM_VISIBLE |
-                                   AGENT_TOOL_FLAG_SIDE_EFFECT);
+                               AGENT_TOOL_SIDE_EFFECT);
 }

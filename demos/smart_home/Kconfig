@@ -1,20 +1,12 @@
 config SMART_HOME_DEMO
     bool "Smart home demo"
-    # Do not make these selects conditional on SMART_HOME_DEMO_STATIC_LVGL_HOME.
-    # That symbol is a child of SMART_HOME_DEMO_UI_BACKEND; QuickApp depends on
-    # CAGENT through its Feature/QuickApp dependency chain, so referring back
-    # to the choice child here creates a Kconfig dependency loop.
     select CAGENT
-    select CAGENT_PROFILE_REACT_DEFAULTS
-    select CAGENT_MODEL_OPENAI
-    select CAGENT_RUNTIME_OPENVELA_DEFAULTS
-    # Do not derive a cAGENT runtime dependency from an LVGL-only profile.
-    # SMART_HOME_DEMO_OFFLINE_UI itself depends on the UI-backend choice; a
-    # reverse reference here makes Kconfig traverse QuickApp -> libcurl ->
-    # mbedTLS -> cAGENT back into that same choice.  All SmartHome variants
-    # can safely include the runtime TLS adapter; offline UI simply does not
-    # use it at runtime.
-    select CAGENT_RUNTIME_OPENVELA_TLS
+    select NETUTILS_WEBCLIENT
+    select CAGENT_SESSION_RAM
+    select CAGENT_PROVIDER_OPENAI
+    select CAGENT_PORT_OPENVELA_RUNTIME
+    select CAGENT_PORT_OPENVELA_TRANSPORT
+    select CAGENT_PORT_OPENVELA_TLS
     default n
     help
       Smart home cAGENT demo skeleton with separated agent, tool, skill,
@@ -37,6 +29,64 @@ config SMART_HOME_DEMO_STACKSIZE
 config SMART_HOME_DEMO_PRIORITY
     int "Smart home demo task priority"
     default 100
+
+config SMART_HOME_MODEL_REQUEST_BUFFER_SIZE
+    int "Model request buffer capacity"
+    default 16384
+    range 8192 65536
+
+config SMART_HOME_MODEL_RESPONSE_BUFFER_SIZE
+    int "Model response buffer capacity"
+    default 16384
+    range 1024 65536
+
+config SMART_HOME_MODEL_DECODED_BUFFER_SIZE
+    int "Model decoded text buffer capacity"
+    default 8192
+    range 2048 32768
+
+config SMART_HOME_MODEL_JSON_TOKENS
+    int "Model response JSON token capacity"
+    default 512
+    range 128 2048
+
+config SMART_HOME_SESSION_HISTORY_TURNS
+    int "Recent complete turns projected to model"
+    default 3
+    range 1 6
+
+config SMART_HOME_SESSION_PAYLOAD_BYTES
+    int "RAM session payload capacity"
+    default 65536
+    range 16384 262144
+
+config SMART_HOME_SESSION_PERSIST
+    bool "Persist conversations and restore chat history"
+    select CAGENT_SESSION_JSONL
+    select CAGENT_FILE_STORE
+    default n
+    help
+      Store completed turns in /data/smart_home/sessions. Restore chat
+      history on startup; New conversation also removes the saved records.
+
+if SMART_HOME_SESSION_PERSIST
+
+config SMART_HOME_SESSION_RETAIN_TURNS
+    int "Maximum saved complete turns"
+    default 20
+    range 4 40
+
+config SMART_HOME_SESSION_FILE_BYTES
+    int "Maximum session file bytes"
+    default 1048576
+    range 262144 2097152
+
+config SMART_HOME_SESSION_LINE_BYTES
+    int "Maximum encoded turn bytes"
+    default 131072
+    range 32768 524288
+
+endif
 
 config SMART_HOME_AUDIO_SMOKE
     bool "ES8311 audio smoke command"
@@ -185,6 +235,80 @@ endif
 
 endif
 
+config SMART_HOME_VAD
+    bool "Energy-based VAD on the shared audio capture path"
+    depends on ESP32P4_FUNCTION_EV_BOARD_AUDIO_ES8311
+    default n
+    help
+      Add an integer-only voice activity detector to the shared capture
+      service.  It runs on every captured frame before the registered
+      consumer, so it keeps working while ASR and KWS swap the consumer
+      slot.  Once speech has been seen, a sustained silence ends the
+      recording early, which turns push-to-talk into "speak and stop".
+
+      The detector uses a 20 ms frame with a 10 ms hop, a slow/fast
+      adaptive noise floor, a relative threshold and an absolute energy
+      floor, then a start/hangover state machine.  No floating point and
+      no libm calls are used, which matters on the current P4 build
+      (single core, soft float).
+
+if SMART_HOME_VAD
+
+config SMART_HOME_VAD_RATIO_PCT
+    int "Speech threshold relative to the noise floor (percent)"
+    default 400
+    range 150 2000
+    help
+      A frame counts as speech when its energy exceeds the tracked noise
+      floor by this percentage.  400 means +6 dB.  Raise it in noisy
+      rooms, lower it for far-field talkers.
+
+config SMART_HOME_VAD_MIN_ENERGY
+    int "Absolute frame energy floor"
+    default 400
+    range 0 100000
+    help
+      Frames below this energy are never speech, which keeps the
+      detector quiet on digital silence where the noise floor can
+      collapse towards zero.  Energy is sum(x^2) >> 12 over a 20 ms
+      frame at 16 kHz; 400 corresponds to an RMS of roughly 90 LSB.
+
+config SMART_HOME_VAD_INIT_FRAMES
+    int "Noise floor initialisation frames"
+    default 10
+    range 1 200
+    help
+      During the first N frames the noise floor follows the minimum
+      observed energy, so starting a recording on speech does not bias
+      the floor upwards.
+
+config SMART_HOME_VAD_START_FRAMES
+    int "Consecutive speech frames required to start"
+    default 3
+    range 1 50
+    help
+      Each frame advances 10 ms, so the default needs 30 ms of speech.
+
+config SMART_HOME_VAD_END_FRAMES
+    int "Consecutive silence frames required to end"
+    default 30
+    range 1 300
+    help
+      Hangover before the detector reports the end of speech.  The
+      default is 300 ms, which keeps short pauses between words from
+      splitting an utterance.
+
+config SMART_HOME_VAD_AUTOSTOP_SILENCE_MS
+    int "Recording auto-stop silence in ms"
+    default 500
+    range 0 5000
+    help
+      After speech has been detected, the ASR recording ends when this
+      much additional silence follows the detector's end-of-speech
+      event.  0 disables the early stop and keeps the fixed duration.
+
+endif
+
 config SMART_HOME_KWS
     bool "Resident KWS wake-word service (wake_large int8)"
     depends on ESP32P4_FUNCTION_EV_BOARD_AUDIO_ES8311
@@ -205,16 +329,29 @@ if SMART_HOME_KWS
 
 config SMART_HOME_KWS_ARENA_SIZE
     int "KWS tensor arena size"
-    default 196608
-    range 65536 524288
+    default 393216
+    range 65536 3145728
     help
       PSRAM buffer reserved for TFLite Micro tensors of wake_large.
       The service reports the actual arena use after AllocateTensors.
 
+      The model needs about 199 KB on the target (conv/depthwise output
+      tensors alone total ~516 KB across 4 conv + 3 dw nodes when the
+      arena is shared; the reference path allocates ~199 KB). The old
+      196608 default was below the real requirement, so the resident
+      service failed at AllocateTensors with -ENOMEM. 393216 leaves
+      headroom for the ESP-NN path, which additionally requests a
+      filter copy and scratch per node.
+
 config SMART_HOME_KWS_WORKER_STACKSIZE
     int "KWS inference worker stack size"
-    default 12288
-    range 8192 32768
+    default 32768
+    range 8192 131072
+    help
+      The worker runs the C++ TFLite Micro interpreter plus the feature
+      front-end on its own stack. 12 KB was too tight once ESP-NN and the
+      full front-end are enabled; 32 KB leaves room without depending on
+      unmeasured luck. Keep this independent from the smoke command stack.
 
 config SMART_HOME_KWS_INTERVAL_MS
     int "KWS inference interval in ms"
@@ -254,8 +391,8 @@ if SMART_HOME_KWS_SMOKE
 
 config SMART_HOME_KWS_SMOKE_ARENA_SIZE
     int "KWS smoke tensor arena size"
-    default 196608
-    range 65536 524288
+    default 393216
+    range 65536 3145728
 
 config SMART_HOME_KWS_SMOKE_STACKSIZE
     int "KWS smoke command stack size"
@@ -533,16 +670,55 @@ endchoice
 
 if SMART_HOME_DEMO_UI_LVGL
 
+config SMART_HOME_V9_PERF_LOG
+    bool "Log V9 LVGL frame timing"
+    default n
+    help
+      Log accumulated lv_timer_handler duration, average and maximum every
+      five seconds.  Intended for target-board P01-P12 measurements; leave
+      disabled in production because serial output itself costs CPU time.
+
+config SMART_HOME_V9_DEVICE_ANIMATION
+    bool "Enable V9 device pixel-frame animation"
+    default n
+    help
+      V9 device cards use static on/off art by default.  Pixel-frame
+      animation is opt-in until the target PSRAM/Flash/stack budget and
+      frame-cache policy have been measured.  Disabling it is the
+      documented static fallback, not a claim that animation is ready.
+
 config SMART_HOME_CAMERA_PREVIEW
-    bool "Enable local SC2336 security-camera preview"
+    bool "Enable local SC2336 device preview"
     depends on ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
     depends on ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
     default n
     help
       Enable the Smart Home-owned /dev/video0 consumer. The camera service
       captures the SC2336 RGB565 stream in a worker and publishes a copied
-      512x300 preview to the LVGL security page at a maximum of 15 FPS.
+      512x300 preview to the LVGL device popup at a maximum of 15 FPS.
       It is intentionally independent of cAGENT and network services.
+
+config SMART_HOME_CAMERA_PPA
+    bool "Scale camera previews with ESP32-P4 PPA"
+    depends on SMART_HOME_CAMERA_PREVIEW && ESP32P4_PPA
+    default n
+    help
+      Scale RGB565 frames from 1024x600 to 512x300 using PPA on CPU0.
+      Keep capture buffers until DMA completes; use CPU scaling if PPA
+      initialization or a job fails after safe buffer ownership recovery.
+      Print hardware/CPU frame counts and scaling times for board checks.
+
+config SMART_HOME_CAMERA_TOOL
+    bool "Agent camera tool (power + snapshot)"
+    depends on SMART_HOME_CAMERA_PREVIEW
+    default n
+    help
+      Register a local agent tool `camera` with status/on/off/shot
+      actions.  `shot` captures the latest 512x300 preview, computes
+      brightness and frame-to-frame motion, and stores two rolling
+      files under /data/smart_home/snapshots (about 600 KB total).
+      Runs only through the camera service; it never opens /dev/video0.
+      Needs about 600 KB of free space on /data for the two slots.
 
 config SMART_HOME_MILOCO_BRIDGE
     bool "Enable Xiaomi Miloco gateway bridge"
@@ -555,6 +731,24 @@ config SMART_HOME_MILOCO_BRIDGE
       panel; power control is issued via the /miot REST API from a
       dedicated worker thread. Gateway host/port/token are stored in
       secrets.json and configured from the settings page.
+
+config SMART_HOME_ONBOARDING
+    bool "First-run configuration guide"
+    depends on SMART_HOME_DEMO_UI_LVGL
+    default y
+    help
+      Show a setup overlay on the home screen while the Wi-Fi link, the
+      Miloco gateway or the model service is still unconfigured. The
+      overlay lists the three items side by side, jumps to the matching
+      settings page, and can always be dismissed with "later".
+
+      It covers the home screen but does not block it: the home page is
+      fully built first, so dismissing the overlay immediately shows the
+      demo content. The dismissal is memory-only for this boot, because
+      writing LittleFS from the LVGL thread hard-freezes the system.
+
+      Say N to build without the overlay, for example for a demo image
+      that must boot straight into the product screens.
 
 config SMART_HOME_MILOCO_VOLATILE_CONFIG
     bool "Miloco gateway config is memory-only (skip secrets.json write)"

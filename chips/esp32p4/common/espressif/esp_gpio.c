@@ -32,8 +32,10 @@
 
 #include <assert.h>
 #include <debug.h>
+#include <errno.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <syslog.h>
 
 /* NuttX */
 
@@ -319,16 +321,27 @@ bool esp_gpioread(int pin)
  *   None.
  *
  * Returned Value:
- *   None.
+ *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
-void esp_gpioirqinitialize(void)
+int esp_gpioirqinitialize(void)
 {
+  esp_err_t ret;
+
   /* Setup the GPIO interrupt. */
 
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  ret = gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  if (ret != ESP_OK)
+    {
+      /* Keep early initialization failures visible without CONFIG_DEBUG. */
+
+      syslog(LOG_ERR, "ERROR: GPIO ISR service setup failed: 0x%x\n", ret);
+      return ret == ESP_ERR_NO_MEM ? -ENOMEM : -EIO;
+    }
+
+  return OK;
 }
 #endif
 

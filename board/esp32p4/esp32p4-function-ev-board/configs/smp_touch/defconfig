@@ -1,0 +1,2 @@
+#include "../smp_display/defconfig"
+CONFIG_LVX_USE_DEMO_CONTEST2026_031_GT911_PROBE=y

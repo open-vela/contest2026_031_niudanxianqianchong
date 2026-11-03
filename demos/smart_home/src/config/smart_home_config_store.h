@@ -69,6 +69,17 @@ int smart_home_config_store_load(const char *path,
                                  char *error,
                                  size_t error_size);
 
+/* Explicit caller-scoped legacy version. Other loaders still accept only v1.
+ * Load does not overwrite the original document; next successful save uses v1.
+ */
+int smart_home_config_store_load_compatible(const char *path,
+                                 int previous_version,
+                                 smart_home_config_default_fn make_default,
+                                 smart_home_config_recovery_t recovery,
+                                 smart_home_config_validate_fn validate,
+                                 void *user_data, cJSON **out_root,
+                                 char *error, size_t error_size);
+
 /**
  * 保存配置文件（原子写）。
  *
@@ -135,7 +146,7 @@ int smart_home_config_settings_load(cJSON **out_root,
 int smart_home_config_settings_save(const cJSON *root);
 
 /* state.json：本地设备状态 + 环境模拟值。
- * 默认工厂复用 smart_home_device_init() 的三设备默认；恢复策略 RECOVER_DEFAULT。 */
+ * 默认工厂复用 smart_home_device_init() 的单灯默认；恢复策略 RECOVER_DEFAULT。 */
 int smart_home_config_state_load(cJSON **out_root,
                                  char *error,
                                  size_t error_size);

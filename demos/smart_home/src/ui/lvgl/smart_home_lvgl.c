@@ -3,11 +3,13 @@
  */
 
 #include "smart_home_lvgl_internal.h"
+#include "smart_home_lvgl_camera_dialog.h"
 #include "../../smart_home_cpu_debug.h"
 #include "../../smart_home_memory.h"
 
 #include <nuttx/config.h>
 
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -42,6 +44,89 @@ static void smart_home_lvgl_log_build_stage(const char *stage,
 #define smart_home_lvgl_log_build_stage(stage, phase) ((void)0)
 #endif
 
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+/* 给性能行打上当前页面标签，板端一份日志就能按场景分组回填 P01-P12。
+ * 弹窗叠加在所在页面上，不单独计数。
+ */
+static const char *v9_perf_scene(smart_home_lvgl_t *ui)
+{
+    lv_obj_t *active;
+
+    if (!ui) {
+        return "none";
+    }
+    active = lv_screen_active();
+    if (active == ui->screen_home) return "home";
+    if (active == ui->screen_chat) return "chat";
+    if (active == ui->screen_settings_v9) return "settings";
+    if (active == ui->screen_screensaver) return "screensaver";
+    if (active == ui->screen_panel) return "panel";
+    if (active == ui->screen_security) return "security";
+    if (active == ui->screen_network) return "network";
+    if (active == ui->screen_settings) return "settings-legacy";
+    if (active == ui->screen_miloco) return "miloco";
+    if (smart_home_lvgl_miloco_bind_is_open(ui)) return "miloco-bind";
+    if (active == ui->screen_model) return "model";
+    if (active == ui->screen_tools) return "tools";
+    if (active == ui->screen_mcp) return "mcp";
+    if (active == ui->screen_node) return "node";
+    if (active == ui->screen_more) return "more";
+    return "other";
+}
+#endif
+
+/* 首帧之后逐个补建非首屏页面：每次循环最多建一个，间隔 ≥ 200 ms，
+ * 避免长时间阻塞渲染。页面指针一旦建好就与启动时构建等价。
+ */
+
+struct smart_home_deferred_build_s
+{
+    const char *name;
+    void (*build)(smart_home_lvgl_t *ui);
+};
+
+static const struct smart_home_deferred_build_s g_deferred_builds[] = {
+    { "network", smart_home_lvgl_build_network_screen },
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    { "miloco", smart_home_lvgl_build_miloco_screen },
+#endif
+    { "settings-legacy", smart_home_lvgl_build_settings_screen },
+    { "model", smart_home_lvgl_build_model_screen },
+    { "tools", smart_home_lvgl_build_tools_screen },
+    { "mcp", smart_home_lvgl_build_mcp_screen },
+    { "node", smart_home_lvgl_build_node_screen },
+};
+
+static uint8_t g_deferred_index;
+static uint32_t g_deferred_last_ms;
+
+static void smart_home_lvgl_defer_remaining(smart_home_lvgl_t *ui)
+{
+    (void)ui;
+    g_deferred_index = 0;
+    g_deferred_last_ms = lv_tick_get();
+}
+
+static void smart_home_lvgl_build_deferred(smart_home_lvgl_t *ui)
+{
+    const size_t total = sizeof(g_deferred_builds) / sizeof(g_deferred_builds[0]);
+
+    if (!ui || g_deferred_index >= total) {
+        return;
+    }
+    if (lv_tick_elaps(g_deferred_last_ms) < 200u) {
+        return;
+    }
+    g_deferred_last_ms = lv_tick_get();
+
+    smart_home_lvgl_log_build_stage(g_deferred_builds[g_deferred_index].name,
+                                    "begin");
+    g_deferred_builds[g_deferred_index].build(ui);
+    smart_home_lvgl_log_build_stage(g_deferred_builds[g_deferred_index].name,
+                                    "done");
+    g_deferred_index++;
+}
+
 smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
 {
     smart_home_lvgl_t *ui;
@@ -65,46 +150,32 @@ smart_home_lvgl_t *smart_home_lvgl_init(smart_home_agent_app_t *app)
     smart_home_lvgl_log_build_stage("screensaver", "done");
 
     smart_home_lvgl_log_build_stage("home", "begin");
-    smart_home_lvgl_build_home_screen(ui);
+    smart_home_lvgl_build_home_screen_v9(ui);
     smart_home_lvgl_log_build_stage("home", "done");
 
     smart_home_lvgl_log_build_stage("panel", "begin");
     smart_home_lvgl_build_panel_screen(ui);
     smart_home_lvgl_log_build_stage("panel", "done");
 
-    smart_home_lvgl_log_build_stage("security", "begin");
-    smart_home_lvgl_build_security_screen(ui);
-    smart_home_lvgl_log_build_stage("security", "done");
+    /* V9 camera preview is an on-demand popup. Do not allocate the old
+     * security page and its second RGB565 preview buffer at startup. */
 
-    smart_home_lvgl_log_build_stage("more", "begin");
-    smart_home_lvgl_build_more_screen(ui);
-    smart_home_lvgl_log_build_stage("more", "done");
-
-    smart_home_lvgl_log_build_stage("network", "begin");
-    smart_home_lvgl_build_network_screen(ui);
-    smart_home_lvgl_log_build_stage("network", "done");
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    smart_home_lvgl_log_build_stage("miloco", "begin");
-    smart_home_lvgl_build_miloco_screen(ui);
-    smart_home_lvgl_log_build_stage("miloco", "done");
-    smart_home_lvgl_log_build_stage("miloco-bind", "begin");
-    smart_home_lvgl_build_miloco_bind_screen(ui);
-    smart_home_lvgl_log_build_stage("miloco-bind", "done");
-#endif
+    /* 旧“更多”页在 V9 三栏导航下已无入口，不再急切构建；
+     * smart_home_lvgl_build_more_screen 仍保留给 Host 回归与后续懒构建。 */
 
     smart_home_lvgl_log_build_stage("chat", "begin");
     smart_home_lvgl_build_chat_screen(ui);
+    (void)smart_home_lvgl_chat_restore(ui);
     smart_home_lvgl_log_build_stage("chat", "done");
 
     smart_home_lvgl_log_build_stage("settings", "begin");
-    smart_home_lvgl_build_settings_screen(ui);
+    smart_home_lvgl_build_settings_screen_v9(ui);
     smart_home_lvgl_log_build_stage("settings", "done");
 
-    /* 服务管理独立屏（更多页第二行卡片入口）。 */
-    smart_home_lvgl_build_model_screen(ui);
-    smart_home_lvgl_build_tools_screen(ui);
-    smart_home_lvgl_build_mcp_screen(ui);
-    smart_home_lvgl_build_node_screen(ui);
+    /* 其余页面（网络、米家、旧设置、模型、工具、MCP、节点）在首帧之后
+     * 由 smart_home_lvgl_build_deferred() 逐个补建：它们只在用户点进
+     * 对应入口时才需要，启动阶段构建会让首帧白等约 3.5 秒。 */
+    smart_home_lvgl_defer_remaining(ui);
 
 #ifdef CONFIG_SMART_HOME_KWS
     /* 语音会话联动：KWS 常驻监听（kws.json enabled 时）+
@@ -140,6 +211,8 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         return;
     }
 
+    smart_home_lvgl_camera_dialog_close();
+    smart_home_lvgl_settings_v9_deinit(ui);
     if (ui->agent_worker_active) {
         pthread_join(ui->agent_worker, NULL);
         ui->agent_worker_active = 0;
@@ -148,6 +221,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         pthread_join(ui->network_worker, NULL);
         ui->network_worker_active = 0;
     }
+    (void)smart_home_agent_app_set_observer(ui->app, NULL, NULL);
     smart_home_lvgl_discard_pending(ui);
     smart_home_lvgl_settings_deinit();
     if (ui->network_status_timer) {
@@ -159,7 +233,7 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
         lv_timer_delete(ui->security_camera_timer);
         ui->security_camera_timer = NULL;
     }
-    smart_home_lvgl_security_camera_stop(ui);
+    if (ui->screen_security) smart_home_lvgl_security_camera_stop(ui);
     smart_home_bulk_free(ui->security_camera_buffer);
     ui->security_camera_buffer = NULL;
 #endif
@@ -182,6 +256,10 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
     if (ui->home_time_timer) {
         lv_timer_delete(ui->home_time_timer);
         ui->home_time_timer = NULL;
+    }
+    if (ui->v9_poll_timer) {
+        lv_timer_delete(ui->v9_poll_timer);
+        ui->v9_poll_timer = NULL;
     }
     if (ui->screen_screensaver) {
         lv_obj_del(ui->screen_screensaver);
@@ -206,6 +284,9 @@ void smart_home_lvgl_deinit(smart_home_lvgl_t *ui)
     }
     if (ui->screen_settings) {
         lv_obj_del(ui->screen_settings);
+    }
+    if (ui->screen_settings_v9) {
+        lv_obj_del(ui->screen_settings_v9);
     }
     pthread_mutex_destroy(&ui->pending_mutex);
     smart_home_bulk_free(ui->network_worker_stack_alloc);
@@ -323,7 +404,7 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
     printf("[lvgl] ui init done\n");
 #endif
 
-    agent_set_event_callback(app->agent, smart_home_lvgl_event_cb, ui);
+    smart_home_agent_app_set_observer(app, smart_home_lvgl_event_cb, ui);
     smart_home_lvgl_show(ui);
 #ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
     printf("[lvgl] show done, entering run loop\n");
@@ -339,12 +420,49 @@ int smart_home_lvgl_run(smart_home_agent_app_t *app,
     smart_home_lvgl_uv_loop(&ui_loop, &result, ui);
 #else
     smart_home_cpu_debug_log("lvgl-loop-start");
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+    uint32_t perf_frames = 0;
+    uint32_t perf_sum_ms = 0;
+    uint32_t perf_max_ms = 0;
+    uint32_t perf_window = lv_tick_get();
+#endif
     for (;;) {
         uint32_t idle;
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+        uint32_t started = lv_tick_get();
+#endif
 
         smart_home_lvgl_process_pending(ui);
+        smart_home_lvgl_build_deferred(ui);
         idle = lv_timer_handler();
         smart_home_lvgl_process_pending(ui);
+#ifdef CONFIG_SMART_HOME_V9_PERF_LOG
+        {
+            uint32_t elapsed = lv_tick_get() - started;
+
+            perf_frames++;
+            perf_sum_ms += elapsed;
+            if (elapsed > perf_max_ms) perf_max_ms = elapsed;
+            if (lv_tick_elaps(perf_window) >= 5000u) {
+                /* 同一行带出用户堆快照，P01-P12 只需一份串口日志即可回填；
+                 * mallinfo() 反映 umm 用户堆（LVGL 与业务对象所在堆）。
+                 */
+                struct mallinfo mem = mallinfo();
+
+                printf("[v9-perf] frames=%u avg_ms=%u max_ms=%u "
+                       "heap_used=%u heap_free=%u heap_largest=%u scene=%s\n",
+                       (unsigned)perf_frames,
+                       (unsigned)(perf_sum_ms / (perf_frames ? perf_frames : 1)),
+                       (unsigned)perf_max_ms,
+                       (unsigned)mem.uordblks, (unsigned)mem.fordblks,
+                       (unsigned)mem.mxordblk, v9_perf_scene(ui));
+                perf_frames = 0;
+                perf_sum_ms = 0;
+                perf_max_ms = 0;
+                perf_window = lv_tick_get();
+            }
+        }
+#endif
         if (idle == 0 || idle > SMART_HOME_LVGL_QUEUE_POLL_MS) {
             idle = SMART_HOME_LVGL_QUEUE_POLL_MS;
         }

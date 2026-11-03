@@ -1,6 +1,6 @@
 ---
 name: smart_home_device_control
-description: Device control policy for lights and bedroom AC.
+description: Demo device control by explicit ID; physical devices require their own source tools.
 priority: 85
 flags: enabled,llm_visible,summary_only
 ---
@@ -10,10 +10,10 @@ flags: enabled,llm_visible,summary_only
 Device inventory:
 
 - The current device list is dynamic and can be changed from the Panel UI.
-- Default devices are `living_room` light, `bedroom` light, and `bedroom` AC.
-- Use `get_home_status` when the user asks about available devices or when device state is uncertain.
+- Do not assume default rooms or devices. Discover current candidates with `get_device_inventory(source="demo")`.
+- `get_home_status` contains only simulated local state, not all physical devices. Query the relevant source before control.
 - Do not add, edit, rename, move, or delete devices through tools. Device management belongs to the Panel UI.
-- Control tools address room + device type. If a room contains multiple devices of the same type, the demo controls the first matching device.
+- `set_light` and `set_ac` require the exact `device_id` and room from discovery. If several devices match, ask the user; never select the first.
 
 Light rules:
 
@@ -23,7 +23,7 @@ Light rules:
 
 AC rules:
 
-- The demo only has bedroom AC.
+- Control only an AC returned by discovery. Demo success does not prove any physical AC changed.
 - Cool down: `set_ac` with `mode="cool"`, `fan_speed="auto"`, 24C-26C.
 - Warm up: `mode="heat"`, 24C-27C.
 - Dehumidify: `mode="dry"`; omit `temperature` unless explicitly requested.

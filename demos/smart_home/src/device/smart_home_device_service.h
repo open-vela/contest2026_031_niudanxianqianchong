@@ -64,6 +64,8 @@ int smart_home_device_service_find_first(smart_home_device_service_t *service,
                                          const char *room,
                                          smart_home_device_type_t type,
                                          smart_home_device_t *out_device);
+int smart_home_device_service_get_device(smart_home_device_service_t *service,
+                                          int id, smart_home_device_t *out);
 int smart_home_device_service_build_snapshot_json(
     smart_home_device_service_t *service,
     char *buffer,
@@ -80,6 +82,9 @@ int smart_home_device_service_add(smart_home_device_service_t *service,
                                   int *device_id);
 int smart_home_device_service_add_room(smart_home_device_service_t *service,
                                        const char *room);
+int smart_home_device_service_delete_room(smart_home_device_service_t *service,
+                                          const char *source_room,
+                                          const char *target_room);
 int smart_home_device_service_update_meta(smart_home_device_service_t *service,
                                           int device_id,
                                           const char *room,
@@ -115,3 +120,14 @@ int smart_home_device_service_set_environment(smart_home_device_service_t *servi
                                               int ambient_light);
 int smart_home_device_service_run_scene(smart_home_device_service_t *service,
                                         const char *scene);
+
+int smart_home_device_service_register_context(agent_t *agent,
+                                                smart_home_device_service_t *service);
+
+int smart_home_device_service_assign_room(smart_home_device_service_t *service,
+                                          const char *key, const char *room);
+
+/* Atomically migrate known gateway devices together with local metadata. */
+int smart_home_device_service_delete_room_with_keys(
+    smart_home_device_service_t *service, const char *source, const char *target,
+    const char keys[][SMART_HOME_ROOM_KEY_SIZE], size_t count);

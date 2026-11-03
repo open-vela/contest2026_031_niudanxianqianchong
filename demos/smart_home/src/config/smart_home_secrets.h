@@ -2,13 +2,14 @@
 /**
  * secrets.json 凭据加载与受控更新。
  *
- * 模型凭据只读；Wi-Fi 凭据由网络设置页受控更新。调用者按 backend_id
+ * 模型、ASR、TTS 凭据按服务隔离；Wi-Fi 凭据由网络设置页受控更新。调用者按 backend_id
  * 请求 API key，避免切换模型时复用其他后端的凭据。
  */
 
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,10 +23,28 @@ extern "C" {
 #define CONFIG_SMART_HOME_MODEL_SECRETS_MAX_FILE_SIZE 4096u
 #endif
 
+typedef enum {
+    SMART_HOME_SECRET_LLM = 0,
+    SMART_HOME_SECRET_ASR,
+    SMART_HOME_SECRET_TTS
+} smart_home_secret_service_t;
+
+/* No cross-service fallback, even when the backend IDs are identical. */
+const char *smart_home_secrets_key_section(smart_home_secret_service_t service);
+const char *smart_home_secrets_error_text(int result);
+int smart_home_secrets_get_api_key(smart_home_secret_service_t service,
+                                   const char *backend_id,
+                                   char *out, size_t out_size);
+int smart_home_secrets_api_key_status(smart_home_secret_service_t service,
+                                      const char *backend_id);
+/* Empty key explicitly clears this service/backend entry. Other fields survive. */
+int smart_home_secrets_set_api_key(smart_home_secret_service_t service,
+                                   const char *backend_id, const char *key);
+
 /**
  * 从 secrets.json 的 model_api_keys 对象中读取 backend_id 对应的密钥。
  *
- * 成功返回 AGENT_OK。文件/条目不存在或值为空返回 AGENT_ERROR_NOTFOUND；
+ * 成功返回 AGENT_OK。文件/条目不存在或值为空返回 AGENT_ERROR_NOT_FOUND；
  * 非法 JSON、版本或值返回 AGENT_ERROR_PARSE；过大输入/输出缓冲不足返回
  * AGENT_ERROR_LIMIT。任何失败都会清空 out，且不会回退到源码默认值。
  */

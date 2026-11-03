@@ -1,0 +1,45 @@
+{
+  "target": "panel_check",
+  "build": {
+    "source": "../../../demos/smart_home/tests/lvgl",
+    "openvela_root": "/home/arongw/openvela"
+  },
+  "pages": [
+    {
+      "name": "home",
+      "env": "SMART_HOME_V9_CAPTURE"
+    },
+    {
+      "name": "chat",
+      "env": "SMART_HOME_V9_CHAT_CAPTURE"
+    },
+    {
+      "name": "settings",
+      "env": "SMART_HOME_V9_SETTINGS_CAPTURE"
+    },
+    {
+      "name": "set-display",
+      "env": "SMART_HOME_V9_CAT_DISPLAY_CAPTURE"
+    },
+    {
+      "name": "set-network",
+      "env": "SMART_HOME_V9_CAT_NETWORK_CAPTURE"
+    },
+    {
+      "name": "set-model",
+      "env": "SMART_HOME_V9_CAT_MODEL_CAPTURE"
+    },
+    {
+      "name": "set-tools",
+      "env": "SMART_HOME_V9_CAT_TOOLS_CAPTURE"
+    },
+    {
+      "name": "set-services",
+      "env": "SMART_HOME_V9_CAT_SERVICES_CAPTURE"
+    },
+    {
+      "name": "set-health",
+      "env": "SMART_HOME_V9_CAT_HEALTH_CAPTURE"
+    }
+  ]
+}

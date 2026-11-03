@@ -1,0 +1,13 @@
+PASS: V9 view mapping and async control readback/timeout
+PASS: room delete reassigns devices and refuses last/duplicate rooms
+[smart_home_lvgl] font preload begin path=/home/arongw/openvela/worktrees/contest2026_031_niudanxianqianchong-lvgl-v9/demos/smart_home/res/fonts/MiSans-Normal.ttf
+[smart_home_lvgl] font preload done size=7943504 buffer=0x707d2f06c010 region=bulk-heap
+[smart_home_lvgl] font instances source=PSRAM-data size=7943504 sizes=11/12/13/14/15/16/17/18/19/20/22/24/26/28/32/38/48/50/56/96
+PASS: real-room catalog, deduplication, filtering, reorder and removal
+PASS: power and BOOL rollback; offline guard; ENUM/ACTION feedback; 8x4 controls
+PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating
+PASS: pointer press/release, RGB565 feedback, nav hit target/cancel, disabled and selected states
+PASS: all 12 V9 card modals, real switches and readback
+PASS: all three real navigation bars, pixel colors, tab clicks and chat input geometry
+PASS: 200 screen switches keep the object tree stable (232 objects)
+PASS: cached weather/city, truthful counts, unknown status, midnight date, V9 home

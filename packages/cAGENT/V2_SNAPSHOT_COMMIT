@@ -1,0 +1,11 @@
+cAgentV2 snapshot
+base commit: 059b568
+plus uncommitted upstream work at snapshot time:
+  - ports/openvela/tls/ (mbedTLS backend for webclient TLS)
+  - openai provider use_legacy_max_tokens option
+  - openvela port Kconfig/CMake/README updates for tls module
+
+contest integration (2026-10-25):
+  - moved packages/cAgent2 to packages/cAGENT, replacing the V1 package
+  - package path and component switches renamed to cAGENT / CAGENT_*
+  - AGENT_* capacity symbols and V2 implementation sources unchanged

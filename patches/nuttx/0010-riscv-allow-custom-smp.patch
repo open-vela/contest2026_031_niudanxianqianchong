@@ -1,0 +1,23 @@
+--- a/arch/risc-v/src/common/Make.defs
++++ b/arch/risc-v/src/common/Make.defs
+@@ -48,7 +48,9 @@
+ endif
+ 
+ ifeq ($(CONFIG_SMP),y)
++ifneq ($(CONFIG_ARCH_CUSTOM_SMP),y)
+ CMN_CSRCS += riscv_smpcall.c riscv_cpustart.c
++endif
+ endif
+ 
+ ifeq ($(CONFIG_ARCH_HAVE_MULTICPU),y)
+--- a/arch/risc-v/src/common/CMakeLists.txt
++++ b/arch/risc-v/src/common/CMakeLists.txt
+@@ -46,7 +46,7 @@
+   endif()
+ endif()
+ 
+-if(CONFIG_SMP)
++if(CONFIG_SMP AND NOT CONFIG_ARCH_CUSTOM_SMP)
+   list(APPEND SRCS riscv_smpcall.c riscv_cpustart.c)
+ endif()
+ 

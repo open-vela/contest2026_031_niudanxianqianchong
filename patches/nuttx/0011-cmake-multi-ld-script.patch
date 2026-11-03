@@ -1,0 +1,45 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2d8c5056bc7..ae3546cbc6b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -669,16 +669,21 @@ get_property(ldscript GLOBAL PROPERTY LD_SCRIPT)
+ 
+ # Pre-compile linker script
+ if(NOT CONFIG_ARCH_SIM AND NOT CONFIG_ARCH_TOOLCHAIN_TASKING)
+-  get_filename_component(LD_SCRIPT_NAME ${ldscript} NAME)
+-  set(LD_SCRIPT_TMP "${CMAKE_BINARY_DIR}/${LD_SCRIPT_NAME}.tmp")
++  set(LD_SCRIPT_TMP_FILES)
++  foreach(ldscript_item IN LISTS ldscript)
++    get_filename_component(LD_SCRIPT_NAME ${ldscript_item} NAME)
++    set(LD_SCRIPT_TMP "${CMAKE_BINARY_DIR}/${LD_SCRIPT_NAME}.tmp")
+ 
+-  nuttx_generate_preprocess_target(SOURCE_FILE ${ldscript} TARGET_FILE
+-                                   ${LD_SCRIPT_TMP})
++    nuttx_generate_preprocess_target(SOURCE_FILE ${ldscript_item} TARGET_FILE
++                                     ${LD_SCRIPT_TMP})
+ 
+-  add_custom_target(ldscript_tmp DEPENDS ${LD_SCRIPT_TMP})
++    list(APPEND LD_SCRIPT_TMP_FILES ${LD_SCRIPT_TMP})
++  endforeach()
++
++  add_custom_target(ldscript_tmp DEPENDS ${LD_SCRIPT_TMP_FILES})
+   add_dependencies(nuttx ldscript_tmp)
+ 
+-  set(ldscript ${LD_SCRIPT_TMP})
++  set(ldscript ${LD_SCRIPT_TMP_FILES})
+ endif()
+ 
+ # Perform link
+@@ -722,8 +727,10 @@ if(NOT CONFIG_ARCH_SIM)
+ 
+   else()
+     get_property(NUTTX_EXTRA_FLAGS GLOBAL PROPERTY NUTTX_EXTRA_FLAGS)
+-    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS}
+-                        ${LINK_OPTION_FLAG}${ldscript})
++    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS})
++    foreach(ldscript_item IN LISTS ldscript)
++      target_link_options(nuttx PRIVATE ${LINK_OPTION_FLAG}${ldscript_item})
++    endforeach()
+     target_link_libraries(
+       nuttx
+       PRIVATE $<$<NOT:$<BOOL:${DISABLE_LINK_GROUP}>>:-Wl,--start-group>

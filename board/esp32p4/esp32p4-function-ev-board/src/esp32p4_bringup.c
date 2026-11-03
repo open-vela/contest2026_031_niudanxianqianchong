@@ -34,9 +34,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/fs/fs.h>
+#include <nuttx/sched.h>
 
 #include <arch/board/board.h>
+
+#ifdef CONFIG_ESP32P4_DMA2D
+#  include <arch/chip/esp_graphics.h>
+#endif
 
 #include "esp_board_ledc.h"
 #include "esp_board_spiflash.h"
@@ -144,6 +150,47 @@
  ****************************************************************************/
 
 /****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: esp_bringup_stack_report
+ *
+ * Description:
+ *   Report the AppBringUp thread's stack high-water mark at a named bring-up
+ *   stage.  board_late_initialize() runs on the temporary "AppBringUp" kernel
+ *   thread, whose stack is CONFIG_BOARD_INITTHREAD_STACKSIZE; every peripheral
+ *   initialiser in this file shares that one budget, so the deepest caller
+ *   decides whether bring-up survives.
+ *
+ *   Only meaningful with CONFIG_STACK_COLORATION, which fills the stack with
+ *   STACK_COLOR at thread start; up_check_tcbstack() then reports how far the
+ *   colour was clobbered.  This is diagnostic only: it does not change the
+ *   stack size, so an overflow still overflows.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_STACK_COLORATION
+static void esp_bringup_stack_report(FAR const char *stage)
+{
+  FAR struct tcb_s *tcb = this_task();
+
+  if (tcb == NULL || tcb->stack_base_ptr == NULL || tcb->adj_stack_size == 0)
+    {
+      syslog(LOG_WARNING, "STACK: stage=%s unavailable\n", stage);
+      return;
+    }
+
+  syslog(LOG_INFO, "STACK: stage=%s used=%zu total=%zu\n",
+         stage,
+         up_check_tcbstack(tcb, tcb->adj_stack_size),
+         (size_t)tcb->adj_stack_size);
+}
+#else
+#  define esp_bringup_stack_report(stage) ((void)(stage))
+#endif
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -166,12 +213,26 @@ int esp_bringup(void)
 {
   int ret = OK;
 
+  esp_bringup_stack_report("entry");
+
+#if defined(CONFIG_ESP32P4_DMA2D) && \
+    !defined(CONFIG_ESP32P4_SMP_GRAPHICS_CPU0)
+  ret = esp_graphics_initialize();
+  if (ret < 0)
+    {
+      _err("Failed to initialize graphics DMA: %d\n", ret);
+      return ret;
+    }
+#endif
+
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_BOARD_CAMERA_SC2336_VIDEO
   ret = board_camera_initialize();
   if (ret < 0)
     {
       _err("Failed to register /dev/video0: %d\n", ret);
     }
+
+  esp_bringup_stack_report("camera");
 #endif
 
 #ifdef CONFIG_FS_PROCFS
@@ -350,6 +411,8 @@ int esp_bringup(void)
     {
       syslog(LOG_ERR, "Failed to initialize ES8311 audio: %d\n", ret);
     }
+
+  esp_bringup_stack_report("es8311");
 #endif
 
 #ifdef CONFIG_SENSORS_BMP180
@@ -565,6 +628,8 @@ int esp_bringup(void)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
     }
+
+  esp_bringup_stack_report("spiflash");
 #endif
 
 #ifdef CONFIG_ESPRESSIF_USE_LP_CORE
@@ -593,6 +658,8 @@ int esp_bringup(void)
    * at least enough succeeded to bring-up NSH with perhaps reduced
    * capabilities.
    */
+
+  esp_bringup_stack_report("exit");
 
   return ret;
 }

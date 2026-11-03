@@ -17,6 +17,14 @@ typedef struct smart_home_node_gateway smart_home_node_gateway_t;
 int smart_home_node_gateway_start(smart_home_node_gateway_t **gateway_out,
                                   agent_t *agent,
                                   pthread_mutex_t *agent_mutex);
+/* Same as start(), but uses an explicit listen port.  The gateway must be
+ * stopped before reconfiguring; the caller is responsible for not calling
+ * this from a context that cannot wait for worker shutdown. */
+int smart_home_node_gateway_start_with_port(
+    smart_home_node_gateway_t **gateway_out,
+    agent_t *agent,
+    pthread_mutex_t *agent_mutex,
+    uint16_t listen_port);
 
 /* Stop transport first, drain queued unregister operations, then free state. */
 void smart_home_node_gateway_stop(smart_home_node_gateway_t **gateway_ptr);

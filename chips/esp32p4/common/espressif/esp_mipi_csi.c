@@ -1178,7 +1178,10 @@ int esp_mipi_csi_initialize(FAR struct esp_mipi_csi_s *csi,
       .input_bpp = config->bits_per_pixel,
       .bayer_order = config->bayer_order,
       .byte_swap = config->byte_swap,
-      .output = config->output
+      .output = config->output,
+      .wbg_gain_r = config->wbg_gain_r,
+      .wbg_gain_g = config->wbg_gain_g,
+      .wbg_gain_b = config->wbg_gain_b
     };
 
     ret = esp_isp_initialize(&priv->isp, &isp_config);

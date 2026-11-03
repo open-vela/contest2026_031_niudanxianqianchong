@@ -49,6 +49,8 @@ documented environment rather than falling back to a random system `esptool`.
 5. Release any serial terminal before esptool opens the download port. After
    reset, rediscover the terminal device if USB re-enumeration changed it,
    then connect with `picocom` using the console selected by the final config.
+   When the boot sequence itself is the evidence, use the scripted pyserial
+   capture below instead of `picocom`.
 6. Verify the requested result, such as `nsh>`, an application command, or a
    mounted LittleFS directory. Report the exact image layout and validation
    result.
@@ -89,6 +91,59 @@ documented environment rather than falling back to a random system `esptool`.
   device.
 - If no `nsh>` appears but ROM output does, check the console configuration
   before diagnosing the flash image as invalid.
+
+## Capturing boot logs
+
+`picocom` is fine for interactive use, but it cannot reliably capture the log
+from the reset vector: by the time the terminal opens, the ROM and bootloader
+lines are already gone. Use a scripted pyserial capture whenever the boot
+sequence itself is the evidence.
+
+1. Find the CDC device after flashing; it may renumber (`ttyACM0` to `ttyACM1`).
+2. Open the port, then pulse reset yourself: RTS drives EN, DTR drives the
+   boot strap. Keep `DTR` low so the board resets into normal flash boot.
+3. Read continuously, tolerate a transient read error while the device
+   re-enumerates, and keep the port open until the prompt or the expected
+   failure appears.
+
+```python
+import glob, time, serial
+
+s = serial.Serial(glob.glob('/dev/ttyACM*')[0], 115200, timeout=0.2)
+s.setDTR(False)
+s.setRTS(True); time.sleep(0.15)
+s.setRTS(False)
+
+buf = b''
+deadline = time.time() + 15
+while time.time() < deadline:
+    try:
+        data = s.read(4096)
+    except Exception:
+        time.sleep(0.1)          # USB re-enumeration, reopen if it persists
+        continue
+    if data:
+        buf += data
+s.close()
+print(buf.decode('utf-8', 'replace')[-4000:])
+```
+
+- Reopen the port in a retry loop; after a reset the old handle can disappear.
+- Extend the deadline when waiting for `nsh>` or a long-running command rather
+  than assuming a silent port means a hang.
+- For interactive checks, write commands with `\r` and read until the next
+  `nsh>` prompt, for example `mount -t procfs /proc` then `ps`.
+- A `SHA-256 comparison failed ... Attempting to boot anyway` line is expected
+  for images built with `elf2image --ram-only-header`; it does not indicate a
+  bad flash write.
+
+### Early-boot instrumentation
+
+Application IROM (`0x4000xxxx`) is not mapped until `map_rom_segments()` runs.
+Calling an ordinary `.text` helper before that point raises an illegal
+instruction, so `riscv_lowputc()` and similar functions cannot be used for the
+first boot markers. Put the marker helper in IRAM and write the USB
+Serial/JTAG FIFO directly, then remove the instrumentation before committing.
 
 ## LittleFS resource updates
 
