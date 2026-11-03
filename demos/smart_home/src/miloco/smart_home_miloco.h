@@ -117,6 +117,9 @@ int smart_home_miloco_reconfigure(smart_home_miloco_t *service,
 int smart_home_miloco_request_save(smart_home_miloco_t *service,
                                    const smart_home_miloco_config_t *config);
 
+/* BUSY until the worker completes; otherwise return its save result. */
+int smart_home_miloco_save_status(const smart_home_miloco_t *service);
+
 /* 停止 worker、等待退出并释放全部资源。容忍 NULL 与重复调用。 */
 void smart_home_miloco_stop(smart_home_miloco_t **service);
 

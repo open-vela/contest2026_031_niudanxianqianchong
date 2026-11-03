@@ -24,6 +24,8 @@ static size_t live_allocations;
 static size_t allocations;
 static size_t fail_allocation;
 static int missing_key;
+static int persist_settings;
+static char saved_settings[4096];
 static int fail_tools;
 static int fail_context;
 static int fail_transport_init;
@@ -193,12 +195,25 @@ void smart_home_miloco_stop(smart_home_miloco_t **s) { *s = NULL; }
 
 int smart_home_config_settings_load(cJSON **out, char *error, size_t size)
 {
-    *out = cJSON_CreateObject();
-    assert(*out && cJSON_AddStringToObject(*out, "active_backend_id", "deepseek"));
+    *out = persist_settings && saved_settings[0] ? cJSON_Parse(saved_settings) : cJSON_CreateObject();
+    assert(*out);
+    if (!persist_settings || !saved_settings[0]) {
+        assert(cJSON_AddStringToObject(*out, "active_backend_id", "deepseek"));
+        assert(cJSON_AddStringToObject(*out, "unrelated", "keep"));
+    }
     if (size) error[0] = '\0';
     return AGENT_OK;
 }
-int smart_home_config_settings_save(const cJSON *root) { (void)root; return AGENT_OK; }
+int smart_home_config_settings_save(const cJSON *root)
+{
+    if (persist_settings) {
+        char *json = cJSON_PrintUnformatted(root);
+        assert(json && strlen(json) < sizeof(saved_settings));
+        strcpy(saved_settings, json);
+        free(json);
+    }
+    return AGENT_OK;
+}
 int smart_home_secrets_get_model_api_key(const char *id, char *out, size_t size)
 {
     (void)id;
@@ -517,8 +532,36 @@ static void observer_and_access(void)
     puts("PASS: observer terminal events, retained tool trace, permission snapshot and observer removal");
 }
 
+static void model_settings_roundtrip(void)
+{
+    smart_home_agent_app_t app;
+    smart_home_model_config_t config;
+    persist_settings = 1;
+    saved_settings[0] = '\0';
+    assert(smart_home_agent_app_init(&app) == AGENT_OK);
+    config = app.model_config;
+    snprintf(config.model, sizeof(config.model), "saved-model");
+    config.timeout_ms = 45000;
+    config.max_output_tokens = 777;
+    assert(smart_home_agent_app_apply_model_config(&app, &config) == AGENT_OK);
+    assert(strstr(saved_settings, "saved-model"));
+    assert(strstr(saved_settings, "unrelated"));
+    assert(!strstr(saved_settings, "test-key"));
+    smart_home_agent_app_deinit(&app);
+    assert(smart_home_agent_app_init(&app) == AGENT_OK);
+    assert(!strcmp(app.model_config.model, "saved-model"));
+    assert(app.model_config.timeout_ms == 45000);
+    assert(app.model_config.max_output_tokens == 777);
+    smart_home_agent_app_deinit(&app);
+    persist_settings = 0;
+    saved_settings[0] = '\0';
+    assert(!live_allocations);
+    puts("PASS: model settings roundtrip preserves other settings and excludes keys");
+}
+
 int main(void)
 {
+    model_settings_roundtrip();
     observer_and_access();
     session_history();
     session_capacity();

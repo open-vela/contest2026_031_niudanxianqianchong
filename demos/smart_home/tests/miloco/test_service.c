@@ -28,6 +28,25 @@ int main(void)
 {
     smart_home_miloco_t *s=calloc(1,sizeof(*s));
     assert(s && !pthread_mutex_init(&s->lock,NULL) && !sem_init(&s->wake,0,0));
+    smart_home_miloco_config_t cfg = {.port=1810};
+    strcpy(cfg.host, "gateway.local");
+    strcpy(cfg.token, "example");
+    assert(smart_home_miloco_save_status(s) == AGENT_ERROR_NOT_FOUND);
+    assert(smart_home_miloco_request_save(s, &cfg) == AGENT_OK);
+    assert(smart_home_miloco_save_status(s) == AGENT_ERROR_BUSY);
+    assert(smart_home_miloco_request_save(s, &cfg) == AGENT_ERROR_BUSY);
+    s->save_pending = false;
+    s->save_in_progress = true;
+    assert(smart_home_miloco_save_status(s) == AGENT_ERROR_BUSY);
+    s->save_in_progress = false;
+    s->save_completed = true;
+    s->save_result = AGENT_ERROR_IO;
+    assert(smart_home_miloco_save_status(s) == AGENT_ERROR_IO);
+    assert(smart_home_miloco_request_save(s, &cfg) == AGENT_OK);
+    s->save_pending = false;
+    s->save_result = AGENT_OK;
+    s->save_completed = true;
+    assert(smart_home_miloco_save_status(s) == AGENT_OK);
     s->device_count=1;
     smart_home_miloco_device_t *d=&s->devices[0];
     strcpy(d->did,"test"); d->online=true; d->control_count=1;

@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <syslog.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -318,6 +319,21 @@ static int load_update_root(cJSON **out)
     return AGENT_OK;
 }
 
+static int ensure_secrets_dir(void)
+{
+    char directory[192];
+    const char *path = CONFIG_SMART_HOME_MODEL_SECRETS_PATH;
+    const char *slash = strrchr(path, '/');
+    size_t length;
+
+    if (!slash || slash == path) return AGENT_OK;
+    length = (size_t)(slash - path);
+    if (length >= sizeof(directory)) return AGENT_ERROR_LIMIT;
+    memcpy(directory, path, length);
+    directory[length] = '\0';
+    return mkdir(directory, 0700) == 0 || errno == EEXIST ? AGENT_OK : AGENT_ERROR_IO;
+}
+
 static int save_update_root(const cJSON *root)
 {
     char temp[192];
@@ -331,6 +347,9 @@ static int save_update_root(const cJSON *root)
         ret = AGENT_ERROR_LIMIT;
         goto out;
     }
+    ret = ensure_secrets_dir();
+    if (ret != AGENT_OK) goto out;
+    ret = AGENT_ERROR_IO;
     clock_gettime(CLOCK_MONOTONIC, &now);
     for (attempt = 0; attempt < 16; attempt++) {
         unsigned long generation = ((unsigned long)now.tv_nsec ^

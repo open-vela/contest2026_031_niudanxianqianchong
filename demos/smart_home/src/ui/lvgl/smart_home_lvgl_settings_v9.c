@@ -3,6 +3,7 @@
 #include "smart_home_lvgl_internal.h"
 #include "images/smart_home_icons.h"
 #include "../../config/smart_home_backends.h"
+#include "../../config/smart_home_secrets.h"
 #include "../../net/smart_home_network.h"
 #ifdef CONFIG_SMART_HOME_MCP_BRIDGE
 #include "../../addons/smart_home_mcp_bridge.h"
@@ -66,6 +67,7 @@ typedef struct {
     lv_obj_t *miloco_port;
     lv_obj_t *miloco_token;
     lv_obj_t *miloco_modal_status;
+    lv_timer_t *miloco_save_timer;
 #endif
     lv_obj_t *model_dd;
     lv_obj_t *model_name;
@@ -93,7 +95,7 @@ typedef struct {
     lv_obj_t *keyboard;
     int model_index;
     char model_name_draft[8][64];
-    char model_key_draft[8][128];
+    char model_key_draft[8][256];
     char model_timeout_draft[8][16];
     char model_tokens_draft[8][16];
     int category;
@@ -313,6 +315,7 @@ static struct {
     int active;
     int ready;
     int result;
+    bool persistent;
 } g_model;
 
 static void model_set_busy(int busy)
@@ -333,7 +336,22 @@ static void *v9_model_worker(void *argument)
 {
     v9_model_job_t *job = argument;
     smart_home_lvgl_t *ui = job->ui;
-    int ret = smart_home_agent_app_apply_model_config(ui->app, &job->config);
+    char saved_key[sizeof(job->config.api_key)] = "";
+    char error[96];
+    int ret = smart_home_model_config_validate(&job->config, error, sizeof(error));
+
+    if (ret == AGENT_OK && job->config.api_key[0] &&
+        strcmp(job->config.backend_id, "custom") != 0) {
+        int found = smart_home_secrets_get_model_api_key(job->config.backend_id,
+                                                         saved_key, sizeof(saved_key));
+        if (found != AGENT_OK || strcmp(saved_key, job->config.api_key) != 0)
+            ret = smart_home_secrets_set_api_key(SMART_HOME_SECRET_LLM,
+                                                  job->config.backend_id,
+                                                  job->config.api_key);
+    }
+    memset(saved_key, 0, sizeof(saved_key));
+    if (ret == AGENT_OK)
+        ret = smart_home_agent_app_apply_model_config(ui->app, &job->config);
 
     memset(&job->config, 0, sizeof(job->config));
     free(job);
@@ -348,6 +366,12 @@ static void *v9_model_worker(void *argument)
 void smart_home_lvgl_settings_v9_deinit(smart_home_lvgl_t *ui)
 {
     if (!ui) return;
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (g_settings.miloco_save_timer) {
+        lv_timer_delete(g_settings.miloco_save_timer);
+        g_settings.miloco_save_timer = NULL;
+    }
+#endif
     if (ui->v9_network_timer) {
         lv_timer_delete(ui->v9_network_timer);
         ui->v9_network_timer = NULL;
@@ -470,7 +494,8 @@ static void v9_net_timer_cb(lv_timer_t *timer)
         model_set_busy(0);
         if (g_settings.model_status) {
             lv_label_set_text(g_settings.model_status,
-                model_result == AGENT_OK ? "本次配置已应用" : "配置应用失败");
+                model_result != AGENT_OK ? "配置保存或应用失败" :
+                g_model.persistent ? "配置已保存并应用" : "配置已应用（仅本次有效）");
             lv_obj_set_style_text_color(g_settings.model_status,
                 model_result == AGENT_OK ? SMART_HOME_UI_COLOR_SUCCESS :
                                           SMART_HOME_UI_COLOR_DANGER, 0);
@@ -569,10 +594,19 @@ static void build_network_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     lv_obj_set_width(g_settings.net_connected, 704);
     lv_label_set_long_mode(g_settings.net_connected, LV_LABEL_LONG_WRAP);
     if (ui && ui->app) {
-        const smart_home_network_status_t *status =
-            &ui->app->system_status.network_status;
-        if ((status->online || status->ip_status == SMART_HOME_NETWORK_OK) &&
-            status->ssid[0]) lv_textarea_set_text(g_settings.net_ssid, status->ssid);
+        char ssid[33] = "";
+        char password[65] = "";
+        if (smart_home_secrets_get_wifi_credentials(ssid, sizeof(ssid),
+                                                    password, sizeof(password)) == AGENT_OK) {
+            lv_textarea_set_text(g_settings.net_ssid, ssid);
+            lv_textarea_set_text(g_settings.net_password, password);
+        } else {
+            const smart_home_network_status_t *status =
+                &ui->app->system_status.network_status;
+            if ((status->online || status->ip_status == SMART_HOME_NETWORK_OK) &&
+                status->ssid[0]) lv_textarea_set_text(g_settings.net_ssid, status->ssid);
+        }
+        memset(password, 0, sizeof(password));
     }
     v9_net_status_refresh(ui);
 
@@ -765,20 +799,30 @@ static void model_load(smart_home_lvgl_t *ui, int index)
     const smart_home_llm_backend_preset_t *preset =
         smart_home_llm_backend_get((size_t)index);
     char buffer[32];
+    char key[256] = "";
+    const smart_home_model_config_t *active = ui && ui->app ?
+        &ui->app->model_config : NULL;
+    bool is_active;
 
     g_settings.model_index = index;
     if (!preset) {
         return;
     }
+    is_active = active && strcmp(active->backend_id, preset->id) == 0;
     if (g_settings.model_name) {
         lv_textarea_set_text(g_settings.model_name,
                              g_settings.model_name_draft[index][0] ?
                              g_settings.model_name_draft[index] :
-                             (preset->default_model ? preset->default_model : ""));
+                             (is_active && active->model[0] ? active->model :
+                              (preset->default_model ? preset->default_model : "")));
     }
     if (g_settings.model_key) {
+        if (!g_settings.model_key_draft[index][0])
+            (void)smart_home_secrets_get_model_api_key(preset->id, key, sizeof(key));
         lv_textarea_set_text(g_settings.model_key,
-                             g_settings.model_key_draft[index]);
+                             g_settings.model_key_draft[index][0] ?
+                             g_settings.model_key_draft[index] : key);
+        memset(key, 0, sizeof(key));
     }
     if (g_settings.model_timeout) {
         if (g_settings.model_timeout_draft[index][0]) {
@@ -786,7 +830,8 @@ static void model_load(smart_home_lvgl_t *ui, int index)
                                  g_settings.model_timeout_draft[index]);
         } else {
             snprintf(buffer, sizeof(buffer), "%u",
-                     (unsigned)preset->default_timeout_ms);
+                     is_active ? (unsigned)active->timeout_ms :
+                                 (unsigned)preset->default_timeout_ms);
             lv_textarea_set_text(g_settings.model_timeout, buffer);
         }
     }
@@ -878,6 +923,7 @@ static void model_apply_cb(lv_event_t *event)
     if (ret == 0) {
         ret = pthread_attr_setstacksize(&attr, 16384u);
         g_model.owner = ui;
+        g_model.persistent = strcmp(job->config.backend_id, "custom") != 0;
         g_model.ready = 0;
         g_model.active = 1;
         if (ret == 0)
@@ -953,8 +999,10 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     g_settings.model_name = model_input(panel, "模型标识", 360, 68, 344,
                                         "模型名称");
     g_settings.model_key = model_input(panel, "API 密钥", 0, 146, 704,
-                                       "留空沿用系统凭据，本次运行有效");
+                                       "留空沿用已保存密钥");
     lv_textarea_set_password_mode(g_settings.model_key, true);
+    lv_textarea_set_max_length(g_settings.model_key,
+                               sizeof(((smart_home_model_config_t *)0)->api_key) - 1u);
     g_settings.model_timeout = model_input(panel, "请求超时 / 毫秒", 0, 224,
                                            336, "30000");
     g_settings.model_tokens = model_input(panel, "最大输出 / 词元", 360, 224,
@@ -976,7 +1024,7 @@ static void build_model_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
         smart_home_lvgl_press_feedback(button);
         g_settings.model_apply = button;
         lv_obj_add_event_cb(button, model_apply_cb, LV_EVENT_CLICKED, ui);
-        label = smart_home_lvgl_label_create(button, "应用本次配置",
+        label = smart_home_lvgl_label_create(button, "保存并应用",
                                              SMART_HOME_UI_COLOR_SURFACE, 17);
         lv_obj_center(label);
     }
@@ -1078,6 +1126,12 @@ static void miloco_config_open(smart_home_lvgl_t *ui);
 
 static void config_modal_close(void)
 {
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+    if (g_settings.miloco_save_timer) {
+        lv_timer_delete(g_settings.miloco_save_timer);
+        g_settings.miloco_save_timer = NULL;
+    }
+#endif
     /* 弹窗里的输入框是遮罩的子对象，随遮罩一起销毁；键盘只存裸指针，
      * LVGL 不会在 textarea 删除时自动解绑。不在删除前先解绑，之后任何
      * 按键都会写已释放内存。 */
@@ -1162,6 +1216,22 @@ static void service_unavailable_open(const char *name, const char *option)
 /* 连接米家家庭服务器（v9 33-mi-config）。保存后由 worker 落盘并立即轮询，
  * 本弹窗只负责采集地址/端口/令牌，扫码在下一步弹窗里完成。 */
 static void miloco_config_open(smart_home_lvgl_t *ui);
+static void miloco_save_poll_v9(lv_timer_t *timer)
+{
+    smart_home_lvgl_t *ui = lv_timer_get_user_data(timer);
+    int ret = ui && ui->app ? smart_home_miloco_save_status(ui->app->miloco) :
+                              AGENT_ERROR_INVALID;
+    if (ret == AGENT_ERROR_BUSY) return;
+    if (ret != AGENT_OK) {
+        lv_timer_delete(g_settings.miloco_save_timer);
+        g_settings.miloco_save_timer = NULL;
+        lv_label_set_text(g_settings.miloco_modal_status, "保存失败，请重试");
+        return;
+    }
+    config_modal_close();
+    smart_home_lvgl_open_miloco_bind(ui);
+}
+
 static void miloco_save_cb_v9(lv_event_t *event)
 {
     smart_home_lvgl_t *ui = lv_event_get_user_data(event);
@@ -1188,7 +1258,7 @@ static void miloco_save_cb_v9(lv_event_t *event)
         return;
     }
     config.port = (uint16_t)port;
-    if (!smart_home_miloco_config_valid(&config)) {
+    if (!config.host[0] || !smart_home_miloco_config_valid(&config)) {
         lv_label_set_text(g_settings.miloco_modal_status, "请填写有效的服务器地址");
         memset(&config, 0, sizeof(config));
         return;
@@ -1199,9 +1269,11 @@ static void miloco_save_cb_v9(lv_event_t *event)
         lv_label_set_text(g_settings.miloco_modal_status, "保存失败，请重试");
         return;
     }
-    config_modal_close();
-    /* 连接配置已提交，直接进入扫码授权步骤。 */
-    smart_home_lvgl_open_miloco_bind(ui);
+    lv_label_set_text(g_settings.miloco_modal_status, "正在保存，请稍候…");
+    if (!g_settings.miloco_save_timer)
+        g_settings.miloco_save_timer = lv_timer_create(miloco_save_poll_v9, 100, ui);
+    if (!g_settings.miloco_save_timer)
+        lv_label_set_text(g_settings.miloco_modal_status, "保存已提交，请稍后重新打开查看");
 }
 
 static void miloco_bind_step_cb(lv_event_t *event)
@@ -1242,7 +1314,11 @@ static void miloco_config_open(smart_home_lvgl_t *ui)
 
     /* 状态行贴在按钮上方：面板被键盘压矮时若用绝对 y，会和底部按钮叠在一起。 */
     g_settings.miloco_modal_status = smart_home_lvgl_label_create(
-        panel, "配置会写入 secrets.json，重启后保留",
+#ifdef CONFIG_SMART_HOME_MILOCO_VOLATILE_CONFIG
+        panel, "仅本次运行有效，重启后不保留",
+#else
+        panel, "保存完成后重启保留",
+#endif
         SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
     lv_obj_align(g_settings.miloco_modal_status, LV_ALIGN_BOTTOM_LEFT, 0, -76);
 

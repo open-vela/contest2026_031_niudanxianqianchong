@@ -1,5 +1,6 @@
 /* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
 #include "smart_home_lvgl_panel.c"
+#include "../../src/config/smart_home_secrets.h"
 #include "smart_home_v9_device_view.h"
 #include "smart_home_lvgl_room_dialog.h"
 #ifdef CONFIG_SMART_HOME_ONBOARDING
@@ -186,6 +187,19 @@ bool smart_home_miloco_get_config(const smart_home_miloco_t *service,
 int smart_home_miloco_request_save(smart_home_miloco_t *service,
                                    const smart_home_miloco_config_t *config)
 { (void)service; (void)config; return AGENT_OK; }
+int smart_home_miloco_save_status(const smart_home_miloco_t *service)
+{ (void)service; return AGENT_ERROR_NOT_FOUND; }
+int smart_home_secrets_get_wifi_credentials(char *ssid, size_t ssid_size,
+                                            char *password, size_t password_size)
+{ (void)ssid; (void)ssid_size; (void)password; (void)password_size; return AGENT_ERROR_NOT_FOUND; }
+int smart_home_secrets_get_model_api_key(const char *backend, char *key, size_t size)
+{ (void)backend; (void)key; (void)size; return AGENT_ERROR_NOT_FOUND; }
+int smart_home_model_config_validate(const smart_home_model_config_t *config,
+                                     char *error, size_t error_size)
+{ (void)config; (void)error; (void)error_size; return AGENT_OK; }
+int smart_home_secrets_set_api_key(smart_home_secret_service_t service,
+                                  const char *backend, const char *key)
+{ (void)service; (void)backend; (void)key; return AGENT_OK; }
 int smart_home_miloco_reconfigure(smart_home_miloco_t *service,
                                   const smart_home_miloco_config_t *config)
 { (void)service; (void)config; return AGENT_OK; }
@@ -1463,7 +1477,7 @@ static void test_v9_settings_clicks(smart_home_lvgl_t *ui)
 {
     lv_obj_t *caption = find_v9_label(ui->screen_settings_v9, "显示与声音");
     lv_obj_t *key = find_v9_input(ui->screen_settings_v9,
-                                 "留空沿用系统凭据，本次运行有效");
+                                 "留空沿用已保存密钥");
     assert(caption && key);
     lv_obj_t *left = lv_obj_get_parent(lv_obj_get_parent(caption));
     lv_obj_t *right = lv_obj_get_parent(lv_obj_get_parent(key));
@@ -1679,7 +1693,7 @@ static void test_v9_shell(smart_home_lvgl_t *ui)
     }
     lv_area_t key_bounds, parent_bounds;
     lv_obj_t *key = find_v9_input(ui->screen_settings_v9,
-                                 "留空沿用系统凭据，本次运行有效");
+                                 "留空沿用已保存密钥");
     assert(key);
     lv_obj_get_coords(key, &key_bounds);
     lv_obj_get_content_coords(lv_obj_get_parent(key), &parent_bounds);

@@ -242,6 +242,10 @@ static void smart_home_model_config_load_active_backend(
 {
     cJSON *settings = NULL;
     cJSON *active;
+    const cJSON *profiles;
+    const cJSON *profile;
+    const cJSON *value;
+    smart_home_model_config_t candidate;
     const smart_home_llm_backend_preset_t *preset;
     char error[64];
     int index;
@@ -263,6 +267,27 @@ static void smart_home_model_config_load_active_backend(
     preset = index >= 0 ? smart_home_llm_backend_get((size_t)index) : NULL;
     if (preset && (preset->flags & SMART_HOME_LLM_FLAG_CUSTOM) == 0u) {
         (void)smart_home_model_config_from_preset(config, preset, 0);
+        profiles = cJSON_GetObjectItemCaseSensitive(settings, "model_profiles");
+        profile = cJSON_IsObject(profiles) ?
+            cJSON_GetObjectItemCaseSensitive(profiles, active->valuestring) : NULL;
+        if (cJSON_IsObject(profile)) {
+            candidate = *config;
+            value = cJSON_GetObjectItemCaseSensitive(profile, "model");
+            if (cJSON_IsString(value) && value->valuestring[0] &&
+                strlen(value->valuestring) < sizeof(candidate.model))
+                snprintf(candidate.model, sizeof(candidate.model), "%s", value->valuestring);
+            value = cJSON_GetObjectItemCaseSensitive(profile, "timeout_ms");
+            if (cJSON_IsNumber(value) && value->valuedouble >= 5000 &&
+                value->valuedouble <= 60000)
+                candidate.timeout_ms = (uint32_t)value->valueint;
+            value = cJSON_GetObjectItemCaseSensitive(profile, "max_output_tokens");
+            if (cJSON_IsNumber(value) && value->valuedouble >= 1 &&
+                value->valuedouble <= 65536)
+                candidate.max_output_tokens = (uint32_t)value->valueint;
+            if (smart_home_model_config_validate(&candidate, error, sizeof(error)) == AGENT_OK)
+                *config = candidate;
+            secure_clear(&candidate, sizeof(candidate));
+        }
     } else if (cJSON_IsString(active)) {
         syslog(LOG_WARNING,
                "smart_home: unsupported saved backend id; using default\n");
@@ -312,10 +337,13 @@ static int smart_home_model_config_resolve_key(
     return ret;
 }
 
-static int smart_home_save_active_backend(const char *backend_id)
+static int smart_home_save_active_backend(const smart_home_model_config_t *config)
 {
     cJSON *settings = NULL;
     cJSON *replacement;
+    cJSON *profiles;
+    cJSON *profile;
+    const char *backend_id = config ? config->backend_id : NULL;
     char error[64];
     int ret;
 
@@ -339,6 +367,26 @@ static int smart_home_save_active_backend(const char *backend_id)
         cJSON_Delete(replacement);
         cJSON_Delete(settings);
         return AGENT_ERROR_PARSE;
+    }
+    profiles = cJSON_GetObjectItemCaseSensitive(settings, "model_profiles");
+    if (!profiles) profiles = cJSON_AddObjectToObject(settings, "model_profiles");
+    if (!cJSON_IsObject(profiles)) {
+        cJSON_Delete(settings);
+        return AGENT_ERROR_PARSE;
+    }
+    profile = cJSON_CreateObject();
+    if (!profile || !cJSON_AddStringToObject(profile, "model", config->model) ||
+        !cJSON_AddNumberToObject(profile, "timeout_ms", config->timeout_ms) ||
+        !cJSON_AddNumberToObject(profile, "max_output_tokens", config->max_output_tokens)) {
+        cJSON_Delete(profile);
+        cJSON_Delete(settings);
+        return AGENT_ERROR_NOMEM;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(profiles, backend_id);
+    if (!cJSON_AddItemToObject(profiles, backend_id, profile)) {
+        cJSON_Delete(profile);
+        cJSON_Delete(settings);
+        return AGENT_ERROR_NOMEM;
     }
     ret = smart_home_config_settings_save(settings);
     cJSON_Delete(settings);
@@ -722,7 +770,7 @@ int smart_home_agent_app_apply_model_config(
     app->system_status.last_error[0] = '\0';
     if (app->system_status.agent_status == AGENT_OK &&
         strcmp(resolved.backend_id, "custom") != 0)
-        ret = smart_home_save_active_backend(resolved.backend_id);
+        ret = smart_home_save_active_backend(&resolved);
 
 done:
     if (ret != AGENT_OK) {

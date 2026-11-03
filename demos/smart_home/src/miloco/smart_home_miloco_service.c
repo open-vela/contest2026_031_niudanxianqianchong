@@ -75,6 +75,9 @@ struct smart_home_miloco {
     /* 保存请求：worker 代写 secrets.json 后应用配置。 */
     smart_home_miloco_config_t save_config;
     bool save_pending;
+    bool save_in_progress;
+    bool save_completed;
+    int save_result;
 
     pthread_mutex_t lock;
     sem_t wake;
@@ -343,8 +346,11 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
     lock_state(service);
     if (service->stop_requested) {
         ret = AGENT_ERROR_INVALID;
+    } else if (service->save_pending || service->save_in_progress) {
+        ret = AGENT_ERROR_BUSY;
     } else {
         service->save_config = *config;
+        service->save_completed = false;
         service->save_pending = true;
     }
     unlock_state(service);
@@ -352,6 +358,17 @@ int smart_home_miloco_request_save(smart_home_miloco_t *service,
         sem_post(&service->wake);
     }
     return ret;
+}
+
+int smart_home_miloco_save_status(const smart_home_miloco_t *service)
+{
+    int result;
+    if (!service) return AGENT_ERROR_INVALID;
+    lock_state((smart_home_miloco_t *)service);
+    result = service->save_pending || service->save_in_progress ? AGENT_ERROR_BUSY :
+             service->save_completed ? service->save_result : AGENT_ERROR_NOT_FOUND;
+    unlock_state((smart_home_miloco_t *)service);
+    return result;
 }
 
 /* ── JSON 解析 ─────────────────────────────────────────────── */
@@ -1084,6 +1101,8 @@ static void *miloco_worker(void *argument)
             int save_ret;
 
             service->save_pending = false;
+            service->save_in_progress = true;
+            memset(&service->save_config, 0, sizeof(service->save_config));
             snprintf(client_config.host, sizeof(client_config.host), "%s",
                      save.host);
             client_config.port = save.port;
@@ -1102,7 +1121,11 @@ static void *miloco_worker(void *argument)
             syslog(LOG_INFO, "[milo] worker: secrets save ret=%d\n",
                    save_ret);
 #endif
+            memset(&save, 0, sizeof(save));
             lock_state(service);
+            service->save_result = save_ret;
+            service->save_in_progress = false;
+            service->save_completed = true;
             if (save_ret == AGENT_OK) {
                 service->client_config = client_config;
                 service->reachable = false;

@@ -19,6 +19,24 @@ static int mcp_calls;
 static smart_home_mcp_runtime_config_t applied_mcp;
 static smart_home_model_config_t applied_model;
 static unsigned network_probe_calls;
+static int fake_save_status = AGENT_ERROR_NOT_FOUND;
+static int fake_bind_calls;
+int smart_home_miloco_save_status(const smart_home_miloco_t *s)
+{ (void)s; return fake_save_status; }
+int smart_home_secrets_get_wifi_credentials(char *ssid, size_t ssid_size,
+                                            char *password, size_t password_size)
+{
+    snprintf(ssid, ssid_size, "saved-network");
+    snprintf(password, password_size, "saved-password");
+    return AGENT_OK;
+}
+int smart_home_secrets_get_model_api_key(const char *backend, char *key, size_t size)
+{ (void)backend; snprintf(key, size, "saved-key"); return AGENT_OK; }
+#ifndef SMART_HOME_TEST_HAS_VOICE_SECRET_STUB
+int smart_home_secrets_set_api_key(smart_home_secret_service_t service,
+                                  const char *backend, const char *key)
+{ (void)service; (void)backend; (void)key; return AGENT_OK; }
+#endif
 static const smart_home_llm_backend_preset_t preset = {
     .id = "test", .name = "测试服务", .host = "example.invalid",
     .path = "/chat", .port = "443", .default_model = "test-model",
@@ -30,6 +48,9 @@ const smart_home_llm_backend_preset_t *smart_home_llm_backend_get(size_t index)
 { return index == 0 ? &preset : NULL; }
 int smart_home_llm_backend_index_for_config(const smart_home_model_config_t *config)
 { (void)config; return 0; }
+int smart_home_model_config_validate(const smart_home_model_config_t *config,
+                                     char *error, size_t error_size)
+{ (void)config; (void)error; (void)error_size; return AGENT_OK; }
 int smart_home_model_config_from_preset(smart_home_model_config_t *config,
     const smart_home_llm_backend_preset_t *value, int keep_key)
 {
@@ -138,8 +159,9 @@ bool smart_home_miloco_config_valid(const smart_home_miloco_config_t *config)
 { return config && config->host[0] != '\0' && config->port != 0; }
 int smart_home_miloco_request_save(smart_home_miloco_t *service,
                                    const smart_home_miloco_config_t *config)
-{ (void)service; (void)config; return AGENT_ERROR; }
-void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui) { (void)ui; }
+{ (void)service; (void)config; fake_save_status = AGENT_ERROR_BUSY; return AGENT_OK; }
+void smart_home_lvgl_open_miloco_bind(smart_home_lvgl_t *ui)
+{ (void)ui; fake_bind_calls++; }
 #endif
 int smart_home_mcp_bridge_reconfigure(smart_home_mcp_bridge_t *bridge,
                                      const smart_home_mcp_runtime_config_t *config)
@@ -226,6 +248,9 @@ static smart_home_lvgl_t *setup(smart_home_agent_app_t *app)
                     smart_home_lvgl_keyboard_h());
     lv_obj_align(g_settings.keyboard, LV_ALIGN_BOTTOM_MID, 0, -72);
     lv_obj_add_flag(g_settings.keyboard, LV_OBJ_FLAG_HIDDEN);
+    assert(!strcmp(lv_textarea_get_text(g_settings.net_ssid), "saved-network"));
+    assert(!strcmp(lv_textarea_get_text(g_settings.net_password), "saved-password"));
+    assert(lv_textarea_get_password_mode(g_settings.net_password));
     lv_textarea_set_text(g_settings.net_ssid, "test-ssid");
     lv_textarea_set_text(g_settings.net_password, "test-password");
     lv_textarea_set_text(g_settings.model_name, "test-model");
@@ -273,7 +298,6 @@ int main(void)
     app.mcp_bridge = (smart_home_mcp_bridge_t *)&app;
     ui = setup(&app);
     screen = g_settings.screen;
-
     /* 当前连接来自网络状态，不能随待连接 SSID 草稿一起改变。 */
     app.system_status.network_status.ip_status = SMART_HOME_NETWORK_OK;
     snprintf(app.system_status.network_status.ssid,
@@ -370,6 +394,34 @@ int main(void)
     }
     puts("PASS: keyboard raised above the settings modal on focus");
 
+    /* A queued gateway write is not success; failure stays visible. */
+    {
+        lv_obj_t *button;
+        app.miloco = (smart_home_miloco_t *)&app;
+        miloco_config_open(ui);
+        lv_textarea_set_text(g_settings.miloco_host, "gateway.local");
+        lv_textarea_set_text(g_settings.miloco_port, "1810");
+        button = lv_button_create(screen);
+        click(button, miloco_save_cb_v9, ui);
+        assert(g_settings.miloco_save_timer && fake_bind_calls == 0);
+        miloco_save_poll_v9(g_settings.miloco_save_timer);
+        assert(g_settings.config_modal && fake_bind_calls == 0);
+        fake_save_status = AGENT_ERROR_IO;
+        miloco_save_poll_v9(g_settings.miloco_save_timer);
+        assert(g_settings.config_modal && !g_settings.miloco_save_timer);
+        assert(strstr(lv_label_get_text(g_settings.miloco_modal_status), "保存失败"));
+        lv_obj_send_event(button, LV_EVENT_CLICKED, NULL);
+        assert(g_settings.miloco_save_timer);
+        fake_save_status = AGENT_OK;
+        miloco_save_poll_v9(g_settings.miloco_save_timer);
+        assert(!g_settings.config_modal && !g_settings.miloco_save_timer);
+        assert(fake_bind_calls == 1);
+        lv_obj_delete(button);
+    }
+    puts("PASS: gateway waits for persistence and exposes errors");
+
+
+
     /* 米家网关弹窗是影响用户的那一例，单独覆盖：三行输入框，位置比 MCP 更低。 */
     {
         lv_obj_t *panel;
@@ -433,7 +485,7 @@ int main(void)
     assert(!g_model.active && !lv_obj_has_state(g_settings.model_apply, LV_STATE_DISABLED));
     assert(!strcmp(applied_model.model, "test-model"));
     assert(!strcmp(applied_model.api_key, "test-key"));
-    assert(!strcmp(lv_label_get_text(g_settings.model_status), "本次配置已应用"));
+    assert(!strcmp(lv_label_get_text(g_settings.model_status), "配置已保存并应用"));
 
     memset(gates, 0, sizeof(gates));
     gates[1].result = AGENT_ERROR_INVALID;
@@ -442,7 +494,7 @@ int main(void)
     release_service(1);
     wait_ready(ui, 1);
     v9_net_timer_cb(ui->v9_network_timer);
-    assert(!strcmp(lv_label_get_text(g_settings.model_status), "配置应用失败"));
+    assert(!strcmp(lv_label_get_text(g_settings.model_status), "配置保存或应用失败"));
     puts("PASS: async model apply, UI heartbeat, duplicate rejection and failure feedback");
 
     /* Teardown must join both pending services before ui/mutex destruction. */
