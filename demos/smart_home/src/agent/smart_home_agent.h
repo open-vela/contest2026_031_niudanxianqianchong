@@ -66,6 +66,12 @@ typedef struct smart_home_agent_app {
     smart_home_local_tool_access_t
         local_tool_access[SMART_HOME_LOCAL_TOOL_ACCESS_MAX];
     size_t local_tool_access_count;
+    struct {
+        char name[AGENT_MAX_NAME_BYTES + 1u];
+        uint16_t group;
+        int read_only;
+    } remote_routes[AGENT_MAX_TOOLS];
+    size_t remote_route_count;
     uint64_t run_start_ms;
     agent_event_callback_t observer;
     void *observer_user_data;

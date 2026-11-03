@@ -31,6 +31,7 @@ def main():
     sources += [package / "providers/storage/ram/src/session_ram.c"]
     application = [
         app / "src/agent/smart_home_agent.c",
+        app / "src/tools/smart_home_device_inventory.c",
         app / "src/agent/smart_home_agent_backend.c",
         app / "src/agent/smart_home_session.c",
         app / "src/config/smart_home_backends.c",

@@ -288,7 +288,11 @@ int main(void)
     history_status = AGENT_OK;
     assert(smart_home_lvgl_chat_restore(&ui) == AGENT_OK);
     assert(lv_obj_get_child_count(ui.chat_list) == 5);
-    assert(count_text(ui.chat_list, "历史操作：调整灯光") == 1);
+    assert(count_text(ui.chat_list, "历史操作：演示 · 调整灯光") == 1);
+    assert(!strcmp(smart_home_lvgl_tool_display_name("board_camera"), "本机 · 摄像头操作"));
+    assert(!strcmp(smart_home_lvgl_tool_display_name("miot_device_control"), "米家 · 提交设备控制"));
+    assert(!strcmp(smart_home_lvgl_tool_display_name("node_bedroom_status"), "Node · 节点操作"));
+    assert(!strcmp(smart_home_lvgl_tool_display_name("mcp_bridge_status"), "MCP · 服务调用"));
     assert(!count_text(ui.chat_list, "set_light"));
     assert(count_text(lv_obj_get_child(ui.chat_list, 0), "旧的问题") == 1);
     assert(count_text(lv_obj_get_child(ui.chat_list, 4), "新的回复") == 1);

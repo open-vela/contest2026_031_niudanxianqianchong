@@ -153,14 +153,20 @@ LVGL 的三屏职责固定为：
 | 工具 | 用途 |
 |------|------|
 | `get_home_status` | 以 JSON 返回当前虚拟家居状态 |
+| `get_device_inventory` | 按来源和设备类型查询缓存摘要及已注册的 Node/MCP 工具 |
+| `board_camera` | 仅操作 `board:camera:0`；无云台，拍照不会自动开机 |
+| `miot_device_list` / `miot_device_control` | 查询米家能力 / 按 `milo:<did>` 提交明确控制 |
 | `get_weather` | 查询指定位置的 demo 模拟天气 |
-| `set_light` | 设置指定房间第一盏灯的状态和亮度 |
-| `set_ac` | 设置指定房间第一台空调的状态、模式、风速和温度 |
+| `set_light` | 按确切 `device_id` 和房间设置演示灯状态和亮度 |
+| `set_ac` | 按确切 `device_id` 和房间设置演示空调状态、模式、风速和温度 |
 | `run_scene` | 执行睡眠、电影、离家、回家场景 |
 | `set_timer` | 创建 demo 定时器或提醒 |
 | `list_timers` | 查询当前 demo 定时器 |
 | `cancel_timer` | 按 id 取消 demo 定时器 |
 | `read_skill` | 按 Skill 名称读取 `/data/res/skills/` 中的完整策略 |
+
+来源与目标不明确时先查询、再澄清，不通过开机或拍照探测意图。来源不改变现有权限分组。
+部署与板端验收见 [设备来源与澄清规则](docs/device-routing.md)。
 
 `get_weather` 当前返回结构化的模拟天气数据，便于展示 Agent 如何把室外天气和室内设备控制结合起来。
 `set_timer`/`list_timers`/`cancel_timer` 当前使用 demo 内存表记录 timer，不依赖后台 cron service，

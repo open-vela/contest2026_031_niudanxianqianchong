@@ -24,9 +24,11 @@ int main(void)
     assert(!strcmp(wifi_status_text(&network, buffer, sizeof(buffer)), "路由器连接失败"));
     assert(!strcmp(tool_category_name(SMART_HOME_TOOL_CATEGORY_QUERY), "查询"));
     assert(!strcmp(tool_category_name(SMART_HOME_TOOL_CATEGORY_CONTROL), "控制"));
-    assert(!strcmp(tool_source_name(0), "本地"));
-    assert(!strcmp(tool_source_name(10), "节点"));
-    assert(!strcmp(tool_source_name(20), "MCP"));
+    assert(!strcmp(smart_home_tool_source_label(smart_home_tool_source(0, "board_camera")), "本机"));
+    assert(!strcmp(smart_home_tool_source_label(smart_home_tool_source(0, "miot_device_control")), "米家"));
+    assert(!strcmp(smart_home_tool_source_label(smart_home_tool_source(0, "set_light")), "演示"));
+    assert(!strcmp(smart_home_tool_source_label(smart_home_tool_source(10, "status")), "Node"));
+    assert(!strcmp(smart_home_tool_source_label(smart_home_tool_source(20, "status")), "MCP"));
     app.system_status.skills_status = AGENT_OK;
     app.system_status.skills_loaded = 3;
     assert(!strcmp(skills_status_text(&app, buffer, sizeof(buffer)), "已加载 3 项"));

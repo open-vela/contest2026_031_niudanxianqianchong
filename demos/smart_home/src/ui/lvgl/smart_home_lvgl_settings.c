@@ -532,20 +532,6 @@ static void create_tool_category_label(lv_obj_t *parent,
     lv_obj_set_width(label, lv_pct(100));
 }
 
-static const char *tool_source_name(uint16_t group_id)
-{
-    switch (group_id) {
-    case 0u:
-        return "本地";
-    case 10u:
-        return "节点";
-    case 20u:
-        return "MCP";
-    default:
-        return "其他";
-    }
-}
-
 static void set_tool_switch_state(lv_obj_t *sw, int enabled)
 {
     if (!sw) {
@@ -675,7 +661,8 @@ static void create_tool_directory_row(lv_obj_t *parent,
     if (tool && tool->group_id == SMART_HOME_TOOL_GROUP_LOCAL)
         access_allowed = tool->access_allowed;
     snprintf(status, sizeof(status), "%s | %s%s",
-             tool_source_name(tool ? tool->group_id : 0u),
+             smart_home_tool_source_label(smart_home_tool_source(
+                 tool ? tool->group_id : 0u, tool ? tool->name : NULL)),
              tool && tool->enabled
                  ? (access_allowed ? "已允许" : "已禁止")
                  : "不可用",

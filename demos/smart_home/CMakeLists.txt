@@ -27,6 +27,7 @@ if(CONFIG_SMART_HOME_DEMO)
     src/skills/smart_home_scene_catalog.c
     src/skills/smart_home_skills.c
     src/tools/smart_home_tools.c
+    src/tools/smart_home_device_inventory.c
     src/ui/smart_home_ui.c
   )
   if(CONFIG_SMART_HOME_CAMERA_PREVIEW)

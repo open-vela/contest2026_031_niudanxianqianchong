@@ -5,6 +5,7 @@
  */
 
 #include "smart_home_miloco.h"
+#include "smart_home_miloco_protocol.h"
 
 #include "../agent/smart_home_agent.h"
 #include "../config/cjson_compat.h"
@@ -20,15 +21,16 @@
 #define MILOCO_TOOL_LIST_BUFFER_BYTES 4096
 
 #define SCHEMA_MIOT_DEVICE_LIST \
-    "{\"type\":\"object\",\"properties\":{}}"
+    "{\"type\":\"object\",\"properties\":{\"did\":{\"type\":\"string\",\"description\":\"Optional device filter from get_device_inventory\"},\"control_offset\":{\"type\":\"integer\",\"description\":\"Requires did; continue at next_control_offset when controls are truncated\"}},\"additionalProperties\":false}"
 
 #define SCHEMA_MIOT_DEVICE_CONTROL                                      \
     "{\"type\":\"object\",\"properties\":"                               \
     "{\"did\":{\"type\":\"string\",\"description\":\"Mi Home device id\"}," \
+    "\"device_key\":{\"type\":\"string\",\"description\":\"milo:<did>, from discovery; never board/local/node\"}," \
     "\"iid\":{\"type\":\"string\",\"description\":\"control id from miot_device_list controls, e.g. prop.2.1\"}," \
     "\"operation\":{\"type\":\"string\",\"enum\":[\"set\",\"action\"],\"description\":\"set=write property, action=call action\"}," \
-    "\"value\":{\"type\":\"number\",\"description\":\"value to write; omit for action\"}}," \
-    "\"required\":[\"did\",\"iid\"]}"
+    "\"value\":{\"type\":[\"integer\",\"boolean\"],\"description\":\"value to write; omit for action\"}}," \
+    "\"required\":[\"device_key\",\"did\",\"iid\"]}"
 
 static const char *category_name(smart_home_miloco_category_t category)
 {
@@ -50,138 +52,122 @@ static const char *category_name(smart_home_miloco_category_t category)
     }
 }
 
-/* 有界 JSON 转义拷贝（含 " 与 \ 及控制字符），返回写入长度；
- * 溢出时截断到 cap-1。 */
-static size_t json_escape_bounded(char *dst, size_t cap, const char *src)
+static cJSON *control_json(const smart_home_miloco_control_t *ctrl)
 {
-    size_t used = 0;
-
-    while (*src && used + 1 < cap) {
-        char c = *src++;
-
-        if (c == '"' || c == '\\') {
-            if (used + 2 >= cap) {
-                break;
+    const char *type = ctrl->type == SMART_HOME_MILOCO_CTRL_BOOL ? "bool" :
+        ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM ? "enum" :
+        ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE ? "range" : "action";
+    cJSON *item = cJSON_CreateObject();
+    if (!item || !cJSON_AddStringToObject(item, "iid", ctrl->iid) ||
+        !cJSON_AddStringToObject(item, "op", ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION ? "action" : "set") ||
+        !cJSON_AddStringToObject(item, "type", type) ||
+        !cJSON_AddStringToObject(item, "type_name", ctrl->type_name) ||
+        !cJSON_AddStringToObject(item, "desc", ctrl->desc) ||
+        !cJSON_AddBoolToObject(item, "readable", !ctrl->write_only && ctrl->type != SMART_HOME_MILOCO_CTRL_ACTION) ||
+        !cJSON_AddBoolToObject(item, "value_valid", ctrl->value_valid)) goto fail;
+    if (ctrl->value_valid && !cJSON_AddNumberToObject(item, "value", ctrl->value)) goto fail;
+    if (ctrl->type == SMART_HOME_MILOCO_CTRL_ENUM) {
+        cJSON *options = cJSON_AddArrayToObject(item, "options");
+        if (!options) goto fail;
+        for (unsigned i = 0; i < ctrl->option_count; i++) {
+            cJSON *option = cJSON_CreateObject();
+            if (!option || !cJSON_AddStringToObject(option, "name", ctrl->options[i].name) ||
+                !cJSON_AddNumberToObject(option, "value", ctrl->options[i].value) ||
+                !cJSON_AddItemToArray(options, option)) {
+                cJSON_Delete(option); goto fail;
             }
-            dst[used++] = '\\';
-            dst[used++] = c;
-        } else if ((unsigned char)c >= 0x20u) {
-            dst[used++] = c;
-        } else {
-            dst[used++] = ' ';
         }
+    } else if (ctrl->type == SMART_HOME_MILOCO_CTRL_RANGE) {
+        if (!cJSON_AddNumberToObject(item, "minimum", ctrl->range.minimum) ||
+            !cJSON_AddNumberToObject(item, "maximum", ctrl->range.maximum) ||
+            !cJSON_AddNumberToObject(item, "step", ctrl->range.step)) goto fail;
     }
-    dst[used] = '\0';
-    return used;
+    return item;
+fail:
+    cJSON_Delete(item);
+    return NULL;
 }
 
-/* snprintf 计数安全包装：返回新 used；截断时钳制到 cap-1 并置
- * *truncated。修复原 used += snprintf(...) 在截断时返回期望长度
- * 导致 (sizeof-output - used) 下溢越界写的隐患。 */
-static size_t append_count(char *buf, size_t cap, size_t used,
-                           const char *fmt, ...) __attribute__((format(printf, 4, 5)));
-
-static size_t append_count(char *buf, size_t cap, size_t used,
-                           const char *fmt, ...)
+static int list_fits(const cJSON *root)
 {
-    va_list ap;
-    int n;
-
-    if (used + 1 >= cap) {
-        return used;
-    }
-
-    va_start(ap, fmt);
-    n = vsnprintf(buf + used, cap - used, fmt, ap);
-    va_end(ap);
-    if (n < 0) {
-        return used;
-    }
-    if ((size_t)n >= cap - used) {
-        return cap - 1;   /* 截断：停在缓冲末尾（NUL 已由 vsnprintf 写） */
-    }
-    return used + (size_t)n;
+    char *text = cJSON_PrintUnformatted(root);
+    if (!text) return -1;
+    size_t limit = AGENT_MAX_TOOL_OUTPUT_BYTES < MILOCO_TOOL_LIST_BUFFER_BYTES ?
+        AGENT_MAX_TOOL_OUTPUT_BYTES : MILOCO_TOOL_LIST_BUFFER_BYTES;
+    int fits = strlen(text) + 32u < limit;
+    cJSON_free(text);
+    return fits;
 }
 
 static agent_error_t miot_device_list_tool(void *user_data,
                                          const agent_tool_context_t *context,
                                          const agent_text_sink_t *sink)
 {
-    static char output[MILOCO_TOOL_LIST_BUFFER_BYTES];
     smart_home_agent_app_t *app = user_data;
-    smart_home_miloco_device_t *devices;
-    size_t count;
-    size_t used;
-    size_t i;
-    uint8_t k;
-    bool truncated = false;
-
-    agent_error_t status = AGENT_ERROR_IO;
-
-    (void)context;
-    if (!app || !app->miloco) {
-        snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"miloco_gateway_not_configured\"}");
-        return smart_home_tool_reply(sink, output, status);
-    }
-    if (!smart_home_miloco_reachable(app->miloco)) {
-        snprintf(output, sizeof(output),
-                 "{\"ok\":false,\"error\":\"miloco_gateway_unreachable\"}");
-        return smart_home_tool_reply(sink, output, status);
-    }
-
-    /* 整表快照约 19 KB：agent worker 只有 32 KB 栈，放 PSRAM。 */
-    devices = smart_home_bulk_alloc(sizeof(*devices) *
-                                    SMART_HOME_MILOCO_MAX_DEVICES);
-    if (devices == NULL)
-        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"out_of_memory\"}", AGENT_ERROR_NOMEM);
-
-    count = smart_home_miloco_list(app->miloco, devices,
-                                   SMART_HOME_MILOCO_MAX_DEVICES, NULL);
-    used = append_count(output, sizeof(output), 0,
-                        "{\"ok\":true,\"source\":\"miloco\",\"devices\":[");
-    for (i = 0; i < count && used < sizeof(output) - 256u; i++) {
-        char name[88];
-        char room[56];
-
-        json_escape_bounded(name, sizeof(name), devices[i].name);
-        json_escape_bounded(room, sizeof(room), devices[i].room);
-        used = append_count(
-            output, sizeof(output), used,
-            "%s{\"did\":\"%s\",\"name\":\"%s\",\"room\":\"%s\","
-            "\"category\":\"%s\",\"online\":%s,\"controls\":[",
-            i > 0 ? "," : "", devices[i].did, name, room,
-            category_name(devices[i].category),
-            devices[i].online ? "true" : "false");
-        for (k = 0; k < devices[i].control_count &&
-                    used < sizeof(output) - 192u; k++) {
-            const smart_home_miloco_control_t *ctrl =
-                &devices[i].controls[k];
-            char desc[100];
-
-            json_escape_bounded(desc, sizeof(desc), ctrl->desc);
-            used = append_count(
-                output, sizeof(output), used,
-                "%s{\"iid\":\"%s\",\"op\":\"%s\",\"desc\":\"%s\"}",
-                k > 0 ? "," : "", ctrl->iid,
-                ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION ?
-                    "action" : "set",
-                desc);
+    smart_home_miloco_device_t *devices = NULL;
+    cJSON *root = NULL, *list;
+    char filter[24] = "", key[40];
+    int offset = 0;
+    char *text = NULL;
+    int ret = smart_home_tool_get_string(context->call.arguments_json, "did", filter, sizeof(filter));
+    if (ret != AGENT_OK && ret != AGENT_ERROR_NOT_FOUND)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"invalid_filter\"}", AGENT_ERROR_TOOL_ARGUMENT);
+    ret = smart_home_tool_get_int(context->call.arguments_json, "control_offset", &offset);
+    if ((ret != AGENT_OK && ret != AGENT_ERROR_NOT_FOUND) || offset < 0 ||
+        offset > SMART_HOME_MILOCO_MAX_CONTROLS || (offset && !filter[0]))
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"invalid_offset\"}", AGENT_ERROR_TOOL_ARGUMENT);
+    if (!app || !app->miloco || !smart_home_miloco_reachable(app->miloco))
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"source\":\"mijia\",\"error\":\"gateway_unavailable\"}", AGENT_ERROR_IO);
+    devices = smart_home_bulk_alloc(sizeof(*devices) * SMART_HOME_MILOCO_MAX_DEVICES);
+    if (!devices) return AGENT_ERROR_NOMEM;
+    size_t count = smart_home_miloco_list(app->miloco, devices, SMART_HOME_MILOCO_MAX_DEVICES, NULL);
+    root = cJSON_CreateObject();
+    ret = AGENT_ERROR_NOMEM;
+    if (!root || !cJSON_AddBoolToObject(root, "ok", 1) ||
+        !cJSON_AddStringToObject(root, "source", "mijia") ||
+        !cJSON_AddBoolToObject(root, "truncated", 0) ||
+        !cJSON_AddNumberToObject(root, "total_devices", count) ||
+        !(list = cJSON_AddArrayToObject(root, "devices"))) goto out;
+    for (size_t i = 0; i < count; i++) {
+        if (filter[0] && strcmp(filter, devices[i].did)) continue;
+        snprintf(key, sizeof(key), "milo:%s", devices[i].did);
+        cJSON *device = cJSON_CreateObject(), *controls;
+        if (!device || !cJSON_AddStringToObject(device, "device_key", key) ||
+            !cJSON_AddStringToObject(device, "did", devices[i].did) ||
+            !cJSON_AddStringToObject(device, "name", devices[i].name) ||
+            !cJSON_AddStringToObject(device, "room", devices[i].room) ||
+            !cJSON_AddStringToObject(device, "category", category_name(devices[i].category)) ||
+            !cJSON_AddBoolToObject(device, "online", devices[i].online) ||
+            !cJSON_AddNumberToObject(device, "next_control_offset", -1) ||
+            !(controls = cJSON_AddArrayToObject(device, "controls")) ||
+            !cJSON_AddItemToArray(list, device)) { cJSON_Delete(device); goto out; }
+        int fits = list_fits(root);
+        if (fits < 0) goto out;
+        if (!fits) {
+            cJSON_DeleteItemFromArray(list, cJSON_GetArraySize(list) - 1);
+            cJSON_GetObjectItemCaseSensitive(root, "truncated")->type = cJSON_True;
+            break;
         }
-        if (k < devices[i].control_count) truncated = true;
-        used = append_count(output, sizeof(output), used, "]}");
+        for (unsigned k = (unsigned)offset; k < devices[i].control_count; k++) {
+            cJSON *control = control_json(&devices[i].controls[k]);
+            if (!control || !cJSON_AddItemToArray(controls, control)) { cJSON_Delete(control); goto out; }
+            fits = list_fits(root);
+            if (fits < 0) goto out;
+            if (!fits) {
+                cJSON_DeleteItemFromArray(controls, cJSON_GetArraySize(controls) - 1);
+                cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(device, "next_control_offset"), k);
+                cJSON_GetObjectItemCaseSensitive(root, "truncated")->type = cJSON_True;
+                break;
+            }
+        }
     }
-    if (i < count) truncated = true;
-    used = append_count(output, sizeof(output), used,
-                        "],\"truncated\":%s,\"total_devices\":%zu}",
-                        truncated ? "true" : "false", count);
-    if (used >= sizeof(output) - 1u)
-        status = smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"device_list_capacity\"}", AGENT_ERROR_CAPACITY);
-    else
-        status = smart_home_tool_reply(sink, output, AGENT_OK);
-
+    text = cJSON_PrintUnformatted(root);
+    ret = text ? smart_home_tool_reply(sink, text, AGENT_OK) : AGENT_ERROR_NOMEM;
+out:
+    cJSON_free(text);
+    cJSON_Delete(root);
     smart_home_bulk_free(devices);
-    return status;
+    return (agent_error_t)ret;
 }
 
 static agent_error_t miot_device_control_tool(void *user_data,
@@ -189,7 +175,8 @@ static agent_error_t miot_device_control_tool(void *user_data,
                                              const agent_text_sink_t *sink)
 {
     smart_home_agent_app_t *app = user_data;
-    char did[24], iid[16], operation[16] = "set";
+    char did[24], iid[16], operation[16] = "set", key[48], expected_key[48];
+    smart_home_miloco_device_t device;
     int value = 0;
     agent_error_t ret;
     cJSON *root;
@@ -200,6 +187,9 @@ static agent_error_t miot_device_control_tool(void *user_data,
     if (smart_home_tool_get_string(context->call.arguments_json, "did", did, sizeof(did)) ||
         smart_home_tool_get_string(context->call.arguments_json, "iid", iid, sizeof(iid)) ||
         !did[0] || !iid[0]) goto invalid;
+    snprintf(expected_key, sizeof(expected_key), "milo:%s", did);
+    if (smart_home_tool_get_string(context->call.arguments_json, "device_key", key, sizeof(key)) ||
+        strcmp(key, expected_key)) goto invalid;
     ret = smart_home_tool_get_string(context->call.arguments_json, "operation", operation, sizeof(operation));
     if ((ret && ret != AGENT_ERROR_NOT_FOUND) ||
         (strcmp(operation, "set") && strcmp(operation, "action"))) goto invalid;
@@ -213,10 +203,23 @@ static agent_error_t miot_device_control_tool(void *user_data,
         }
     }
     cJSON_Delete(root);
+    if (!smart_home_miloco_reachable(app->miloco) ||
+        !smart_home_miloco_copy_device(app->miloco, did, &device) || !device.online)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"source\":\"mijia\",\"error\":\"device_unavailable\"}", AGENT_ERROR_NOT_FOUND);
+    bool allowed = false;
+    for (unsigned i = 0; i < device.control_count; i++) {
+        const smart_home_miloco_control_t *ctrl = &device.controls[i];
+        if (strcmp(ctrl->iid, iid)) continue;
+        allowed = !strcmp(operation, "action") ? ctrl->type == SMART_HOME_MILOCO_CTRL_ACTION :
+            ctrl->type != SMART_HOME_MILOCO_CTRL_ACTION && smart_home_miloco_value_allowed(ctrl, value);
+        break;
+    }
+    if (!allowed)
+        return smart_home_tool_reply(sink, "{\"ok\":false,\"source\":\"mijia\",\"error\":\"unsupported_capability_or_value\"}", AGENT_ERROR_TOOL_ARGUMENT);
     if (smart_home_miloco_submit_control(app->miloco, did, iid, operation, value))
         return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"submit_failed\"}", AGENT_ERROR_TOOL_FAILED);
     return smart_home_tool_reply(sink,
-        "{\"ok\":true,\"note\":\"control submitted; state updates on next poll\"}", AGENT_OK);
+        "{\"ok\":true,\"source\":\"mijia\",\"accepted\":true,\"note\":\"control submitted; state updates on next poll\"}", AGENT_OK);
 invalid:
     return smart_home_tool_reply(sink, "{\"ok\":false,\"error\":\"invalid_arguments\"}", AGENT_ERROR_TOOL_ARGUMENT);
 }
@@ -253,7 +256,7 @@ int smart_home_miloco_tools_register(agent_t *agent,
     }
     ret = register_tool(agent, "miot_device_list",
                         "List Mi Home devices bridged through the Miloco "
-                        "home-server gateway, with online and power state.",
+                        "home-server gateway. Use did to focus; follow next_control_offset if truncated. Includes exact control types, options and valid cached values.",
                         SCHEMA_MIOT_DEVICE_LIST,
                         miot_device_list_tool, app,
                         AGENT_TOOL_READ_ONLY);
@@ -261,7 +264,7 @@ int smart_home_miloco_tools_register(agent_t *agent,
         return ret;
     }
     return register_tool(agent, "miot_device_control",
-                         "Submit a Mi Home property write (set) or action. "
+                         "[mijia] Submit only a discovered Mi Home property write (set) or exact action. "
                          "Use did and iid from miot_device_list controls. "
                          "Success means queued; verify state on the next poll.",
                          SCHEMA_MIOT_DEVICE_CONTROL,

@@ -364,18 +364,25 @@ const char *smart_home_lvgl_tool_display_name(const char *name)
         const char *name;
         const char *title;
     } titles[] = {
-        {"get_home_status", "查看家庭状态"},
+        {"get_home_status", "演示 · 查询设备状态"},
+        {"get_device_inventory", "查看设备来源"},
+        {"board_camera", "本机 · 摄像头操作"},
+        {"camera", "本机 · 摄像头操作"},
         {"get_indoor_environment", "查看室内环境"},
         {"get_weather", "查询天气"},
-        {"set_light", "调整灯光"},
-        {"set_ac", "调整空调"},
-        {"run_scene", "提交场景操作"},
+        {"set_light", "演示 · 调整灯光"},
+        {"set_ac", "演示 · 调整空调"},
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+        {"run_scene", "米家 · 提交场景"},
+#else
+        {"run_scene", "演示 · 切换场景"},
+#endif
         {"set_timer", "设置提醒"},
         {"list_timers", "查看提醒"},
         {"cancel_timer", "取消提醒"},
         {"read_skill", "查阅操作说明"},
-        {"miot_device_list", "查看米家设备"},
-        {"miot_device_control", "提交米家控制"},
+        {"miot_device_list", "米家 · 查询设备能力"},
+        {"miot_device_control", "米家 · 提交设备控制"},
     };
     size_t i;
 
@@ -384,7 +391,9 @@ const char *smart_home_lvgl_tool_display_name(const char *name)
             return titles[i].title;
         }
     }
-    return "扩展服务操作";
+    if (name && !strncmp(name, "node_", 5)) return "Node · 节点操作";
+    if (name && !strncmp(name, "mcp_", 4)) return "MCP · 服务调用";
+    return "其他服务操作";
 }
 
 static lv_color_t tool_status_color(int ok)

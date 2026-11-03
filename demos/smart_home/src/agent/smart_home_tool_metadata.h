@@ -17,6 +17,63 @@
 #define SMART_HOME_TOOL_CATEGORY_CONTROL_NAME "control"
 #define SMART_HOME_TOOL_CATEGORY_SKILL_NAME "skill"
 
+/* Device origin is independent from the permission/transport group. */
+typedef enum {
+    SMART_HOME_SOURCE_SYSTEM,
+    SMART_HOME_SOURCE_BOARD,
+    SMART_HOME_SOURCE_DEMO,
+    SMART_HOME_SOURCE_MIJIA,
+    SMART_HOME_SOURCE_NODE,
+    SMART_HOME_SOURCE_MCP,
+} smart_home_tool_source_t;
+
+static inline smart_home_tool_source_t smart_home_tool_source(uint16_t group,
+                                                              const char *name)
+{
+    if (group == SMART_HOME_TOOL_GROUP_NODE) return SMART_HOME_SOURCE_NODE;
+    if (group == SMART_HOME_TOOL_GROUP_MCP) return SMART_HOME_SOURCE_MCP;
+    if (name && (!strcmp(name, "miot_device_list") ||
+                 !strcmp(name, "miot_device_control")))
+        return SMART_HOME_SOURCE_MIJIA;
+    if (name && !strcmp(name, "run_scene")) {
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+        return SMART_HOME_SOURCE_MIJIA;
+#else
+        return SMART_HOME_SOURCE_DEMO;
+#endif
+    }
+    if (name && (!strcmp(name, "board_camera") || !strcmp(name, "camera") ||
+                 !strcmp(name, "get_indoor_environment")))
+        return SMART_HOME_SOURCE_BOARD;
+    if (name && (!strcmp(name, "get_home_status") || !strcmp(name, "set_light") ||
+                 !strcmp(name, "set_ac"))) return SMART_HOME_SOURCE_DEMO;
+    return SMART_HOME_SOURCE_SYSTEM;
+}
+
+static inline const char *smart_home_tool_source_name(smart_home_tool_source_t source)
+{
+    switch (source) {
+    case SMART_HOME_SOURCE_BOARD: return "board";
+    case SMART_HOME_SOURCE_DEMO: return "demo";
+    case SMART_HOME_SOURCE_MIJIA: return "mijia";
+    case SMART_HOME_SOURCE_NODE: return "node";
+    case SMART_HOME_SOURCE_MCP: return "mcp";
+    default: return "system";
+    }
+}
+
+static inline const char *smart_home_tool_source_label(smart_home_tool_source_t source)
+{
+    switch (source) {
+    case SMART_HOME_SOURCE_BOARD: return "本机";
+    case SMART_HOME_SOURCE_DEMO: return "演示";
+    case SMART_HOME_SOURCE_MIJIA: return "米家";
+    case SMART_HOME_SOURCE_NODE: return "Node";
+    case SMART_HOME_SOURCE_MCP: return "MCP";
+    default: return "系统";
+    }
+}
+
 /* SmartHome settings-page categories. */
 typedef enum {
     SMART_HOME_TOOL_CATEGORY_UNSPECIFIED = 0,

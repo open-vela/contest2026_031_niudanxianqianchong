@@ -46,6 +46,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/skills/smart_home_scene_catalog.c
   CSRCS     += src/skills/smart_home_skills.c
   CSRCS     += src/tools/smart_home_tools.c
+  CSRCS     += src/tools/smart_home_device_inventory.c
   CSRCS     += src/ui/smart_home_ui.c
   ifneq ($(CONFIG_SMART_HOME_CAMERA_PREVIEW),)
     CSRCS   += src/camera/smart_home_camera_service.c

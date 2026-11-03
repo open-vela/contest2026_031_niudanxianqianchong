@@ -25,6 +25,7 @@ static agent_error_t complete(void *data, const agent_model_request_t *request,
     ++model_calls;
     assert(contains(request->system_prompt, "Do not claim that a device changed"));
     assert(contains(request->system_prompt, "Skill smart_home_device_control:"));
+    assert(contains(request->system_prompt, "Skill smart_home_device_routing:"));
     assert(!contains(request->system_prompt, "Device inventory:"));
     assert(!contains(request->system_prompt, "\"environment\""));
     for (size_t i = 0; i < request->message_count; ++i) {
@@ -84,7 +85,7 @@ int main(int argc, char **argv)
         return 0;
     }
     assert(!smart_home_skills_register(agent, &store));
-    assert(store.count == 6);
+    assert(store.count == 7);
     assert(!smart_home_tools_register(agent, &service));
     assert(!agent_tool_enumerate(agent, visit, NULL) && tools == 9);
     assert(!agent_set_policy_callback(agent, allow, NULL));
@@ -99,6 +100,6 @@ int main(int argc, char **argv)
     agent_model_destroy(model);
     smart_home_skill_store_deinit(&store);
     smart_home_device_service_deinit(&service);
-    puts("PASS: real Core, device snapshot reference, six file Skills and on-demand read_skill");
+    puts("PASS: real Core, device snapshot reference, seven file Skills and on-demand read_skill");
     return 0;
 }

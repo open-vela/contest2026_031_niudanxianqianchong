@@ -1103,10 +1103,13 @@ static void build_tools_panel(smart_home_lvgl_t *ui, lv_obj_t *panel)
     for (size_t i = 0; i < count && i < 6; i++) {
         smart_home_local_tool_access_t *tool =
             &ui->app->local_tool_access[i];
+        char description[64];
+        snprintf(description, sizeof(description), "%s · 本次运行有效",
+            smart_home_tool_source_label(smart_home_tool_source(SMART_HOME_TOOL_GROUP_LOCAL, tool->name)));
         lv_obj_t *name = smart_home_lvgl_label_create(
             panel, tool->name, SMART_HOME_UI_COLOR_TEXT_PRIMARY, 17);
         lv_obj_t *sub = smart_home_lvgl_label_create(
-            panel, "本地工具 · 本次运行有效",
+            panel, description,
             SMART_HOME_UI_COLOR_TEXT_MUTED, 12);
         lv_obj_t *sw = lv_switch_create(panel);
 

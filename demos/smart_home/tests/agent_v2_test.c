@@ -31,6 +31,8 @@ static int fail_context;
 static int fail_transport_init;
 static int transport_error;
 static int tool_flow;
+static const char *flow_name;
+static char tool_result[4096];
 static int effects;
 static int last_user_count, failed_history;
 static int events;
@@ -67,7 +69,8 @@ static agent_error_t http_request(void *context, const agent_http_request_t *req
                                   const agent_http_sink_t *sink)
 {
     const char *final = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"hello from V2\"},\"finish_reason\":\"stop\"}]}";
-    const char *call = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call1\",\"type\":\"function\",\"function\":{\"name\":\"set_light\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}";
+    char call[512];
+    snprintf(call, sizeof(call), "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call1\",\"type\":\"function\",\"function\":{\"name\":\"%s\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}", flow_name ? flow_name : "set_light");
     agent_error_t ret;
     cJSON *json, *messages, *message, *role;
     int has_result = 0;
@@ -94,7 +97,11 @@ static agent_error_t http_request(void *context, const agent_http_request_t *req
             has_result = 0;
             if (cJSON_IsString(content) && !strcmp(content->valuestring, "failed-turn")) ++failed_history;
         }
-        if (cJSON_IsString(role) && strcmp(role->valuestring, "tool") == 0) has_result = 1;
+        if (cJSON_IsString(role) && strcmp(role->valuestring, "tool") == 0) {
+            has_result = 1;
+            cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
+            if (cJSON_IsString(content)) snprintf(tool_result, sizeof(tool_result), "%s", content->valuestring);
+        }
     }
     cJSON_Delete(json);
     pthread_mutex_lock(&gate_mutex);
@@ -151,6 +158,8 @@ int smart_home_device_service_init(smart_home_device_service_t *s, smart_home_st
 void smart_home_device_service_deinit(smart_home_device_service_t *s) { (void)s; }
 int smart_home_device_service_register_context(agent_t *agent, smart_home_device_service_t *s)
 { (void)agent; (void)s; return fail_context ? AGENT_ERROR_CONTEXT_OVERFLOW : AGENT_OK; }
+int smart_home_device_service_copy_state(smart_home_device_service_t *s, smart_home_state_t *out)
+{ *out = *s->state; return AGENT_OK; }
 void smart_home_skill_store_init(smart_home_skill_store_t *s) { memset(s, 0, sizeof(*s)); }
 void smart_home_skill_store_deinit(smart_home_skill_store_t *s) { memset(s, 0, sizeof(*s)); }
 int smart_home_skills_register(agent_t *a, smart_home_skill_store_t *s)
@@ -191,6 +200,10 @@ int smart_home_tools_register(agent_t *agent, smart_home_device_service_t *s)
 int smart_home_miloco_tools_register(agent_t *a, smart_home_agent_app_t *app)
 { (void)a; (void)app; return AGENT_OK; }
 void smart_home_miloco_stop(smart_home_miloco_t **s) { *s = NULL; }
+bool smart_home_miloco_reachable(const smart_home_miloco_t *s) { (void)s; return false; }
+size_t smart_home_miloco_list(const smart_home_miloco_t *s, smart_home_miloco_device_t *out,
+                             size_t capacity, uint32_t *revision)
+{ (void)s; (void)out; (void)capacity; (void)revision; return 0; }
 #endif
 
 int smart_home_config_settings_load(cJSON **out, char *error, size_t size)
@@ -256,6 +269,11 @@ static void expect_run(smart_home_agent_app_t *app)
 static int visit_tool(const smart_home_tool_info_t *tool, void *data)
 {
     int *count = data;
+    if (!strcmp(tool->name, "get_device_inventory")) {
+        assert(tool->flags == AGENT_TOOL_READ_ONLY);
+        (*count)++;
+        return AGENT_OK;
+    }
     assert(strcmp(tool->name, "set_light") == 0);
     assert(tool->group_id == SMART_HOME_TOOL_GROUP_LOCAL);
     assert(tool->category_id == SMART_HOME_TOOL_CATEGORY_CONTROL);
@@ -273,7 +291,7 @@ static void lifecycle_and_configuration(void)
     assert(smart_home_agent_app_init(&app) == AGENT_OK);
     expect_run(&app);
     assert(strcmp(last_auth, "Bearer test-key") == 0 && events >= 4);
-    assert(smart_home_agent_app_enumerate_tools(&app, visit_tool, &count) == AGENT_OK && count == 1);
+    assert(smart_home_agent_app_enumerate_tools(&app, visit_tool, &count) == AGENT_OK && count == 2);
     config = custom_config(&app);
     assert(smart_home_agent_app_apply_model_config(&app, &config) == AGENT_OK);
     memset(&config, 0xa5, sizeof(config));
@@ -496,6 +514,7 @@ static void queued_observer(void *data, const agent_event_t *event)
 static int inspect_access(const smart_home_tool_info_t *tool, void *data)
 {
     int *allowed = data;
+    if (!strcmp(tool->name, "get_device_inventory")) return AGENT_OK;
     assert(!strcmp(tool->name, "set_light"));
     *allowed = tool->access_allowed;
     return AGENT_OK;
@@ -559,8 +578,34 @@ static void model_settings_roundtrip(void)
     puts("PASS: model settings roundtrip preserves other settings and excludes keys");
 }
 
+static void inventory_turn(void)
+{
+    smart_home_agent_app_t app;
+    assert(!smart_home_agent_app_init(&app));
+    const agent_tool_t node = {
+        .name = AGENT_SV_LITERAL("node_room_status"), .group = AGENT_SV_LITERAL("node"),
+        .description = AGENT_SV_LITERAL("Read node status"),
+        .input_schema_json = AGENT_SV_LITERAL("{\"type\":\"object\"}"),
+        .flags = AGENT_TOOL_READ_ONLY, .execute = execute_tool,
+    };
+    assert(!agent_register_tool(app.agent, &node));
+    int before = effects;
+    flow_name = "get_device_inventory";
+    tool_result[0] = '\0';
+    tool_flow = 1;
+    expect_run(&app);
+    assert(effects == before && strstr(tool_result, "node_room_status"));
+    assert(strstr(tool_result, "\"device_source\":\"unknown\""));
+    tool_flow = 0;
+    flow_name = NULL;
+    smart_home_agent_app_deinit(&app);
+    assert(!live_allocations);
+    puts("PASS: real inventory callback uses pre-turn Node routes without registry reentry or side effects");
+}
+
 int main(void)
 {
+    inventory_turn();
     model_settings_roundtrip();
     observer_and_access();
     session_history();

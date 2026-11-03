@@ -34,12 +34,14 @@
 
 #define SCHEMA_SET_LIGHT                                                   \
     "{\"type\":\"object\",\"properties\":{\"room\":{\"type\":\"string\"},"  \
+    "\"device_id\":{\"type\":\"integer\",\"description\":\"Exact demo device_id from get_device_inventory\"}," \
     "\"on\":{\"type\":\"boolean\"},\"brightness\":{\"type\":\"integer\"}}," \
-    "\"required\":[\"room\",\"on\",\"brightness\"],"                       \
+    "\"required\":[\"device_id\",\"room\",\"on\",\"brightness\"],"                       \
     "\"additionalProperties\":false}"
 
 #define SCHEMA_SET_AC                                                      \
     "{\"type\":\"object\",\"properties\":{"                                \
+    "\"device_id\":{\"type\":\"integer\",\"description\":\"Exact demo device_id from get_device_inventory\"}," \
     "\"room\":{\"type\":\"string\",\"description\":\"Room name: bedroom\"}," \
     "\"on\":{\"type\":\"boolean\",\"description\":\"Whether AC is on\"},"   \
     "\"temperature\":{\"type\":\"integer\",\"description\":"               \
@@ -50,7 +52,7 @@
     "\"fan_speed\":{\"type\":\"string\",\"enum\":"                         \
         "[\"low\",\"medium\",\"high\",\"auto\"],"                         \
         "\"description\":\"Fan speed. Defaults to current value or auto\"}}," \
-    "\"required\":[\"room\",\"on\"],"                                      \
+    "\"required\":[\"device_id\",\"room\",\"on\"],"                                      \
     "\"additionalProperties\":false}"
 
 #define SCHEMA_RUN_SCENE                                                   \
@@ -243,7 +245,18 @@ static agent_error_t status_tool(void *user_data,
     (void)context;
     ret = smart_home_device_service_build_snapshot_json(service,
                                                             output, sizeof(output));
-    return smart_home_tool_reply(sink, output, (agent_error_t)ret);
+    if (ret != AGENT_OK) return smart_home_tool_reply(sink, "{\"ok\":false,\"source\":\"demo\"}", (agent_error_t)ret);
+    cJSON *root = cJSON_Parse(output);
+    if (!root || !cJSON_AddStringToObject(root, "source", "demo")) {
+        cJSON_Delete(root);
+        return AGENT_ERROR_NOMEM;
+    }
+    char *text = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!text) return AGENT_ERROR_NOMEM;
+    ret = smart_home_tool_reply(sink, text, AGENT_OK);
+    cJSON_free(text);
+    return (agent_error_t)ret;
 }
 
 #ifdef CONFIG_SMART_HOME_AHT30_TOOL
@@ -369,9 +382,17 @@ static agent_error_t set_light_tool(void *user_data,
     char escaped_room[192];
     int brightness = 0;
     int on = 0;
+    int device_id;
+    smart_home_device_t target;
     int ret;
 
     ret = smart_home_tool_get_string(context->call.arguments_json, "room", room, sizeof(room));
+    if (ret == AGENT_OK)
+        ret = smart_home_tool_get_int(context->call.arguments_json, "device_id", &device_id);
+    if (ret == AGENT_OK)
+        ret = smart_home_device_service_get_device(service, device_id, &target);
+    if (ret == AGENT_OK && (target.type != SMART_HOME_DEVICE_LIGHT || strcmp(target.room, room)))
+        ret = AGENT_ERROR_TOOL_ARGUMENT;
     if (ret == AGENT_OK) {
         ret = smart_home_tool_get_bool(context->call.arguments_json, "on", &on);
     }
@@ -379,13 +400,14 @@ static agent_error_t set_light_tool(void *user_data,
         ret = smart_home_tool_get_int(context->call.arguments_json, "brightness", &brightness);
     }
     if (ret == AGENT_OK) {
-        ret = smart_home_device_service_set_light(service, room, on, brightness);
+        ret = smart_home_device_service_set_device_control(service, device_id, on, brightness,
+                                                           target.ac_mode, target.ac_fan_speed);
     }
 
     json_escape_string(room, escaped_room, sizeof(escaped_room));
     snprintf(output,
              sizeof(output),
-             "{\"ok\":%s,\"room\":\"%s\",\"on\":%s,\"brightness\":%d}",
+             "{\"ok\":%s,\"source\":\"demo\",\"room\":\"%s\",\"on\":%s,\"brightness\":%d}",
              ret == AGENT_OK ? "true" : "false",
              escaped_room,
              on ? "true" : "false",
@@ -410,6 +432,7 @@ static agent_error_t set_ac_tool(void *user_data,
     int mode;
     int fan_speed;
     int on = 0;
+    int device_id;
     int ret;
 
     if (!service) {
@@ -418,11 +441,12 @@ static agent_error_t set_ac_tool(void *user_data,
 
     ret = smart_home_tool_get_string(context->call.arguments_json, "room", room, sizeof(room));
     if (ret == AGENT_OK) {
-        ret = smart_home_device_service_find_first(service,
-                                                   room,
-                                                   SMART_HOME_DEVICE_AC,
-                                                   &ac);
+        ret = smart_home_tool_get_int(context->call.arguments_json, "device_id", &device_id);
     }
+    if (ret == AGENT_OK)
+        ret = smart_home_device_service_get_device(service, device_id, &ac);
+    if (ret == AGENT_OK && (ac.type != SMART_HOME_DEVICE_AC || strcmp(ac.room, room)))
+        ret = AGENT_ERROR_TOOL_ARGUMENT;
     temperature = ret == AGENT_OK ? ac.temperature : 26;
     mode = ret == AGENT_OK ? ac.ac_mode : 0;
     fan_speed = ret == AGENT_OK ? ac.ac_fan_speed : 3;
@@ -448,20 +472,17 @@ static agent_error_t set_ac_tool(void *user_data,
             if (fan_speed < 0) ret = AGENT_ERROR_TOOL_ARGUMENT;
         } else if (optional != AGENT_ERROR_NOT_FOUND) ret = optional;
         if (ret == AGENT_OK)
-            ret = smart_home_device_service_set_ac(service, room, on, mode,
-                                                   fan_speed, temperature);
+            ret = smart_home_device_service_set_device_control(service, device_id, on,
+                                                                 temperature, mode, fan_speed);
         if (ret == AGENT_OK) {
-            (void)smart_home_device_service_find_first(service,
-                                                       room,
-                                                       SMART_HOME_DEVICE_AC,
-                                                       &ac);
+            (void)smart_home_device_service_get_device(service, device_id, &ac);
         }
     }
 
     json_escape_string(room, escaped_room, sizeof(escaped_room));
     snprintf(output,
              sizeof(output),
-             "{\"ok\":%s,\"room\":\"%s\",\"on\":%s,"
+             "{\"ok\":%s,\"source\":\"demo\",\"room\":\"%s\",\"on\":%s,"
              "\"temperature\":%d,\"mode\":\"%s\",\"fan_speed\":\"%s\"}",
              ret == AGENT_OK ? "true" : "false",
              escaped_room,
@@ -504,7 +525,7 @@ static agent_error_t run_scene_tool(void *user_data,
         json_escape_string(report[0] ? report : "miloco gateway unavailable",
                            escaped_report, sizeof(escaped_report));
         snprintf(output, sizeof(output),
-                 "{\"ok\":%s,\"scene\":\"%s\",\"report\":\"%s\"}",
+                 "{\"ok\":%s,\"source\":\"mijia\",\"scene\":\"%s\",\"report\":\"%s\"}",
                  scene_ret == 0 ? "true" : "false", escaped_scene, escaped_report);
         return smart_home_tool_reply(sink, output,
                                      scene_ret == 0 ? AGENT_OK : AGENT_ERROR_TOOL_FAILED);
@@ -725,7 +746,7 @@ int smart_home_tools_register(agent_t *agent,
 
     ret = smart_home_tool_register_local(agent,
                               "get_home_status",
-                              "Get current virtual smart home status.",
+                              "[demo] Get virtual device state only; not a whole-home hardware inventory. Use get_device_inventory to discover origins.",
                               SCHEMA_GET_HOME_STATUS,
                               SMART_HOME_TOOL_CATEGORY_QUERY,
                               status_tool,
@@ -763,7 +784,7 @@ int smart_home_tools_register(agent_t *agent,
 
     ret = smart_home_tool_register_local(agent,
                               "set_light",
-                              "Set a room light. Rooms: living_room, bedroom.",
+                              "[demo] Change only a virtual light by its discovered device_id and room. No physical Mi Home, board or Node control.",
                               SCHEMA_SET_LIGHT,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               set_light_tool,
@@ -775,7 +796,7 @@ int smart_home_tools_register(agent_t *agent,
 
     ret = smart_home_tool_register_local(agent,
                               "set_ac",
-                              "Set bedroom air conditioner.",
+                              "[demo] Change only a virtual AC by its discovered device_id and room. No physical Mi Home, board or Node control.",
                               SCHEMA_SET_AC,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               set_ac_tool,
@@ -787,7 +808,11 @@ int smart_home_tools_register(agent_t *agent,
 
     ret = smart_home_tool_register_local(agent,
                               "run_scene",
-                              "Run a smart home scene: sleep, movie, away, home.",
+#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
+                              "[mijia] Submit an explicit scene to real Mi Home devices only: sleep, movie, away, home. Never use to probe an ambiguous request.",
+#else
+                              "[demo] Change only virtual scene state: sleep, movie, away, home.",
+#endif
                               SCHEMA_RUN_SCENE,
                               SMART_HOME_TOOL_CATEGORY_CONTROL,
                               run_scene_tool,

@@ -41,9 +41,16 @@ static const char g_system_prompt[] =
     "语言规则：无论用户使用什么语言提问，必须始终使用简体中文回复，"
     "did、iid 等设备标识和专有名词可保留原文。"
     "回复务必简短：通常一句话，最多两句话；"
-    "不要罗列选项、不要长篇解释，适合屏幕对话气泡展示。"
+    "澄清时最多列出三个相关候选，不要长篇解释，适合屏幕对话气泡展示。"
     "工具规则：一切设备状态查询与控制都必须调用工具完成，"
     "禁止编造设备、状态或执行结果。"
+    "设备来源分为board本机硬件、demo演示、mijia米家、node节点；mcp仅表示接入通道，不能推断真实设备来源。"
+    "设备来源或目标不明确时，先调用get_device_inventory查询相关候选（如kind=camera），"
+    "再使用对应来源的查询工具核对能力；有多个候选、动作不明确或清单被截断时先询问用户。"
+    "用户明确且唯一的目标和动作无需重复询问。禁止跨来源替代设备，禁止猜测标识或用其他动作替代缺失能力。"
+    "测试摄像头云台不等于开机、拍照或校准；校准、方向转动和巡航是不同动作，含糊时必须询问。"
+    "board_camera仅控制本机固定摄像头且无云台；get_home_status、set_light、set_ac只操作演示状态。"
+    "不得通过开机、拍照、校准等有副作用的动作探测用户意图。"
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     "控制米家设备时，先调用 miot_device_list 获取设备与 controls 列表，"
     "再用其中返回的 did 和 iid 调用 miot_device_control，不要凭空猜测 iid。"
@@ -131,6 +138,22 @@ static agent_policy_decision_t smart_home_local_tool_policy(
 static void smart_home_agent_event(void *user_data, const agent_event_t *event)
 {
     smart_home_agent_app_t *app = user_data;
+#ifdef CONFIG_SMART_HOME_DEMO_DEBUG_LOG
+    if (event->type == AGENT_EVENT_TOOL_BEGIN || event->type == AGENT_EVENT_TOOL_END) {
+        char name[AGENT_MAX_NAME_BYTES + 1u];
+        size_t n = event->tool_call.name.size;
+        if (!event->tool_call.name.data) n = 0;
+        if (n >= sizeof(name)) n = sizeof(name) - 1u;
+        if (n) memcpy(name, event->tool_call.name.data, n);
+        name[n] = '\0';
+        uint16_t group = SMART_HOME_TOOL_GROUP_LOCAL;
+        for (size_t i = 0; i < app->remote_route_count; i++)
+            if (!strcmp(name, app->remote_routes[i].name)) group = app->remote_routes[i].group;
+        printf("[smart_home_tool] source=%s name=%s event=%s status=%d\n",
+            smart_home_tool_source_name(smart_home_tool_source(group, name)), name,
+            event->type == AGENT_EVENT_TOOL_BEGIN ? "begin" : "end", (int)event->status);
+    }
+#endif
     if (event->type == AGENT_EVENT_TURN_BEGIN) app->run_start_ms = event->timestamp_ms;
     if (app->observer) app->observer(app->observer_user_data, event);
     else smart_home_ui_event_cb(event, &app->run_start_ms);
@@ -586,6 +609,13 @@ int smart_home_agent_app_init(smart_home_agent_app_t *app)
     }
 #endif
 
+    ret = smart_home_device_inventory_register(app);
+    if (ret != AGENT_OK) {
+        smart_home_status_error(app, "Device inventory", ret);
+        smart_home_agent_app_deinit(app);
+        return ret;
+    }
+
     smart_home_init_trace("policy-bind-begin", AGENT_OK);
     ret = agent_set_policy_callback(app->agent,
                                     smart_home_local_tool_policy,
@@ -809,7 +839,9 @@ int smart_home_agent_run(smart_home_agent_app_t *app,
         response.output = output;
         response.output_size = output_size;
         smart_home_cpu_debug_log("agent-run-start");
-        ret = smart_home_agent_backend_prepare_turn(app->backend);
+        ret = smart_home_device_inventory_prepare(app);
+        if (ret == AGENT_OK)
+            ret = smart_home_agent_backend_prepare_turn(app->backend);
         if (ret == AGENT_OK) {
             ret = agent_run(app->agent, &request, &response);
             app->system_status.session_status = response.session_status;

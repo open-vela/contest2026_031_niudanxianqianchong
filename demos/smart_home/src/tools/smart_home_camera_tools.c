@@ -3,7 +3,7 @@
 /****************************************************************************
  * demos/smart_home/src/tools/smart_home_camera_tools.c
  *
- * Agent 本地摄像头工具：单工具 camera，四个动作：
+ * Agent 本机摄像头工具：board_camera，四个动作：
  *   status  查询在线状态 / FPS / 丢帧
  *   on/off  请求开关（非阻塞合并命令，返回真实 desired 状态）
  *   shot    取最新预览帧 → 计算亮度/变化量 → 落盘两槽滚动 → 返回元数据
@@ -33,7 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define CAMERA_TOOL_NAME        "camera"
+#define CAMERA_TOOL_NAME        "board_camera"
 #define CAMERA_TOOL_MIN_INTERVAL_MS 800u
 
 #define CAMERA_SAMPLE_STEP      8u
@@ -43,12 +43,13 @@
 
 #define CAMERA_SCHEMA_JSON                                                  \
   "{\"type\":\"object\",\"properties\":{"                                   \
+  "\"device_key\":{\"type\":\"string\",\"enum\":[\"board:camera:0\"]},"   \
   "\"action\":{\"type\":\"string\","                                        \
   "\"enum\":[\"status\",\"on\",\"off\",\"shot\"],"                          \
   "\"description\":\"status=查询, on=开启, off=关闭, shot=拍照并保存\"},"   \
   "\"reason\":{\"type\":\"string\","                                        \
   "\"description\":\"用户意图摘要，可选\"}},"                               \
-  "\"required\":[\"action\"],\"additionalProperties\":false}"
+  "\"required\":[\"device_key\",\"action\"],\"additionalProperties\":false}"
 
 /* 采样亮度（0..255），供亮度与帧间变化量使用。 */
 static uint8_t camera_luma(uint16_t pixel)
@@ -103,22 +104,21 @@ static const char *camera_state_name(smart_home_camera_state_t state)
     }
 }
 
-static void camera_tool_status(const agent_text_sink_t *sink)
+static agent_error_t camera_tool_status(const agent_text_sink_t *sink)
 {
   struct smart_home_camera_status_s status;
-  char output[192];
+  char output[320];
   int ret = smart_home_camera_get_status(&status);
 
   if (ret != 0)
     {
       snprintf(output, sizeof(output),
                "{\"ok\":false,\"error\":\"status_failed\",\"ret\":%d}", ret);
-      (void)smart_home_tool_reply(sink, output, AGENT_ERROR_IO);
-      return;
+      return smart_home_tool_reply(sink, output, AGENT_ERROR_IO);
     }
 
   snprintf(output, sizeof(output),
-           "{\"ok\":true,\"online\":%s,\"state\":\"%s\"," 
+           "{\"ok\":true,\"source\":\"board\",\"device_key\":\"board:camera:0\",\"online\":%s,\"state\":\"%s\","
            "\"capture_fps_x100\":%lu,\"preview_fps_x100\":%lu,"
            "\"dropped\":%lu}",
            status.state == SMART_HOME_CAMERA_RUNNING ? "true" : "false",
@@ -126,55 +126,32 @@ static void camera_tool_status(const agent_text_sink_t *sink)
            (unsigned long)status.capture_fps_x100,
            (unsigned long)status.preview_fps_x100,
            (unsigned long)status.dropped_frames);
-  (void)smart_home_tool_reply(sink, output, AGENT_OK);
+  return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 
-static void camera_tool_power(const agent_text_sink_t *sink, int on)
+static agent_error_t camera_tool_power(const agent_text_sink_t *sink, int on)
 {
   smart_home_camera_control_status_t control;
-  char output[160];
+  char output[256];
   int ret = smart_home_camera_request(on != 0);
 
   if (ret != 0)
     {
       snprintf(output, sizeof(output),
                "{\"ok\":false,\"error\":\"request_failed\",\"ret\":%d}", ret);
-      (void)smart_home_tool_reply(sink, output, AGENT_ERROR_TOOL_FAILED);
-      return;
+      return smart_home_tool_reply(sink, output, AGENT_ERROR_TOOL_FAILED);
     }
 
   smart_home_camera_control_status(&control);
   snprintf(output, sizeof(output),
-           "{\"ok\":true,\"desired_on\":%s,\"busy\":%s,"
+           "{\"ok\":true,\"source\":\"board\",\"desired_on\":%s,\"busy\":%s,"
            "\"note\":\"state changes asynchronously; verify with status\"}",
            control.desired_on ? "true" : "false",
            control.busy ? "true" : "false");
-  (void)smart_home_tool_reply(sink, output, AGENT_OK);
+  return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 
-/* 等首帧：摄像头刚启动时最多等 300 ms。 */
-static int camera_wait_first_frame(void)
-{
-  struct smart_home_camera_status_s status;
-  unsigned int waited = 0u;
-
-  while (waited < 300u)
-    {
-      if (smart_home_camera_get_status(&status) == 0 &&
-          status.state == SMART_HOME_CAMERA_RUNNING &&
-          status.preview_sequence > 0u)
-        {
-          return 0;
-        }
-
-      usleep(20 * 1000);
-      waited += 20u;
-    }
-
-  return -ETIMEDOUT;
-}
-
-static void camera_tool_shot(const agent_text_sink_t *sink)
+static agent_error_t camera_tool_shot(const agent_text_sink_t *sink)
 {
   static uint8_t *frame;
   static uint8_t previous[CAMERA_SAMPLE_COUNT];
@@ -195,10 +172,9 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
 
   if (pthread_mutex_lock(&lock) != 0)
     {
-      (void)smart_home_tool_reply(sink,
+      return smart_home_tool_reply(sink,
                                   "{\"ok\":false,\"error\":\"busy\"}",
                                   AGENT_ERROR_BUSY);
-      return;
     }
 
   clock_gettime(CLOCK_MONOTONIC, &now);
@@ -206,9 +182,18 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
   if (last_shot_ms != 0u && now_ms - last_shot_ms < CAMERA_TOOL_MIN_INTERVAL_MS)
     {
       pthread_mutex_unlock(&lock);
-      (void)smart_home_tool_reply(
+      return smart_home_tool_reply(
           sink, "{\"ok\":false,\"error\":\"rate_limited\"}", AGENT_ERROR_BUSY);
-      return;
+    }
+
+  ret = smart_home_camera_get_status(&status);
+  if (ret != 0 || status.state != SMART_HOME_CAMERA_RUNNING)
+    {
+      pthread_mutex_unlock(&lock);
+      return smart_home_tool_reply(sink,
+          "{\"ok\":false,\"source\":\"board\",\"error\":\"camera_not_running\","
+          "\"note\":\"Ask before starting the local camera; shot never powers it on\"}",
+          AGENT_ERROR_STATE);
     }
 
   if (frame == NULL)
@@ -217,27 +202,9 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
       if (frame == NULL)
         {
           pthread_mutex_unlock(&lock);
-          (void)smart_home_tool_reply(sink,
+          return smart_home_tool_reply(sink,
                                       "{\"ok\":false,\"error\":\"no_memory\"}",
                                       AGENT_ERROR_NOMEM);
-          return;
-        }
-    }
-
-  ret = smart_home_camera_get_status(&status);
-  if (ret != 0 || status.state != SMART_HOME_CAMERA_RUNNING)
-    {
-      (void)smart_home_camera_request(true);
-      ret = camera_wait_first_frame();
-      if (ret != 0)
-        {
-          pthread_mutex_unlock(&lock);
-          (void)smart_home_tool_reply(
-              sink,
-              "{\"ok\":true,\"pending\":true,"
-              "\"note\":\"camera starting; retry in a moment\"}",
-              AGENT_OK);
-          return;
         }
     }
 
@@ -256,8 +223,7 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
       snprintf(output, sizeof(output),
                "{\"ok\":false,\"error\":\"frame_unavailable\",\"ret\":%d}",
                ret);
-      (void)smart_home_tool_reply(sink, output, AGENT_ERROR_TOOL_FAILED);
-      return;
+      return smart_home_tool_reply(sink, output, AGENT_ERROR_TOOL_FAILED);
     }
 
   camera_sample_frame(frame, current, &sum_luma);
@@ -296,12 +262,11 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
     {
       snprintf(output, sizeof(output),
                "{\"ok\":false,\"error\":\"save_failed\",\"ret\":%d}", ret);
-      (void)smart_home_tool_reply(sink, output, AGENT_ERROR_IO);
-      return;
+      return smart_home_tool_reply(sink, output, AGENT_ERROR_IO);
     }
 
   snprintf(output, sizeof(output),
-           "{\"ok\":true,\"path\":\"%s\",\"slot\":%u,\"seq\":%lu,"
+           "{\"ok\":true,\"source\":\"board\",\"path\":\"%s\",\"slot\":%u,\"seq\":%lu,"
            "\"bytes\":%lu,\"width\":%u,\"height\":%u,"
            "\"format\":\"rgb565\",\"brightness\":%u,\"motion\":%u,"
            "\"ts\":%llu,\"frame_seq\":%lu}",
@@ -310,7 +275,7 @@ static void camera_tool_shot(const agent_text_sink_t *sink)
            (unsigned)info.height, (unsigned)info.brightness,
            (unsigned)info.motion, (unsigned long long)info.ts,
            (unsigned long)sequence);
-  (void)smart_home_tool_reply(sink, output, AGENT_OK);
+  return smart_home_tool_reply(sink, output, AGENT_OK);
 }
 
 static agent_error_t camera_tool_execute(void *user_data,
@@ -318,6 +283,7 @@ static agent_error_t camera_tool_execute(void *user_data,
                                          const agent_text_sink_t *sink)
 {
   char action[8];
+  char device_key[SMART_HOME_ROOM_KEY_SIZE];
   agent_error_t ret;
 
   (void)user_data;
@@ -326,6 +292,13 @@ static agent_error_t camera_tool_execute(void *user_data,
     {
       return AGENT_ERROR_INVALID;
     }
+
+  ret = smart_home_tool_get_string(context->call.arguments_json,
+                                  "device_key", device_key, sizeof(device_key));
+  if (ret != AGENT_OK || strcmp(device_key, SMART_HOME_BOARD_CAMERA_KEY))
+    return smart_home_tool_reply(sink,
+        "{\"ok\":false,\"error\":\"wrong_device_source\",\"expected\":\"board:camera:0\"}",
+        AGENT_ERROR_TOOL_ARGUMENT);
 
   ret = smart_home_tool_get_string(context->call.arguments_json,
                                    "action", action, sizeof(action));
@@ -338,26 +311,22 @@ static agent_error_t camera_tool_execute(void *user_data,
 
   if (strcmp(action, "status") == 0)
     {
-      camera_tool_status(sink);
-      return AGENT_OK;
+      return camera_tool_status(sink);
     }
 
   if (strcmp(action, "on") == 0)
     {
-      camera_tool_power(sink, 1);
-      return AGENT_OK;
+      return camera_tool_power(sink, 1);
     }
 
   if (strcmp(action, "off") == 0)
     {
-      camera_tool_power(sink, 0);
-      return AGENT_OK;
+      return camera_tool_power(sink, 0);
     }
 
   if (strcmp(action, "shot") == 0)
     {
-      camera_tool_shot(sink);
-      return AGENT_OK;
+      return camera_tool_shot(sink);
     }
 
   return smart_home_tool_reply(sink,
@@ -374,9 +343,9 @@ int smart_home_camera_tools_register(agent_t *agent)
 
   return smart_home_tool_register_local(
       agent, CAMERA_TOOL_NAME,
-      "Control the local camera. action=status/on/off or shot "
-      "(capture preview, save to /data/smart_home/snapshots, "
-      "return brightness and motion).",
+      "[board] Control only board:camera:0, the panel's local camera; NO PTZ, rotation or calibration. "
+      "Never use for Mi Home/Node cameras. action=status/on/off or shot (requires camera already on). "
+      "shot saves a local snapshot.",
       CAMERA_SCHEMA_JSON, SMART_HOME_TOOL_CATEGORY_CONTROL,
       camera_tool_execute, NULL, AGENT_TOOL_SIDE_EFFECT);
 }
@@ -413,7 +382,7 @@ static agent_error_t camera_selftest_write(void *context,
 
 int smart_home_camera_tool_selftest(const char *action)
 {
-  char arguments[48];
+  char arguments[128];
   char output[768];
   struct camera_selftest_sink_s state;
   agent_text_sink_t sink;
@@ -425,7 +394,7 @@ int smart_home_camera_tool_selftest(const char *action)
       return AGENT_ERROR_INVALID;
     }
 
-  snprintf(arguments, sizeof(arguments), "{\"action\":\"%s\"}", action);
+  snprintf(arguments, sizeof(arguments), "{\"device_key\":\"board:camera:0\",\"action\":\"%s\"}", action);
   output[0] = '\0';
 
   state.buffer = output;
