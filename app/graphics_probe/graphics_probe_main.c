@@ -10,6 +10,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/kmalloc.h>
 #include <arch/chip/esp_graphics.h>
 #include <errno.h>
 #include <malloc.h>
@@ -27,9 +28,30 @@
 #define PROBE_TIMEOUT 1000
 #define PROBE_MAX_ROUNDS 1000
 
+/* ESP32-P4 rev3.x address windows from HAL soc/esp32p4/include/soc/soc.h. */
+
+#define PROBE_SRAM_START  0x4ff00000u
+#define PROBE_SRAM_END    0x4ffc0000u
+#define PROBE_PSRAM_START 0x48000000u
+#define PROBE_PSRAM_END   0x4c000000u
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
+
+enum probe_memory_e
+{
+  PROBE_AUTO,
+  PROBE_SRAM,
+  PROBE_PSRAM
+};
+
+struct probe_memory_s
+{
+  enum probe_memory_e source;
+  enum probe_memory_e foreground;
+  enum probe_memory_e destination;
+};
 
 struct probe_s
 {
@@ -39,23 +61,33 @@ struct probe_s
   unsigned char *destination;
 };
 
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
 struct probe_test_s
 {
   const char *name;
   int (*run)(struct probe_s *probe);
+  bool source;
+  bool foreground;
 };
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 static void probe_reset(struct probe_s *probe)
 {
   struct esp_graphics_job_s *job = &probe->job;
 
   memset(job, 0, sizeof(*job));
-  memset(probe->source, 0, PROBE_BYTES);
-  memset(probe->foreground, 0, PROBE_BYTES);
+  if (probe->source != NULL)
+    {
+      memset(probe->source, 0, PROBE_BYTES);
+    }
+
+  if (probe->foreground != NULL)
+    {
+      memset(probe->foreground, 0, PROBE_BYTES);
+    }
+
   memset(probe->destination, 0x5a, PROBE_BYTES);
   job->src.data = probe->source;
   job->src.size = PROBE_BYTES;
@@ -493,13 +525,272 @@ static int probe_convert(struct probe_s *probe)
 }
 #endif
 
+static const char *probe_memory_name(enum probe_memory_e memory)
+{
+  switch (memory)
+    {
+      case PROBE_SRAM:
+        return "sram";
+      case PROBE_PSRAM:
+        return "psram";
+      default:
+        return "auto";
+    }
+}
+
+static int probe_memory_parse(const char *name, enum probe_memory_e *memory)
+{
+  for (*memory = PROBE_AUTO; *memory <= PROBE_PSRAM; (*memory)++)
+    {
+      if (strcmp(name, probe_memory_name(*memory)) == 0)
+        {
+          return 0;
+        }
+    }
+
+  return -EINVAL;
+}
+
+static enum probe_memory_e probe_memory_region(const void *buffer)
+{
+  uintptr_t address = (uintptr_t)buffer;
+
+  if (address >= PROBE_SRAM_START &&
+      address <= PROBE_SRAM_END - PROBE_BYTES)
+    {
+      return PROBE_SRAM;
+    }
+
+  if (address >= PROBE_PSRAM_START &&
+      address <= PROBE_PSRAM_END - PROBE_BYTES)
+    {
+      return PROBE_PSRAM;
+    }
+
+  return PROBE_AUTO;
+}
+
+static bool probe_memory_supported(enum probe_memory_e memory)
+{
+  if (memory != PROBE_PSRAM)
+    {
+      return true;
+    }
+
+#if defined(CONFIG_ESPRESSIF_SPIRAM) && \
+    defined(CONFIG_ESPRESSIF_SPIRAM_USER_HEAP) && \
+    defined(CONFIG_MM_KERNEL_HEAP)
+  return true;
+#else
+  return false;
+#endif
+}
+
+static void probe_buffer_free(void *buffer, enum probe_memory_e memory)
+{
+  if (memory == PROBE_SRAM)
+    {
+      kmm_free(buffer);
+    }
+  else
+    {
+      free(buffer);
+    }
+}
+
+static int probe_buffer_alloc(unsigned char **buffer,
+                              enum probe_memory_e memory, const char *role)
+{
+  int ret;
+
+  if (!probe_memory_supported(memory))
+    {
+      printf("graphics: %s memory=%s unavailable: need SPIRAM, "
+             "SPIRAM_USER_HEAP and MM_KERNEL_HEAP\n",
+             role, probe_memory_name(memory));
+      return -ENOTSUP;
+    }
+
+  if (memory == PROBE_SRAM)
+    {
+      *buffer = kmm_memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
+    }
+  else
+    {
+      *buffer = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
+    }
+
+  ret = -ENOMEM;
+  if (*buffer != NULL)
+    {
+      ret = -EFAULT;
+      if (((uintptr_t)*buffer % ESP_GRAPHICS_ALIGNMENT) == 0 &&
+          (memory == PROBE_AUTO || probe_memory_region(*buffer) == memory))
+        {
+          return 0;
+        }
+    }
+
+  printf("graphics: %s allocation memory=%s addr=%p bytes=%u failed: %d\n",
+         role, probe_memory_name(memory), *buffer, PROBE_BYTES, ret);
+  probe_buffer_free(*buffer, memory);
+  *buffer = NULL;
+  return ret;
+}
+
+static const char *probe_buffer_name(const void *buffer)
+{
+  return buffer == NULL ? "unused" :
+         probe_memory_name(probe_memory_region(buffer));
+}
+
+static bool probe_selected(const char *command,
+                           const struct probe_test_s *test)
+{
+  return strcmp(command, "all") == 0 || strcmp(command, test->name) == 0;
+}
+
+static int probe_case(const struct probe_test_s *tests, unsigned int count,
+                      const char *command, unsigned long rounds,
+                      const struct probe_memory_s *memory)
+{
+  struct probe_s probe;
+  bool source = false;
+  bool foreground = false;
+  unsigned long round;
+  unsigned int i;
+  int ret;
+
+  memset(&probe, 0, sizeof(probe));
+  for (i = 0; i < count; i++)
+    {
+      if (probe_selected(command, &tests[i]))
+        {
+          source |= tests[i].source;
+          foreground |= tests[i].foreground;
+        }
+    }
+
+  printf("graphics case: %s src=%s dst=%s fg=%s\n", command,
+         source ? probe_memory_name(memory->source) : "unused",
+         probe_memory_name(memory->destination),
+         foreground ? probe_memory_name(memory->foreground) : "unused");
+
+  ret = probe_buffer_alloc(&probe.destination, memory->destination, "dst");
+  if (ret < 0)
+    {
+      goto out;
+    }
+
+  if (source)
+    {
+      ret = probe_buffer_alloc(&probe.source, memory->source, "src");
+      if (ret < 0)
+        {
+          goto out;
+        }
+    }
+
+  if (foreground)
+    {
+      ret = probe_buffer_alloc(&probe.foreground, memory->foreground, "fg");
+      if (ret < 0)
+        {
+          goto out;
+        }
+    }
+
+  printf("graphics: cpu=%d rounds=%lu bytes=%u src=%p fg=%p dst=%p\n",
+         sched_getcpu(), rounds, PROBE_BYTES,
+         probe.source, probe.foreground, probe.destination);
+  printf("graphics memory: src=%s fg=%s dst=%s\n",
+         probe_buffer_name(probe.source),
+         probe_buffer_name(probe.foreground),
+         probe_buffer_name(probe.destination));
+
+  for (round = 0; round < rounds; round++)
+    {
+      if (rounds > 1)
+        {
+          printf("graphics round %lu/%lu\n", round + 1, rounds);
+        }
+
+      for (i = 0; i < count; i++)
+        {
+          if (probe_selected(command, &tests[i]))
+            {
+              ret = tests[i].run(&probe);
+              printf("graphics %s: %s (%d)\n", tests[i].name,
+                     ret == 0 ? "PASS" : "FAIL", ret);
+              if (ret < 0)
+                {
+                  goto out;
+                }
+            }
+        }
+    }
+
+out:
+  probe_buffer_free(probe.destination, memory->destination);
+  probe_buffer_free(probe.foreground, memory->foreground);
+  probe_buffer_free(probe.source, memory->source);
+  return ret;
+}
+
+static int probe_matrix(const struct probe_test_s *tests, unsigned int count,
+                        unsigned long rounds)
+{
+  struct probe_memory_s memory;
+  unsigned int cases = 0;
+  unsigned int source;
+  unsigned int foreground;
+  unsigned int destination;
+  unsigned int i;
+  int ret;
+
+  for (i = 0; i < count; i++)
+    {
+      for (source = 0; source < (tests[i].source ? 2 : 1); source++)
+        {
+          for (destination = 0; destination < 2; destination++)
+            {
+              for (foreground = 0;
+                   foreground < (tests[i].foreground ? 2 : 1); foreground++)
+                {
+                  memory.source = source == 0 ? PROBE_SRAM : PROBE_PSRAM;
+                  memory.destination = destination == 0 ?
+                                       PROBE_SRAM : PROBE_PSRAM;
+                  memory.foreground = foreground == 0 ?
+                                      PROBE_SRAM : PROBE_PSRAM;
+                  ret = probe_case(tests, count, tests[i].name, rounds,
+                                   &memory);
+                  if (ret < 0)
+                    {
+                      printf("graphics matrix: FAIL after %u cases (%d)\n",
+                             cases, ret);
+                      return ret;
+                    }
+
+                  cases++;
+                }
+            }
+        }
+    }
+
+  printf("graphics matrix: PASS (%u cases, %lu rounds/case)\n",
+         cases, rounds);
+  return 0;
+}
+
 static void probe_usage(void)
 {
   printf("Usage: graphics_probe all | copy"
 #ifdef CONFIG_ESP32P4_PPA
          " | fill | srm | blend | convert"
 #endif
-         " [rounds:1..1000]\n");
+         " [rounds:1..1000] [src_mem dst_mem [fg_mem]]\n"
+         "       graphics_probe matrix [rounds:1..1000]\n"
+         "Memory: auto | sram | psram; fg_mem defaults to src_mem\n");
 }
 
 /****************************************************************************
@@ -510,29 +801,33 @@ int main(int argc, FAR char *argv[])
 {
   static const struct probe_test_s tests[] =
   {
-    {"copy", probe_copy},
+    {"copy", probe_copy, true, false},
 #ifdef CONFIG_ESP32P4_PPA
-    {"fill", probe_fill},
-    {"srm", probe_srm},
-    {"blend", probe_blend},
-    {"convert", probe_convert},
+    {"fill", probe_fill, false, false},
+    {"srm", probe_srm, true, false},
+    {"blend", probe_blend, true, true},
+    {"convert", probe_convert, true, false},
 #endif
   };
 
-  struct probe_s probe;
+  struct probe_memory_s memory =
+  {
+    PROBE_AUTO, PROBE_AUTO, PROBE_AUTO
+  };
+
+  const unsigned int count = sizeof(tests) / sizeof(tests[0]);
   const char *command = argc > 1 ? argv[1] : "all";
+  bool matrix = strcmp(command, "matrix") == 0;
   char *end;
   unsigned long rounds = 1;
-  unsigned long round;
   unsigned int i;
-  bool matched = false;
+  bool matched = matrix;
   int ret;
 #ifdef CONFIG_SMP
   cpu_set_t cpu0;
 #endif
 
-  memset(&probe, 0, sizeof(probe));
-  if (argc > 3)
+  if (argc > 6 || argc == 4 || (matrix && argc > 3))
     {
       probe_usage();
       return EXIT_FAILURE;
@@ -550,15 +845,38 @@ int main(int argc, FAR char *argv[])
         }
     }
 
-  for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+  if (argc > 3)
     {
-      matched |= strcmp(command, "all") == 0 ||
-                 strcmp(command, tests[i].name) == 0;
+      if (probe_memory_parse(argv[3], &memory.source) < 0 ||
+          probe_memory_parse(argv[4], &memory.destination) < 0 ||
+          (argc == 6 &&
+           probe_memory_parse(argv[5], &memory.foreground) < 0))
+        {
+          probe_usage();
+          return EXIT_FAILURE;
+        }
+
+      if (argc == 5)
+        {
+          memory.foreground = memory.source;
+        }
+    }
+
+  for (i = 0; i < count; i++)
+    {
+      matched |= probe_selected(command, &tests[i]);
     }
 
   if (!matched)
     {
       probe_usage();
+      return EXIT_FAILURE;
+    }
+
+  if (matrix && !probe_memory_supported(PROBE_PSRAM))
+    {
+      printf("graphics matrix: unavailable: need SPIRAM, "
+             "SPIRAM_USER_HEAP and MM_KERNEL_HEAP\n");
       return EXIT_FAILURE;
     }
 
@@ -572,54 +890,21 @@ int main(int argc, FAR char *argv[])
     }
 #endif
 
-  probe.source = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
-  probe.foreground = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
-  probe.destination = memalign(ESP_GRAPHICS_ALIGNMENT, PROBE_BYTES);
-  ret = -ENOMEM;
-  if (probe.source == NULL || probe.foreground == NULL ||
-      probe.destination == NULL)
-    {
-      printf("graphics: allocation failed: %d\n", ret);
-      goto out;
-    }
-
   ret = esp_graphics_initialize();
   if (ret < 0)
     {
       printf("graphics: initialize failed: %d\n", ret);
-      goto out;
+      return EXIT_FAILURE;
     }
 
-  printf("graphics: cpu=%d rounds=%lu bytes=%u src=%p fg=%p dst=%p\n",
-         sched_getcpu(), rounds, PROBE_BYTES,
-         probe.source, probe.foreground, probe.destination);
-
-  for (round = 0; round < rounds; round++)
+  if (matrix)
     {
-      if (rounds > 1)
-        {
-          printf("graphics round %lu/%lu\n", round + 1, rounds);
-        }
-
-      for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
-        {
-          if (strcmp(command, "all") == 0 ||
-              strcmp(command, tests[i].name) == 0)
-            {
-              ret = tests[i].run(&probe);
-              printf("graphics %s: %s (%d)\n", tests[i].name,
-                     ret == 0 ? "PASS" : "FAIL", ret);
-              if (ret < 0)
-                {
-                  goto out;
-                }
-            }
-        }
+      ret = probe_matrix(tests, count, rounds);
+    }
+  else
+    {
+      ret = probe_case(tests, count, command, rounds, &memory);
     }
 
-out:
-  free(probe.destination);
-  free(probe.foreground);
-  free(probe.source);
   return ret < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

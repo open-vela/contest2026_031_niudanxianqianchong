@@ -18,7 +18,8 @@
 
 PPA 与二维复制共用一个 DMA2D 管理层，当前一次只允许一个未回收任务。
 DMA2D 完成中断通知写回结果，PPA 参数错误中断返回 `-EIO`。
-暂不接入 LVGL、摄像头业务、JPEG 或 PM。
+探针不访问 LVGL 或摄像头缓冲，不接入 JPEG 或 PM。
+SmartHome 可另外启用 `SMART_HOME_CAMERA_PPA` 加速摄像头预览，见构建验证指南第 8 节。
 `smart_home` 另行启用实验性 SMP 共存模式，图形操作限定在 CPU0，待组合板测。
 
 ## 构建
@@ -81,9 +82,59 @@ SmartHome 已在运行时不重复启动。探针在分配和填充缓冲之前�
 缓冲只供探针使用，不访问 framebuffer 或摄像头缓冲。
 先单轮预热再比较堆余量，因为首次初始化会常驻分配驱动实例和描述符。
 
-此阶段验证 UI 与独立图形探针共存。UI、摄像头仍走原有 CPU 处理路径。
+此阶段验证 UI 与独立图形探针共存。UI 保持原渲染路径；
+摄像头是否使用 PPA 由 `SMART_HOME_CAMERA_PPA` 独立控制。
 先观察页面切换、触摸和基础网络，再单独加入摄像头或音频，逐项保留日志。
 文件擦写并发、跨核共享图形缓冲和性能收益不在本轮已验证范围内。
+
+## SRAM / PSRAM 矩阵
+
+沿用 `smart_home` 配置构建，无需修改 defconfig。现有 `graphics_probe all 100`
+保留默认分配方式。指定内存时命令格式为：
+
+```text
+graphics_probe <操作> <轮次> <src_mem> <dst_mem> [fg_mem]
+```
+
+内存取值为 `auto`、`sram`、`psram`；`fg_mem` 默认与 `src_mem` 相同。
+`blend` 中 `src_mem` 表示背景；`fill` 只使用 `dst_mem`，其他操作不使用前景。
+
+```text
+nsh> graphics_probe copy 1 sram sram
+nsh> graphics_probe copy 1 sram psram
+nsh> graphics_probe copy 1 psram sram
+nsh> graphics_probe copy 1 psram psram
+nsh> graphics_probe blend 1 sram psram psram
+nsh> graphics_probe matrix
+nsh> free
+nsh> graphics_probe matrix 100
+nsh> free
+```
+
+`matrix` 顺序执行以下组合，每组完成指定轮次后释放缓冲，再进入下一组：
+
+| 操作 | 组合数 | 内存选择 |
+| --- | --- | --- |
+| copy、srm、convert | 各 4 | 源和目标分别选择 SRAM / PSRAM |
+| fill | 2 | 目标选择 SRAM / PSRAM |
+| blend | 8 | 背景、前景、目标分别选择 SRAM / PSRAM |
+
+PPA 启用时共 22 组；只有 DMA2D 时为 4 组复制。完整矩阵要求
+`CONFIG_ESPRESSIF_SPIRAM=y`、`CONFIG_ESPRESSIF_SPIRAM_USER_HEAP=y` 和
+`CONFIG_MM_KERNEL_HEAP=y`，不满足时直接报 unavailable，不跳过后输出 PASS。
+原单核 `dma2d` / `ppa` 配置仍可使用默认命令及显式 SRAM 测试。
+
+SRAM 使用 `kmm_memalign` / `kmm_free`，PSRAM 和 auto 使用 `memalign` / `free`。
+每个缓冲为 49152 字节、64 字节对齐；只分配当前操作需要的输入。
+显式选择会检查完整缓冲的地址范围，失败返回错误，不回退至其他内存。
+日志中 `graphics case` 是请求的组合，`graphics memory` 和地址是实际分配结果。
+SRAM 地址窗口为 `[0x4ff00000, 0x4ffc0000)`，PSRAM 为
+`[0x48000000, 0x4c000000)`；整个缓冲必须落在窗口内。
+
+完整通过后打印 `graphics matrix: PASS (22 cases, 100 rounds/case)`。
+任一分配或校验失败立即停止，保留失败组合和错误码；内存不足先关闭额外业务再重试。
+先无摄像头/音频负载验收矩阵，再逐项加入 UI、网络、摄像头、音频共存。
+矩阵复用现有像素用例，不扩大格式、变换或受控超时的覆盖范围。
 
 ## 接口与约束
 
@@ -109,10 +160,12 @@ PANIC，防止向调用者归还仍可能被 DMA 写入的内存。
 ```sh
 python3 tests/esp32p4/test_graphics_bounds.py
 python3 tests/esp32p4/test_graphics_context.py
+python3 tests/esp32p4/test_graphics_memory.py
 ```
 
 检查直接编译生产用几何校验代码与上下文限制，覆盖 stride、像素对齐、边界、地址溢出、
 描述符字段上限、CPU0 亲和性及中断拒绝；不模拟 DMA，不能替代板端像素和中断验收。
+内存测试以 Host 映射缓冲检查矩阵遍历、地址拒绝、分配失败清理及命令兼容，不验证 Cache。
 
 ## 历史验证状态（2026-10-28，初始实现）
 
