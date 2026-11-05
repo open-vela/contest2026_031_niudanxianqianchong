@@ -15,7 +15,7 @@
 > [ESP32-P4X-端侧KWS方案](./ESP32-P4X-端侧KWS方案.md)、
 > [ESP32-P4X-端侧目标检测方案](./ESP32-P4X-端侧目标检测方案.md)、
 > [ESP32-P4X-MIPI-CSI摄像头适配方案](../摄像头与视觉/ESP32-P4X-MIPI-CSI摄像头适配方案.md)、
-> [ESP32-P4X SmartHome Demo 测试开发计划](../ESP32-P4X-SmartHome-Demo测试开发计划.md)、
+> [ESP32-P4X SmartHome Demo 测试开发计划](ESP32-P4X-SmartHome-Demo测试开发计划.md)、
 > [华为全屋智能中控屏 S2 产品页](https://consumer.huawei.com/cn/wholehome/control-panel-s2/)。
 >
 > 注意：demos/smart_home/docs/ui-design.md 是既有的 UI 规范，其目标为

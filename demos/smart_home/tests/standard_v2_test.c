@@ -90,7 +90,11 @@ static agent_error_t http_request(void *data, const agent_http_request_t *reques
             if (strstr(content->valuestring, agent_error_str(AGENT_ERROR_POLICY_DENIED))) ++policy_denials;
         }
     }
+#ifdef CONFIG_SMART_HOME_USER_MEMORY
+    assert(references == 2);
+#else
     assert(references == 1);
+#endif
     cJSON_Delete(json);
     ret = sink->headers(sink->context, http_status, NULL, 0);
     if (ret) return ret;
@@ -144,7 +148,7 @@ int main(int argc, char **argv)
              "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"%s\"},\"finish_reason\":\"stop\"}]}", answer);
     memset(input, 'q', sizeof(input) - 1); input[sizeof(input) - 1] = '\0';
     assert(!smart_home_agent_app_init(&app));
-    assert(app.skill_store.count == 6 && app.system_status.model_status == AGENT_OK);
+    assert(app.skill_store.count == 7 && app.system_status.model_status == AGENT_OK);
     app.miloco = (smart_home_miloco_t *)&app;
     if (argc > 1 && !strcmp(argv[1], "--resume")) {
         size_t turns = 0u;

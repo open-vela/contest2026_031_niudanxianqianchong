@@ -22,6 +22,7 @@ def main():
         package / "providers/model/openai/include", package / "providers/storage/ram/include",
         package / "ports/runtime/include", package / "ports/transport/include",
         package / "ports/tls/include", app / "src", cjson,
+        repo / "packages/cagent_addons/include",
         *sorted(package.glob("providers/storage/*/include")),
         package / "ports/posix/storage/include", package / "ports/openvela/storage/include",
     ]
@@ -47,6 +48,8 @@ def main():
         sources += [package / "ports/posix/storage/src/file_store.c",
                     package / "ports/openvela/storage/src/file_store.c"]
         sources += [app / "src/tools/smart_home_tools.c",
+                    app / "src/memory/smart_home_user_memory.c",
+                    app / "src/tools/smart_home_user_memory_tools.c",
                     app / "src/miloco/smart_home_miloco_tools.c",
                     app / "src/device/smart_home_device.c",
                     app / "src/device/smart_home_device_service.c",
@@ -58,7 +61,8 @@ def main():
                     app / "src/ui/lvgl/smart_home_lvgl_agent.c",
                     app / "src/ui/lvgl/smart_home_lvgl_chat.c",
                     app / "src/ui/lvgl/smart_home_lvgl_history.c",
-                    app / "src/ui/lvgl/smart_home_lvgl_settings.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_settings_v9.c",
+                    app / "src/ui/lvgl/smart_home_lvgl_wake_settings.c",
                     app / "src/app/smart_home_main.c",
                     app / "src/smart_home_memory.c"]
         native_includes = [repo.parent / "nuttx/include", repo.parent / "apps/include",
@@ -88,17 +92,24 @@ def main():
             "-fsanitize=address,undefined", "-no-pie", "-include", str(work / "nuttx/config.h"),
         ]
         include_flags = [item for path in [work, *includes] for item in ["-I", str(path)]]
-        for miloco in (False, True):
+        for miloco, user_memory in ((False, False), (True, False), (True, True)):
             profile = "#pragma once\n#define FAR\n"
             if miloco:
                 profile += ("#define CONFIG_AGENT_MAX_TOOLS 16\n"
                             "#define CONFIG_AGENT_SCRATCH_BYTES 20480\n"
                             "#define CONFIG_AGENT_CORE_WORKSPACE_BYTES 65536\n")
             (work / "nuttx/config.h").write_text(profile)
-            executable = work / ("agent-miloco" if miloco else "agent")
+            if user_memory:
+                profile += ('#define CONFIG_SMART_HOME_USER_MEMORY 1\n'
+                            '#define CONFIG_AGENT_MAX_CONTEXT_BYTES 8192\n'
+                            f'#define CONFIG_SMART_HOME_DEMO_DATA_ROOT "{work}/data"\n')
+                (work / "nuttx/config.h").write_text(profile)
+            executable = work / ("agent-memory" if user_memory else "agent-miloco" if miloco else "agent")
             definitions = ["-DCONFIG_SMART_HOME_MILOCO_BRIDGE=1"] if miloco else []
+            feature_sources = [app / "src/memory/smart_home_user_memory.c",
+                               app / "src/tools/smart_home_user_memory_tools.c"] if user_memory else []
             command = [os.environ.get("CC", "cc"), *flags, *definitions, *include_flags,
-                       *map(str, sources), "-lm", "-o", str(executable)]
+                       *map(str, sources + feature_sources), "-lm", "-o", str(executable)]
             subprocess.run(command, check=True)
             environment = dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",
                                UBSAN_OPTIONS="halt_on_error=1")

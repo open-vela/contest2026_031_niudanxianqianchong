@@ -12,7 +12,7 @@
 - [ESP32-P4X 智能家居中控面板 UI 设计方案](./ESP32-P4X-智能家居中控面板UI设计方案.md)：产品 IA、视觉规范及当前 LVGL 路线。
 - [ESP32-P4X 端侧目标检测方案](./ESP32-P4X-端侧目标检测方案.md)：AI 事件和摄像头资源约束。
 - [ESP32-P4X SmartHome 板载 C6-Wi-Fi 接入方案](../网络与连接/ESP32-P4X-SmartHome板载C6-WiFi接入方案.md)：网络服务边界。
-- [ESP32-P4X SmartHome Demo 测试开发计划](../ESP32-P4X-SmartHome-Demo测试开发计划.md)：现有原生 UI 与板级集成边界。
+- [ESP32-P4X SmartHome Demo 测试开发计划](ESP32-P4X-SmartHome-Demo测试开发计划.md)：现有原生 UI 与板级集成边界。
 - C6 Wi-Fi 接入方案属于独立网络功能分支；快应用只通过原生状态服务消费网络状态，不依赖其具体驱动实现。
 
 ---

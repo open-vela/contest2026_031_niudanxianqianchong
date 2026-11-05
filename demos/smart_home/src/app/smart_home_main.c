@@ -10,7 +10,7 @@
 #ifdef CONFIG_SMART_HOME_APP_BRIDGE
 #include "../addons/smart_home_app_bridge.h"
 #endif
-#ifdef CONFIG_SMART_HOME_VOICE_TTS
+#if defined(CONFIG_SMART_HOME_VOICE_TTS) || defined(CONFIG_SMART_HOME_REMINDER_RING)
 #include "../voice/smart_home_voice_play.h"
 #endif
 #if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_KWS)
@@ -27,7 +27,12 @@
 #include "../tools/smart_home_camera_tools.h"
 #endif
 
+#ifdef CONFIG_SMART_HOME_REMINDERS
+#include "../reminder/smart_home_reminder.h"
+#endif
+
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
@@ -76,7 +81,8 @@ static int smart_home_selftest_camera(void)
             status.state == SMART_HOME_CAMERA_RUNNING &&
             status.preview_sequence > 0)
         {
-            printf("smart_home_selftest: camera PASS preview=%u capture=%u\n",
+            printf("smart_home_selftest: camera PASS preview=%" PRIu32
+                   " capture=%" PRIu32 "\n",
                    status.preview_sequence, status.capture_sequence);
             smart_home_camera_stop();
             return 0;
@@ -86,17 +92,14 @@ static int smart_home_selftest_camera(void)
     }
 
     smart_home_camera_get_status(&status);
-    printf("smart_home_selftest: camera FAIL state=%d err=%d preview=%u\n",
+    printf("smart_home_selftest: camera FAIL state=%d err=%d preview=%" PRIu32 "\n",
            status.state, status.last_error, status.preview_sequence);
     smart_home_camera_stop();
     return 1;
 }
+#endif
 
-static int smart_home_selftest_camera_tool(const char *action)
-{
-    return smart_home_camera_tool_selftest(action);
-}
-#elif defined(CONFIG_SMART_HOME_CAMERA_TOOL)
+#if defined(CONFIG_SMART_HOME_CAMERA_TOOL)
 static int smart_home_selftest_camera_tool(const char *action)
 {
     return smart_home_camera_tool_selftest(action);
@@ -239,13 +242,19 @@ int main(int argc, char *argv[])
     }
 #endif
 
-#ifdef CONFIG_SMART_HOME_VOICE_TTS
+#if defined(CONFIG_SMART_HOME_VOICE_TTS) || defined(CONFIG_SMART_HOME_REMINDER_RING)
     /* 播报服务与 UI 并行启动；初始化失败只损失语音播报，不阻断主流程。 */
     printf("[main] voice_play_init begin\n");
     if (voice_play_init() != 0) {
         fprintf(stderr, "voice_play_init failed; announcements disabled\n");
     }
     printf("[main] voice_play_init done\n");
+#endif
+
+#ifdef CONFIG_SMART_HOME_REMINDERS
+    if (smart_home_reminder_start(NULL) != AGENT_OK) {
+        fprintf(stderr,"reminder worker start failed; reminders unavailable\n");
+    }
 #endif
 
 #if defined(CONFIG_SMART_HOME_DEMO_UI_QUICKAPP)
@@ -274,7 +283,10 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_SMART_HOME_APP_BRIDGE
     smart_home_app_bridge_stop(&app.app_bridge);
 #endif
-#ifdef CONFIG_SMART_HOME_VOICE_TTS
+#ifdef CONFIG_SMART_HOME_REMINDERS
+    smart_home_reminder_stop();
+#endif
+#if defined(CONFIG_SMART_HOME_VOICE_TTS) || defined(CONFIG_SMART_HOME_REMINDER_RING)
     voice_play_deinit();
 #endif
 #if defined(CONFIG_SMART_HOME_VOICE_ASR) || defined(CONFIG_SMART_HOME_KWS)

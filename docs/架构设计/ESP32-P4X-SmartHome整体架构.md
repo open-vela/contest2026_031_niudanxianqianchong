@@ -231,7 +231,7 @@ ROM 中的 libc/libgcc 函数经 `esp32p4.rom.eco5.*.ld` 以绝对地址绑定�
 | miloco worker | pthread，常驻 | 继承 | 48 KB（PSRAM） | **1** | 每 5 s 轮询网关，执行控制队列，每 10 min 拉取天气并同步时间 |
 | camera worker | pthread，按需 | 继承 | 8 KB | **0** | V4L2 DQBUF/QBUF，缩放到预览双缓冲 |
 | voice capture | pthread | 110 | 8 KB | 继承 | 独占 `pcm_in0`，把帧分发给当前的单一消费者 |
-| KWS worker | pthread | 90 | 12 KB | 继承 | 特征前端 + TFLM 推理 |
+| KWS worker | pthread | 90 | 32 KB（`CONFIG_SMART_HOME_KWS_WORKER_STACKSIZE`，range 8~128 KB） | 继承 | 特征前端 + TFLM 推理 |
 | voice play worker | pthread | 90 | 32 KB | 继承 | TTS 请求与 PCM 播放 |
 | ASR worker | pthread，按需 | 继承 | Kconfig | 继承 | 录音 + 云端识别 |
 | V9 设置 model/net worker | pthread，按需 | 继承 | 16 KB | 继承 | 模型切换、配网，避免阻塞 UI |

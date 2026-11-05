@@ -27,7 +27,7 @@ struct voice_controls_s {
 };
 static struct voice_controls_s g_voice[2];
 static struct {
-    lv_obj_t *tabs[2], *panel[2], *keyboard;
+    lv_obj_t *tabs[3], *panel[3], *keyboard;
     int selected;
 } g_voice_page;
 static pthread_mutex_t g_voice_job_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -448,13 +448,24 @@ static void voice_tab_cb(lv_event_t *event)
     int selected = (int)(intptr_t)lv_event_get_user_data(event);
     voice_hide_keyboard();
     g_voice_page.selected = selected;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
+        if (!g_voice_page.panel[i]) continue;
         if (i == selected) lv_obj_remove_flag(g_voice_page.panel[i], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(g_voice_page.panel[i], LV_OBJ_FLAG_HIDDEN);
         smart_home_lvgl_set_bg(g_voice_page.tabs[i], i == selected ?
             SMART_HOME_UI_COLOR_SURFACE_ON : SMART_HOME_UI_COLOR_SURFACE);
     }
 }
+
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+static void voice_stop_cb(lv_event_t *event)
+{
+    struct voice_controls_s *v = lv_event_get_user_data(event);
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    voice_play_stop();
+    lv_label_set_text(v->status, "已请求停止播报");
+}
+#endif
 
 static void build_voice_panel(smart_home_lvgl_t *ui, lv_obj_t *panel,
                               lv_obj_t *keyboard, smart_home_secret_service_t service)
@@ -540,6 +551,14 @@ static void build_voice_panel(smart_home_lvgl_t *ui, lv_obj_t *panel,
         smart_home_secrets_api_key_status(service, id)), SMART_HOME_UI_COLOR_TEXT_MUTED, 13);
     lv_obj_set_pos(v->status, 0, 222); lv_obj_set_size(v->status, 704, 40);
     lv_label_set_long_mode(v->status, LV_LABEL_LONG_WRAP);
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+    if (service == SMART_HOME_SECRET_TTS) {
+        lv_obj_set_width(v->status, 480);
+        button = voice_button(panel, 500, 222, 204, "停止播报", false);
+        lv_obj_set_height(button, 36);
+        lv_obj_add_event_cb(button, voice_stop_cb, LV_EVENT_CLICKED, v);
+    }
+#endif
     for (int i = 0; i < 3; i++) {
         const char *titles[] = {"保存配置", "清除密钥", "测试已保存配置"};
         button = voice_button(panel, i * 240, 274, 224, titles[i], i == VOICE_SAVE);
@@ -567,13 +586,23 @@ void smart_home_lvgl_build_voice_settings(smart_home_lvgl_t *ui, lv_obj_t *panel
     lv_obj_set_pos(label, 0, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     g_voice_page.keyboard = keyboard;
-    for (int i = 0; i < 2; ++i) {
-        const char *names[] = {"语音输入 ASR", "语音播报 TTS"};
-        g_voice_page.tabs[i] = voice_button(panel, 352 + i * 180, 0, 172, names[i], false);
+    int tabs = 2;
+#ifdef CONFIG_SMART_HOME_KWS
+    tabs = 3;
+#endif
+    for (int i = 0; i < tabs; ++i) {
+        const char *names[] = {"语音输入 ASR", "语音播报 TTS", "语音唤醒 KWS"};
+        g_voice_page.tabs[i] = voice_button(panel, 196 + i * 172, 0, 164, names[i], false);
         lv_obj_set_height(g_voice_page.tabs[i], 40);
         lv_obj_add_event_cb(g_voice_page.tabs[i], voice_tab_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         g_voice_page.panel[i] = voice_container(panel);
         lv_obj_set_pos(g_voice_page.panel[i], 0, 54);
+#ifdef CONFIG_SMART_HOME_KWS
+        if (i == 2) {
+            smart_home_lvgl_build_wake_settings(ui, g_voice_page.panel[i]);
+            continue;
+        }
+#endif
         bool available = false;
 #ifdef CONFIG_SMART_HOME_VOICE_ASR
         if (i == 0) available = true;

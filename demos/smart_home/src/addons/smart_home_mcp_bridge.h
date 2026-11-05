@@ -11,7 +11,7 @@ typedef struct smart_home_mcp_bridge smart_home_mcp_bridge_t;
 
 /* Runtime configuration for the V9 settings dialog.  The bridge is rebuilt
  * with these values; tools from the previous endpoint are unregistered by
- * caddons_mcp_bridge_destroy() before the new bridge is created. */
+ * caddons_mcp_bridge_destroy() after a replacement is successfully created. */
 typedef struct {
     char server_id[64];
     char host[256];
@@ -47,6 +47,9 @@ int smart_home_mcp_bridge_request_discover(smart_home_mcp_bridge_t *bridge);
 int smart_home_mcp_bridge_reconfigure(
     smart_home_mcp_bridge_t *bridge,
     const smart_home_mcp_runtime_config_t *config);
+
+int smart_home_mcp_bridge_get_config(smart_home_mcp_bridge_t *bridge,
+                                      smart_home_mcp_runtime_config_t *config);
 
 /* Stops the bridge, drains queued unregister operations, and frees state.
  * Joins an in-flight discovery first (bounded by the network deadline). */

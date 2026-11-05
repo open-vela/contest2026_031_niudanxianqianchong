@@ -47,6 +47,11 @@ riscv-none-elf-gcc --version
 ./build.sh contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/nsh -j2
 ```
 
+`nsh` 不启用乐鑫工具链，`./build.sh` 会选到 `riscv-none-elf`，可以直接构建。
+启用 `CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN=y` 的配置（`smart_home_kws`、
+`smp_smart_home`）必须改用 `scripts/build_p4x.sh <config> -j8`，因为
+`envsetup.sh` 只把 `riscv-none-elf` 加进 PATH。
+
 当前 P4 HAL 兼容补丁只在板级 `Make.defs` 构建链路中应用，因此本基线不要添加 `--cmake`。构建过程会按需获取 HAL 并应用该补丁。
 
 构建完成后，检查实际生效的配置：

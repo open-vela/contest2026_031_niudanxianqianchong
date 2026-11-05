@@ -1,5 +1,8 @@
 # smart_home 环境模拟设计
 
+> 历史设计文档：保留旧页面方案供追溯，不代表当前实现。当前产品使用 V9 首页、聊天和设置，代码入口见 [code-architecture.md](code-architecture.md)。
+
+
 ## 背景
 
 当前 smart_home demo 已经可以通过 Agent 工具控制虚拟设备，例如开关灯、调整亮度、

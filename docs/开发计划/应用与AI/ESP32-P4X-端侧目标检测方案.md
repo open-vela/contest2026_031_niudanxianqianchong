@@ -1,9 +1,9 @@
 # ESP32-P4X Smart Home 端侧目标检测方案
 
-> 状态：方案阶段。当前 smart_home 没有视觉模块；/dev/video0 已通过真机
-> 连续取帧验收（video_test 300，app_fps=30.02，sequence_gaps=0）；
-> cAGENT 的工具契约已支持逐工具超时与动态启停。本方案只描述设计与验收
-> 判据，不代表功能已实现。
+> 状态：未实施。当前 smart_home 没有视觉推理模块；`/dev/video0` 已通过真机
+> 连续取帧验收（video_test 300 帧，app_fps=30.02，sequence_gaps=0），
+> `src/camera/` 只有取帧、PPA 缩放与落盘，没有检测算子。
+> cAGENT 的工具契约已支持逐工具超时与动态启停。本文描述 D0~D4 的设计与验收判据。
 >
 > 适用对象：ESP32-P4X Function EV Board、SC2336 摄像头、Smart Home。
 >

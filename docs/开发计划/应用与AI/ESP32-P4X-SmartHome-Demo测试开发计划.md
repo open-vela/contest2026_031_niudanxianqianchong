@@ -1,5 +1,9 @@
 # ESP32-P4X SmartHome Demo 测试开发计划
 
+> 状态：主体已实施。P4X 本地设备面板、触摸与 cAGENT 均在主线，
+> `smart_home` 系列配置可以构建上板。以太网阶段未在 `smart_home` 配置中启用
+> （当前联网走板载 C6 Wi-Fi）。本文保留分阶段验收矩阵与代码边界，供新增能力时参照。
+
 ## 1. 目标与范围
 
 本计划将现有 `demos/smart_home` 从 Goldfish / ESP32-S3 的运行环境迁移到

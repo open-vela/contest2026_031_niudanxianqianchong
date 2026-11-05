@@ -1,7 +1,12 @@
 # ESP32-P4X Smart Home KWS 推理优化与 P4 后端接入方案
 
-> 状态：设计阶段。`kws_smoke` 已作为独立 TFLite Micro reference 基准命令接入
-> Smart Home；未完成编译、实板推理或 ES8311 音频接入。
+> 状态：已实施。ESP-NN P4 内核已按 `ccf_audioevent` 架构接入
+> （`third_party/esp-nn/` 80 个源文件 + `third_party/tflm-espnn-adapter/` 三个
+> 内核 + `scripts/link_esp_nn.sh` 软链覆盖），mask 配置为
+> `CONV2D=0xa8000000`、`DEPTHWISE=0x50000000`，覆盖 58.3% MAC。
+> 板端实测 3.68 s → 2.38 s（2.54×），输出与 reference 逐位一致。
+> 覆盖上限受 `IsEspNnConvOutputSelected()` 的 `tid < 32` 限制（末层 tid=33 无法选中）；
+> 平台吞吐仍与 benchmark 有 5~20 倍差距。本文保留 P4 后端选型与验证方法。
 >
 > 适用目标：ESP32-P4 Function EV Board、OpenVela/NuttX、`wake_large` int8
 > 唤醒词模型。

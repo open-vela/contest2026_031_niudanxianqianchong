@@ -7,15 +7,21 @@
 
 ## 适用范围与标准入口
 
-板级配置的标准入口是：
+板级配置的标准入口是 `scripts/build_p4x.sh`（配置名取自
+`board/esp32p4/esp32p4-function-ev-board/configs/`）：
 
 ```bash
-./build.sh vendor/espressif/boards/esp32p4/esp32p4-function-ev-board/configs/nsh -j2
+contest2026_031_niudanxianqianchong/scripts/build_p4x.sh nsh -j2
 ```
 
+脚本按 `CONFIG_ESP32P4_ESPRESSIF_TOOLCHAIN` 选择 `riscv32-esp-elf` 或
+`riscv-none-elf`。直接用 `./build.sh` 时 `envsetup.sh` 只把 `riscv-none-elf`
+加进 PATH，启用乐鑫工具链的配置会找不到编译器；下文 2026-08-19 的复现用当时
+的 `./build.sh vendor/espressif/...` 写法，故障现象与修复结论不受影响。
+
 `vendor/espressif/boards/esp32p4/esp32p4-function-ev-board` 是指向竞赛工程
-`board/esp32p4/esp32p4-function-ev-board` 的软链接。前者用于保持与工作区标准
-板级目录一致；实际 custom board 与 custom chip 源码仍在竞赛工程中。
+`board/esp32p4/esp32p4-function-ev-board` 的软链接（工作区已建立）。实际
+custom board 与 custom chip 源码仍在竞赛工程中。
 
 本板的 HAL 兼容层接入 NuttX Make 构建链路，当前只使用 Make 路径；不要改用
 `--cmake` 作为本问题的绕过手段。

@@ -1,7 +1,8 @@
 # ESP32-P4X SmartHome LVGL 1024×600 横屏 UI 重构方案
 
-> 状态：计划中。本文确定近期产品 UI 回归原生 LVGL 的重构边界和实施顺序，暂不要求
-> QuickApp UI 参与交付。
+> 状态：已实施。原生 LVGL 已是交付路径，QuickApp UI 不参与交付。V9 界面在
+> `src/ui/lvgl/` 下落地，`smart_home` 与 `smart_home_voice` 均以它为默认界面。
+> 本文保留重构边界与实施顺序的约定。
 >
 > 目标平台：ESP32-P4X Function EV Board、EK79007 1024×600 横屏、GT911 触摸。
 >

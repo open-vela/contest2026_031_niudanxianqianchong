@@ -1,9 +1,13 @@
 # ESP32-P4X SmartHome 语音与能力合入实施计划
 
-> 版本：v0.3（2026-11-02）
+> 版本：v0.4（2026-11-03）
 > 主线审查基线：`contest2026 @ 252812c`；本轮 P0 运行基线：`ceb1c48`
 > 执行工作区：`/home/arongw/openvela/worktrees/voice-gates-codex`
-> 总体状态：实施中。P0 通过；P1 两个问题需收敛；KWS 生命周期候选已过宿主测试和 P4 构建，待上板。
+> 总体状态：P0 通过；P1 camera 工具已合主线（`e04efab`、`0f64854`），20 张新帧
+> 与 agent"拍照"仍未验收；P2 VAD 已开；P3 KWS 生命周期修复已合主线
+> （`059c5bc`），板端只跑通单次推理，P95 未取；P4 ESP-NN 已接 P4 内核并配 mask，
+> 覆盖 58.3% MAC，实测 3.68 s → 2.38 s；P5 云端 ASR/TTS 短句通过、长句超时未解决；
+> P6 SMP 音频基础通过，KWS/ESP-NN 组合未验。
 > 范围：本地音频、camera 工具、VAD、KWS、ESP-NN、云端 ASR/TTS、最终 SMP 组合。
 
 关联文档：[本轮验收记录](../../开发日志/ESP32-P4X-语音能力分阶段验收记录_20261102.md)、[问题分析](../../架构设计/ESP32-P4X-SmartHome问题分析.md)、[线程内存方案](../../架构设计/ESP32-P4X-SmartHome卡顿线程内存优化方案.md)、[SMP 音频修复方案](../ESP32-P4X-SMP音频链路排查与修复方案_20261101.md)。
@@ -37,11 +41,11 @@ ESP-NN 确实执行并产生可测收益，云端 ASR/TTS 可交互，双核组�
 | 阶段 | 已有实现和本轮结果 | 尚未完成的验收 | 状态 |
 | --- | --- | --- | --- |
 | P0 音频 | `d3374a3` 音频修复、`ee219f6` voice 缓冲已在主线；本轮 10 秒录音 320000 B，两条回放及固定语音均清楚，无周期咔哒 | 后续改动触及音频/缓存/调度时需回归 | **通过：本次 voice 镜像** |
-| P1 camera | `f06d4ca`、`e04efab` 已在主线；JTAG 找到缓存停用期间的 IRAM 缺口；链接候选已恢复拍照返回和串口响应 | 自测任务退出后复用旧帧；20 张新帧、资源清理、agent“拍照”未通过 | **未通过** |
-| P2 VAD | `f0adbc2`、`ee219f6` 已在主线；宿主四场景通过；历史板测提前结束时间不稳定 | CLI 毫秒参数修正、可回放样本、受控 A/B 3/3、首尾字完整 | **部分验证** |
-| P3 KWS | smoke 配置已在主线；真实 TFLM 宿主复现 resolver 失效；候选 10 次重建/200 次输出一致，ASan 通过，P4 reference 构建通过 | 修复板测、P95、训练前端 golden 对照、常驻与冷启动验收 | **候选待板测** |
-| P4 ESP-NN | 有继承的包及 apps 接线实验；可参考本地 `ccf_audioevent` | P4 源码实际编译、算子命中、逐字节正确性、两态各 3 轮性能 | **实验未验收** |
-| P5 云端 | ASR/TTS 主线已有实现；历史曾取得 IP 后 DNS 失败 | 当前实际服务域名预检、ASR/TTS 各 2/3 成功、失败有界 | **待复测网络** |
+| P1 camera | `f06d4ca`、`e04efab`、`0f64854` 已在主线；camera 工具注册成功（description 压到 139 B，原 262 B 触发 `AGENT_ERROR_LIMIT`）；`SMART_HOME_CAMERA_TOOL` 默认 n，由 defconfig 显式开启 | 自测任务退出后复用旧帧；20 张新帧、资源清理、agent"拍照"未通过 | **工具已合，功能未通过** |
+| P2 VAD | `f0adbc2`、`ee219f6` 已在主线；宿主四场景通过；`record-vad` 子命令可用；`smart_home_voice` 已开 VAD | 受控 A/B 3/3、首尾字完整 | **部分验证** |
+| P3 KWS | `kws_infer.cc` resolver 改静态 + placement new，`059c5bc` 已合主线；板端单次推理 3.68 s 输出正确，模型 `scale=0.17718 zp=-20` 与预期一致 | P95、常驻服务验收（`CONFIG_SMART_HOME_KWS` 未在任何 defconfig 开启） | **板端单次通过，P95 缺失** |
+| P4 ESP-NN | `third_party/esp-nn/` 80 源文件、`tflm-espnn-adapter` 三内核、`link_esp_nn.sh` 软链覆盖；P4 mask 配 `0xa8000000`/`0x50000000`，覆盖 58.3% MAC；实测 2.38 s（2.54×） | 覆盖上限受 `IsEspNn...Selected()` 的 `tid < 32` 限制；平台吞吐仍是基准 5~20 倍差距 | **已生效，未达预期 4×** |
+| P5 云端 | ASR/TTS 主线已有实现；短句"你好"板端听感通过；ASR/TTS 响应头容量、24→16 kHz 重采样已修 | 长句正文接收超时（HTTP 200 但 `AGENT_ERROR_TIMEOUT`）根因未定；DNS 现场不可用 | **部分通过，长句阻塞** |
 | P6 SMP | 既有 `smart_home` 双核音频已获用户听感验收 | 本轮新增 KWS/ESP-NN 与双核音频组合、反复启动和资源检查 | **基础通过，组合待验** |
 
 ### 2.2 本轮重要发现
@@ -63,10 +67,12 @@ JTAG 读到 `mepc=mtval=0x40002d1c`（`riscv_exception`）、指令访问异常�
 
 **KWS：先解决内存生命周期。** TFLM 保存 resolver 引用及注册项指针，原实现却把
 resolver 放在初始化函数栈上。真实模型第一次宿主 Invoke 即触发 ASan
-`stack-use-after-return`。smoke 还存在 arena 先释放、解释器未销毁的问题。
-此前“首次 Invoke 超过 230 秒不返回”不能当作纯算力结论。
-候选持久保存 resolver、明确 arena 所有者、先销毁解释器再释放 arena；
-宿主和目标构建通过，尚未在板上验证修复效果。
+`stack-use-after-return`，表现为首次 Invoke 长时间不返回，曾被误判为算力不足。
+smoke 还存在 arena 先释放、解释器未销毁的问题。
+修复已在 `059c5bc` 合入主线：resolver 改静态对象 + placement new，明确 arena
+所有者，先销毁解释器再释放 arena，并新增 `kws_infer_deinit/ready/backend`
+与 `-EBUSY` 语义。板端单次推理输出与 `scale=0.17718 zp=-20` 契约一致；
+P95 与常驻服务仍无板端数据。
 
 **配置差异。** 最终 `.config` 表明当前 voice/KWS 测试均为单核、默认工具链；
 voice 的 `CONFIG_BOARD_INITTHREAD_STACKSIZE=2048`，既有 SMP `smart_home` 为 4096。

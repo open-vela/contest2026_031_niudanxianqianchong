@@ -17,4 +17,4 @@ flags: enabled,llm_visible
 - `dry` and `fan` do not require temperature.
 - Keep unspecified AC parameters unchanged.
 - Distinguish simulated environment in `get_home_status` from physical sensor readings. Do not claim to modify either through tools.
-- Demo timers only record state. Do not claim a delayed physical action fired unless a real action tool reports it.
+- Timer/alarm tools schedule reminders only, never delayed device control. Confirm creation only after successful durable tool output; unavailable persistence builds remain an in-memory demo.

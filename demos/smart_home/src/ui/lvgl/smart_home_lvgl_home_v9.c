@@ -1300,12 +1300,6 @@ void smart_home_lvgl_build_home_screen_v9(smart_home_lvgl_t *ui)
     memset(&g_v9, 0, sizeof(g_v9));
     g_v9_refresh_forced = 1;
 
-    /* Drop pointers owned by a previous (legacy) home build. */
-    ui->home_env_label = NULL;
-    ui->home_miloco_sub_label = NULL;
-    ui->home_ac_label = NULL;
-    ui->home_status_label = NULL;
-    ui->home_weather_city_label = NULL;
     ui->home_weather_badge = NULL;
     ui->home_weather_temp_label = NULL;
     ui->home_weather_condition_label = NULL;

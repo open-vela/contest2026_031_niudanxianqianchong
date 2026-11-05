@@ -3,7 +3,13 @@
 #include <assert.h>
 #include <time.h>
 
-void *smart_home_bulk_alloc(size_t size) { return malloc(size); }
+static unsigned bulk_allocations;
+static int fail_bulk_alloc;
+void *smart_home_bulk_alloc(size_t size)
+{
+    bulk_allocations++;
+    return fail_bulk_alloc ? NULL : malloc(size);
+}
 void smart_home_bulk_free(void *ptr) { free(ptr); }
 
 static pthread_mutex_t gate_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -174,6 +180,87 @@ int smart_home_mcp_bridge_reconfigure(smart_home_mcp_bridge_t *bridge,
     return AGENT_OK;
 }
 
+static smart_home_mcp_state_t fake_mcp_state;
+static int discover_calls;
+static int fake_tools_busy;
+static int fake_tools_count = 9;
+static int fake_tools_shift;
+static unsigned fake_tools_reads;
+static char fake_controlled_tool[80];
+static int fake_controlled_allowed;
+static int fake_tool_unavailable;
+int smart_home_mcp_bridge_start(smart_home_mcp_bridge_t **out, agent_t *agent,
+                                 pthread_mutex_t *mutex)
+{ (void)agent; (void)mutex; *out = (smart_home_mcp_bridge_t *)out; return AGENT_OK; }
+int smart_home_mcp_bridge_get_config(smart_home_mcp_bridge_t *bridge,
+                                     smart_home_mcp_runtime_config_t *config)
+{ (void)bridge; (void)config; return AGENT_ERROR_NOT_FOUND; }
+int smart_home_mcp_bridge_get_state(smart_home_mcp_bridge_t *bridge,
+                                    smart_home_mcp_state_t *state, int *error)
+{ (void)bridge; if (error) *error = 0; *state = fake_mcp_state; return AGENT_OK; }
+int smart_home_mcp_bridge_request_discover(smart_home_mcp_bridge_t *bridge)
+{ assert(bridge); discover_calls++; fake_mcp_state = SMART_HOME_MCP_STATE_CONNECTING; return AGENT_OK; }
+int smart_home_agent_app_try_enumerate_tools(const smart_home_agent_app_t *app,
+                                             smart_home_tool_visit_fn visitor, void *user)
+{
+    (void)app;
+    fake_tools_reads++;
+    if (fake_tools_busy) return AGENT_ERROR_BUSY;
+    for (int i = 0; i < fake_tools_count; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "tool%d", i + fake_tools_shift);
+        smart_home_tool_info_t tool = {.name = name, .description = "测试工具",
+            .enabled = !(fake_tool_unavailable && i == 0), .access_allowed = 1,
+            .group_id = i == 8 ? SMART_HOME_TOOL_GROUP_MCP : SMART_HOME_TOOL_GROUP_LOCAL};
+        int ret = visitor(&tool, user);
+        if (ret != AGENT_OK) return ret;
+    }
+    return AGENT_OK;
+}
+int smart_home_agent_app_try_set_local_tool_access(smart_home_agent_app_t *app,
+                                                  const char *name, int allowed)
+{
+    (void)app;
+    if (fake_tools_busy) return AGENT_ERROR_BUSY;
+    snprintf(fake_controlled_tool, sizeof(fake_controlled_tool), "%s", name);
+    fake_controlled_allowed = allowed;
+    return AGENT_OK;
+}
+static void wait_mcp(smart_home_lvgl_t *ui)
+{
+    for (int i = 0; i < 3000; i++) {
+        int ready;
+        pthread_mutex_lock(&ui->pending_mutex);
+        ready = g_mcp.ready;
+        pthread_mutex_unlock(&ui->pending_mutex);
+        if (ready) { mcp_poll(ui); return; }
+        const struct timespec pause = {.tv_nsec = 1000000};
+        nanosleep(&pause, NULL);
+    }
+    assert(!"MCP apply timeout");
+}
+
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+static caddons_node_info_t fake_nodes[2];
+static size_t fake_node_count;
+static uint32_t fake_node_revision;
+static uint16_t fake_node_port = 18790;
+size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
+    caddons_node_info_t *nodes, size_t capacity, uint32_t *revision)
+{
+    if (revision) *revision = fake_node_revision;
+    size_t count = gateway ? fake_node_count : 0;
+    if (nodes) { count = count < capacity ? count : capacity; memcpy(nodes, fake_nodes, count * sizeof(*nodes)); }
+    return count;
+}
+uint16_t smart_home_node_gateway_port(const smart_home_node_gateway_t *gateway)
+{ return gateway ? fake_node_port : 0; }
+int smart_home_node_gateway_start_with_port(smart_home_node_gateway_t **out,
+    agent_t *agent, pthread_mutex_t *mutex, uint16_t port)
+{ (void)agent; (void)mutex; *out = (smart_home_node_gateway_t *)out; fake_node_port = port; return AGENT_OK; }
+void smart_home_node_gateway_stop(smart_home_node_gateway_t **gateway) { *gateway = NULL; }
+#endif
+
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 { (void)area; (void)pixels; lv_display_flush_ready(display); }
 
@@ -220,6 +307,151 @@ static void click(lv_obj_t *button, lv_event_cb_t callback, smart_home_lvgl_t *u
 {
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, ui);
     lv_obj_send_event(button, LV_EVENT_CLICKED, NULL);
+}
+
+static void tools_tick(void)
+{
+    lv_tick_inc(V9_TOOLS_STEP_MS + 1u);
+    lv_timer_handler();
+}
+
+static void tools_finish(void)
+{
+    for (int i = 0; i < 8 && (g_settings.tools_requested || g_settings.tools_rendering); ++i)
+        tools_tick();
+    assert(!g_settings.tools_requested && !g_settings.tools_rendering);
+}
+
+static void test_tools_panel(smart_home_lvgl_t *ui, lv_obj_t *screen)
+{
+    config_modal_close();
+    lv_obj_t *panel = lv_obj_create(screen);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, 704, 378);
+    build_tools_panel(ui, panel);
+    lv_obj_t *category = lv_button_create(screen);
+    lv_obj_set_user_data(category, (void *)(intptr_t)V9_CAT_TOOLS);
+    unsigned reads = fake_tools_reads;
+    click(category, category_cb, ui);
+    assert(g_settings.category == V9_CAT_TOOLS);
+    assert(!g_settings.tool_count && fake_tools_reads == reads);
+    assert(g_settings.tools_requested);
+    assert(lv_obj_get_child_count(g_settings.tools_body) == V9_TOOLS_PER_PAGE);
+    fail_bulk_alloc = 1;
+    tools_tick();
+    assert(!g_settings.tool_count && fake_tools_reads == reads);
+    assert(strstr(lv_label_get_text(g_settings.tools_status), "内存不足"));
+    fail_bulk_alloc = 0;
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    tools_tick();
+    assert(g_settings.tool_count == 9 && fake_tools_reads == reads + 1);
+    assert(!g_settings.tool_slots[0].valid); /* Snapshot does not bind all rows. */
+    tools_tick();
+    assert(g_settings.tool_slots[0].valid && !g_settings.tool_slots[1].valid);
+    tools_finish();
+    assert(!strcmp(lv_label_get_text(g_settings.tool_slots[0].name), "tool0"));
+    lv_obj_t *rows[V9_TOOLS_PER_PAGE], *toggles[V9_TOOLS_PER_PAGE];
+    for (size_t i = 0; i < V9_TOOLS_PER_PAGE; ++i) {
+        rows[i] = g_settings.tool_slots[i].row;
+        toggles[i] = g_settings.tool_slots[i].toggle;
+    }
+    lv_obj_update_layout(screen);
+    lv_area_t panel_area, last_card, pager;
+    lv_obj_get_coords(panel, &panel_area);
+    lv_obj_get_coords(rows[V9_TOOLS_PER_PAGE - 1u], &last_card);
+    lv_obj_get_coords(g_settings.tools_next, &pager);
+    assert(last_card.y2 < pager.y1 && pager.y2 <= panel_area.y2);
+    assert(!lv_obj_has_flag(panel, LV_OBJ_FLAG_SCROLLABLE));
+    unsigned allocations = bulk_allocations;
+    const char *name_text = lv_label_get_text(g_settings.tool_slots[0].name);
+    lv_obj_send_event(category, LV_EVENT_CLICKED, NULL);
+    tools_finish();
+    assert(name_text == lv_label_get_text(g_settings.tool_slots[0].name));
+    assert(bulk_allocations == allocations);
+    assert(g_settings.tool_slots[0].row == rows[0]);
+
+    fake_tools_busy = 1;
+    lv_obj_remove_state(toggles[0], LV_STATE_CHECKED);
+    lv_obj_send_event(toggles[0], LV_EVENT_VALUE_CHANGED, NULL);
+    assert(lv_obj_has_state(toggles[0], LV_STATE_CHECKED));
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    tools_finish();
+    assert(g_settings.tool_count == 9 && g_settings.tool_slots[0].valid);
+    fake_tools_busy = 0;
+    lv_obj_remove_state(toggles[0], LV_STATE_CHECKED);
+    lv_obj_send_event(toggles[0], LV_EVENT_VALUE_CHANGED, NULL);
+    assert(!strcmp(fake_controlled_tool, "tool0") && !fake_controlled_allowed);
+    assert(!g_settings.tools[0].allowed);
+
+    for (int i = 0; i < 2; ++i) {
+        lv_obj_send_event(g_settings.tools_next, LV_EVENT_CLICKED, NULL);
+        tools_finish();
+    }
+    assert(g_settings.tools_page == 2);
+    assert(!strcmp(lv_label_get_text(g_settings.tool_slots[0].name), "tool6"));
+    lv_obj_t *remote = g_settings.tool_slots[2].toggle;
+    assert(lv_obj_has_state(remote, LV_STATE_DISABLED));
+    char controlled[80];
+    snprintf(controlled, sizeof(controlled), "%s", fake_controlled_tool);
+    lv_obj_send_event(remote, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(!strcmp(controlled, fake_controlled_tool));
+    for (size_t i = 0; i < V9_TOOLS_PER_PAGE; ++i) {
+        assert(g_settings.tool_slots[i].row == rows[i]);
+        assert(g_settings.tool_slots[i].toggle == toggles[i]);
+    }
+    lv_obj_send_event(rows[2], LV_EVENT_CLICKED, NULL);
+    assert(g_settings.config_modal);
+    config_modal_close();
+
+    /* A changed/reordered catalog must not redirect a visible old switch. */
+    fake_tools_count = 2;
+    fake_tools_shift = 20;
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    tools_tick();
+    assert(!g_settings.tools_page && g_settings.tools_rendering);
+    assert(!g_settings.tool_slots[0].valid);
+    lv_obj_send_event(toggles[0], LV_EVENT_VALUE_CHANGED, NULL);
+    assert(!strcmp(controlled, fake_controlled_tool));
+    tools_finish();
+    assert(!g_settings.tool_slots[2].valid);
+    lv_obj_remove_state(toggles[0], LV_STATE_CHECKED);
+    lv_obj_send_event(toggles[0], LV_EVENT_VALUE_CHANGED, NULL);
+    assert(!strcmp(fake_controlled_tool, "tool20"));
+
+    /* Hiding the category cancels rendering work; re-entry resumes safely. */
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    reads = fake_tools_reads;
+    panel_show(V9_CAT_MODEL);
+    tools_tick();
+    assert(fake_tools_reads == reads);
+    lv_obj_send_event(category, LV_EVENT_CLICKED, NULL);
+    tools_finish();
+    lv_obj_t *other_screen = lv_obj_create(NULL);
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    reads = fake_tools_reads;
+    lv_screen_load(other_screen);
+    tools_tick();
+    assert(fake_tools_reads == reads);
+    lv_screen_load(screen);
+    v9_net_timer_cb(ui->v9_network_timer);
+    tools_finish();
+    assert(fake_tools_reads == reads + 1);
+    lv_obj_delete(other_screen);
+    fake_tool_unavailable = 1;
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    tools_finish();
+    assert(lv_obj_has_state(toggles[0], LV_STATE_DISABLED));
+    fake_tool_unavailable = 0;
+    fake_tools_count = 0;
+    lv_obj_send_event(g_settings.tools_refresh, LV_EVENT_CLICKED, NULL);
+    tools_finish();
+    assert(!g_settings.tool_count && !g_settings.tool_slots[0].valid);
+    assert(lv_obj_has_state(g_settings.tools_next, LV_STATE_DISABLED));
+    assert(lv_obj_has_state(g_settings.tools_prev, LV_STATE_DISABLED));
+    fake_tools_count = 9;
+    fake_tools_shift = 0;
+    puts("PASS: deferred tool entry, one-card timer turns, cached objects, pagination, policy rollback, reorder and empty catalog");
+    lv_obj_delete(category);
 }
 
 static void *release_pending(void *unused)
@@ -344,12 +576,14 @@ int main(void)
     lv_textarea_set_text(g_settings.mcp_auth, "Bearer test-token");
     lv_obj_t *apply = lv_button_create(screen);
     click(apply, mcp_apply_cb, ui);
+    wait_mcp(ui);
     assert(mcp_calls == 1 && applied_mcp.use_tls && applied_mcp.port == 443);
     lv_refr_now(NULL);
     snapshot(pixels, "SMART_HOME_MCP_SHOT");
     lv_dropdown_set_selected(g_settings.mcp_protocol, 1);
     lv_textarea_set_text(g_settings.mcp_port, "80");
     lv_obj_send_event(apply, LV_EVENT_CLICKED, NULL);
+    wait_mcp(ui);
     assert(mcp_calls == 2 && !applied_mcp.use_tls && applied_mcp.port == 80);
     const char *bad_ports[] = {"65537", "0", "abc", "443x", "9999999999999999999999"};
     for (size_t i = 0; i < sizeof(bad_ports) / sizeof(bad_ports[0]); i++) {
@@ -357,6 +591,14 @@ int main(void)
         lv_obj_send_event(apply, LV_EVENT_CLICKED, NULL);
         assert(mcp_calls == 2);
     }
+    lv_obj_send_event(g_settings.mcp_discover, LV_EVENT_CLICKED, NULL);
+    assert(discover_calls == 1);
+    services_refresh(ui);
+    assert(lv_obj_has_state(g_settings.mcp_discover, LV_STATE_DISABLED));
+    fake_mcp_state = SMART_HOME_MCP_STATE_READY;
+    services_refresh(ui);
+    assert(!strcmp(lv_label_get_text(g_settings.mcp_service_status), "工具已就绪"));
+    assert(!lv_obj_has_state(g_settings.mcp_discover, LV_STATE_DISABLED));
     puts("PASS: explicit MCP TLS, HTTP, port validation and masked credentials");
 
     /* 弹窗遮罩运行期才建，永远排在构建期就存在的键盘之后。输入框聚焦时必须
@@ -409,6 +651,8 @@ int main(void)
         }
     }
     puts("PASS: keyboard raised above the settings modal on focus");
+
+    test_tools_panel(ui, screen);
 
     /* A queued gateway write is not success; failure stays visible. */
     {
@@ -513,6 +757,39 @@ int main(void)
     assert(!strcmp(lv_label_get_text(g_settings.model_status), "配置保存或应用失败"));
     puts("PASS: async model apply, UI heartbeat, duplicate rejection and failure feedback");
 
+#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+    node_config_open(ui);
+    lv_textarea_set_text(g_settings.node_port, "19000x");
+    lv_obj_t *toggle = lv_obj_get_child(lv_obj_get_child(g_settings.config_modal, 0), -1);
+    lv_obj_send_event(toggle, LV_EVENT_CLICKED, NULL);
+    assert(!app.node_gateway);
+    lv_textarea_set_text(g_settings.node_port, "19000");
+    lv_obj_send_event(toggle, LV_EVENT_CLICKED, NULL);
+    assert(app.node_gateway && fake_node_port == 19000);
+    assert(!strcmp(lv_label_get_text(g_settings.node_service_status), "监听中"));
+    config_modal_close();
+    node_config_open(ui);
+    assert(!strcmp(lv_textarea_get_text(g_settings.node_port), "19000"));
+    fake_node_count = 1;
+    strcpy(fake_nodes[0].node_id, "node-test");
+    strcpy(fake_nodes[0].display_name, "测试节点");
+    fake_nodes[0].online = true;
+    fake_nodes[0].command_count = 1;
+    strcpy(fake_nodes[0].commands[0], "get_status");
+    fake_node_revision++;
+    nodes_refresh(ui);
+    assert(lv_obj_get_child_count(g_settings.nodes_body) == 2);
+    assert(strstr(lv_label_get_text(lv_obj_get_child(g_settings.nodes_body, 0)), "在线"));
+    assert(strstr(lv_label_get_text(lv_obj_get_child(g_settings.nodes_body, 1)), "get_status"));
+    toggle = lv_obj_get_child(lv_obj_get_child(g_settings.config_modal, 0), -1);
+    lv_obj_send_event(toggle, LV_EVENT_CLICKED, NULL);
+    assert(!app.node_gateway);
+    assert(!strcmp(lv_label_get_text(g_settings.node_service_status), "未开启"));
+    assert(strstr(lv_label_get_text(lv_obj_get_child(g_settings.nodes_body, 0)), "未开启"));
+    config_modal_close();
+    puts("PASS: Node live metadata, start/stop state, strict port validation and actual port refill");
+#endif
+
     /* Teardown must join both pending services before ui/mutex destruction. */
     memset(gates, 0, sizeof(gates));
     v9_net_connect(ui);
@@ -520,7 +797,10 @@ int main(void)
     wait_entered(0);
     wait_entered(1);
     assert(pthread_create(&releaser, NULL, release_pending, NULL) == 0);
+    tools_refresh(ui); /* Teardown also cancels an unconsumed tool request. */
+    assert(g_settings.tools_timer && g_settings.tools_requested);
     smart_home_lvgl_settings_v9_deinit(ui);
+    assert(!g_settings.tools_timer && !g_settings.tools && !g_settings.tools_scratch);
     pthread_join(releaser, NULL);
     assert(gates[0].done && gates[1].done);
     assert(!g_net.active && !g_net.owner && !g_model.active && !g_model.owner);

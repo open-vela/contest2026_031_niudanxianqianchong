@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "team_id": "contest2026_031_niudanxianqianchong",
+  "github_login": "ARongvv",
+  "generator": "collect_batch@1.0",
+  "sessions": [
+    {
+      "session_id": "01a1618f-a10e-79ea-811f-e4cd5433c845",
+      "tool": "codebuddy",
+      "started_at": "2026-10-22T03:02:57.077000Z",
+      "last_event_at": "2026-10-22T03:12:13.509000Z",
+      "event_count": 74,
+      "raw_event_count": 74,
+      "file_path": "logs/ARongvv/2026-10-22/codebuddy__01a1618f-a10e-79ea-811f-e4cd5433c845.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "01a17600-3820-7155-8855-8fe9424df997",
+      "tool": "codebuddy",
+      "started_at": "2026-10-27T15:43:07.200000Z",
+      "last_event_at": "2026-10-28T01:31:09.535000Z",
+      "event_count": 94,
+      "raw_event_count": 94,
+      "file_path": "logs/ARongvv/2026-10-27/codebuddy__01a17600-3820-7155-8855-8fe9424df997.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "6c7da087-2f4e-431e-9f51-5d91c171a412",
+      "tool": "codebuddy",
+      "started_at": "2026-10-28T14:48:35.179000Z",
+      "last_event_at": "2026-10-30T02:41:42.961000Z",
+      "event_count": 1175,
+      "raw_event_count": 1175,
+      "file_path": "logs/ARongvv/2026-10-28/codebuddy__6c7da087-2f4e-431e-9f51-5d91c171a412.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "01a187ed-dfed-73cc-b457-ac177199fa85",
+      "tool": "codebuddy",
+      "started_at": "2026-11-01T10:57:04.829000Z",
+      "last_event_at": "2026-11-01T11:06:49.414000Z",
+      "event_count": 158,
+      "raw_event_count": 158,
+      "file_path": "logs/ARongvv/2026-11-01/codebuddy__01a187ed-dfed-73cc-b457-ac177199fa85.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "91ff1cb5-2e4e-48f7-930e-bb8e54ece332",
+      "tool": "codebuddy",
+      "started_at": "2026-11-01T11:12:38.374000Z",
+      "last_event_at": "2026-11-01T11:19:47.928000Z",
+      "event_count": 95,
+      "raw_event_count": 95,
+      "file_path": "logs/ARongvv/2026-11-01/codebuddy__91ff1cb5-2e4e-48f7-930e-bb8e54ece332.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-v4.1-flash"
+    },
+    {
+      "session_id": "01a1a65b-8745-7626-97e0-f8e646656dee",
+      "tool": "codebuddy",
+      "started_at": "2026-11-04T11:39:55.589000Z",
+      "last_event_at": "2026-11-04T11:40:17.808000Z",
+      "event_count": 9,
+      "raw_event_count": 9,
+      "file_path": "logs/ARongvv/2026-11-04/codebuddy__01a1a65b-8745-7626-97e0-f8e646656dee.jsonl",
+      "collection_mode": "cli",
+      "health": "ok",
+      "model": "deepseek-flash"
+    }
+  ],
+  "note": "codebuddy is not yet in the official tool enum; kept separate until organizers confirm",
+  "updated_at": "2026-11-04T22:39:30.026997Z"
+}

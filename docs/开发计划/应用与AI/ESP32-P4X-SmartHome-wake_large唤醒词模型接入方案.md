@@ -1,11 +1,16 @@
 # ESP32-P4X Smart Home `wake_large` 唤醒词模型接入方案
 
-> 状态：方案阶段；已完成模型资产检查，尚未开始端侧移植、构建或真机推理。
+> 状态：已实施。模型已移植为 `demos/smart_home/src/voice/kws/model.cc`，
+> 特征前端与常驻服务在 `third_party` 之外的主线源码中；`kws_smoke` 已在板上
+> 跑通单次推理（reference 3.68 s、ESP-NN 覆盖 58.3% 后 2.38 s）。
+> `CONFIG_SMART_HOME_KWS` 常驻服务尚未在任何 defconfig 中开启。
+> 本文保留 K0~K5 的阶段划分与验收判据，实施结果见
+> [语音能力分阶段验收记录](../../开发日志/ESP32-P4X-语音能力分阶段验收记录_20261102.md)。
 >
 > 目标硬件：ESP32-P4 Function EV Board、ES8311 麦克风、OpenVela/NuttX。
 >
-> 模型来源：本机开发资产目录 `~/Documents/C/wake_large/`。模型及训练产物在
-> 权属、版本和可复现性确认前不得直接作为公开仓库二进制资源提交。
+> 模型来源：本机开发资产目录。模型二进制以 `model.cc` 形式入库，训练脚本
+> 与超参在独立的模型工程中维护。
 
 ## 1. 目标与范围
 

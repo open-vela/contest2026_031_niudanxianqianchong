@@ -1,25 +1,20 @@
 ---
 name: smart_home_timer
-description: Timer and reminder behavior for the smart home demo.
+description: Persistent countdown reminders and one-shot alarms.
 priority: 70
 flags: enabled,llm_visible,summary_only
 ---
 
-# Smart Home Timer Policy
+# Reminder policy
 
-Use timer tools when the user asks for reminders, alarms, or delayed tasks.
+When persistent reminders are enabled:
+- `list_timers` returns tasks, states, clock readiness and the current Beijing time (UTC+08:00). Query it before resolving a calendar alarm.
+- `set_timer` takes positive `delay_seconds`, `message`, optional `name`.
+- `set_alarm` takes `at_local` in `YYYY-MM-DDTHH:MM:SS` Beijing time, `message`, optional `name`. Use an explicit date; ask when ambiguous.
+- `cancel_timer` removes either type by id.
 
-Available timer tools:
+Only claim creation/cancellation after the tool succeeds. A valid board clock is required. Maximum eight outstanding tasks; countdown maximum 366 days. Reminders persist across restart and display a popup; local tone requires the ring build option and working audio hardware. A restored already-fired reminder is silent. Tasks overdue by more than five minutes at startup are shown as missed, silently.
 
-- `set_timer`: create a demo timer.
-- `list_timers`: list active demo timers.
-- `cancel_timer`: cancel a timer by id.
+The application must be running to notify. No power-off wake, recurring schedule, or scheduled device control. For "turn off the light in ten minutes", explain that this feature can remind the user but cannot execute the control later; do not silently substitute a reminder.
 
-Important demo boundary:
-
-- Timers are stored in demo memory.
-- Timers are lost when the program restarts.
-- Expired timers can be observed by `list_timers`.
-- The current demo does not automatically fire notifications or execute device actions.
-
-If the user asks "turn off the light after 10 minutes", create a timer reminder in this demo. Do not claim the light will turn off automatically.
+If `set_alarm` is unavailable, the build still uses the legacy in-memory timer demo: no persistence or automatic notification. Describe only the tools actually registered in the current build.

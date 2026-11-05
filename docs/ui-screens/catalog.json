@@ -1,0 +1,237 @@
+[
+  {
+    "file": "03-devices.png",
+    "title": "首页 · 雨天",
+    "purpose": "右上角保留128px天气插画；设备卡片继续沿用V9布局。"
+  },
+  {
+    "file": "03-devices-sunny.png",
+    "title": "首页 · 晴天",
+    "purpose": "右上角保留128px天气插画；设备卡片继续沿用V9布局。"
+  },
+  {
+    "file": "03-devices-cloudy.png",
+    "title": "首页 · 多云",
+    "purpose": "右上角保留128px天气插画；设备卡片继续沿用V9布局。"
+  },
+  {
+    "file": "03-devices-snow.png",
+    "title": "首页 · 雪天",
+    "purpose": "右上角保留128px天气插画；设备卡片继续沿用V9布局。"
+  },
+  {
+    "file": "11-chat.png",
+    "title": "聊天 · 调用完成",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "24-chat-busy.png",
+    "title": "聊天 · 调用中",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "24-chat-failed.png",
+    "title": "聊天 · 调用失败",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "12-listening.png",
+    "title": "聊天 · 语音输入",
+    "purpose": "语音输入时顶部麦克风状态联动。"
+  },
+  {
+    "file": "09-settings.png",
+    "title": "设置 · 显示与声音",
+    "purpose": "屏幕亮度、播报音量、空闲屏保与像素动效的设计方案。"
+  },
+  {
+    "file": "10-network.png",
+    "title": "设置 · 网络连接",
+    "purpose": "Wi-Fi 连接与网络详情方案；网络名称为示例，尚未接入扫描服务。"
+  },
+  {
+    "file": "13-model.png",
+    "title": "设置 · 模型服务",
+    "purpose": "服务和模型标识同排；API密钥独占一行，手工密钥按后端分别保留。"
+  },
+  {
+    "file": "14-model-custom.png",
+    "title": "设置 · 模型服务 · 自定义",
+    "purpose": "服务和模型标识同排；API密钥独占一行，手工密钥按后端分别保留。"
+  },
+  {
+    "file": "23-model-menu.png",
+    "title": "设置 · 模型服务 · 选择后端",
+    "purpose": "服务和模型标识同排；API密钥独占一行，手工密钥按后端分别保留。"
+  },
+  {
+    "file": "15-tools.png",
+    "title": "设置 · 工具权限",
+    "purpose": "本地权限切换为预览状态；外部工具仅显示服务可用性。"
+  },
+  {
+    "file": "17-services.png",
+    "title": "设置 · 设备与服务",
+    "purpose": "三行服务入口分别直达各自的连接与状态弹窗；Node 为本机监听网关。"
+  },
+  {
+    "file": "18-health.png",
+    "title": "设置 · 系统健康",
+    "purpose": "动态状态与最近错误的展示方案。支持手动刷新；所有读数为设计示例。"
+  },
+  {
+    "file": "19-health-warning.png",
+    "title": "设置 · 系统健康 · 网络异常",
+    "purpose": "动态状态与最近错误的展示方案。支持手动刷新；所有读数为设计示例。"
+  },
+  {
+    "file": "11-chat-sunny.png",
+    "title": "聊天 · 调用完成 · 晴天",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "09-settings-sunny.png",
+    "title": "设置 · 显示与声音 · 晴天",
+    "purpose": "统一明亮背景，天气变化只影响天气数据。"
+  },
+  {
+    "file": "11-chat-cloudy.png",
+    "title": "聊天 · 调用完成 · 多云",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "09-settings-cloudy.png",
+    "title": "设置 · 显示与声音 · 多云",
+    "purpose": "统一明亮背景，天气变化只影响天气数据。"
+  },
+  {
+    "file": "11-chat-snow.png",
+    "title": "聊天 · 调用完成 · 雪天",
+    "purpose": "用户头像；工具调用行位于助手回复上方，消息卡片不打开设备控制。"
+  },
+  {
+    "file": "09-settings-snow.png",
+    "title": "设置 · 显示与声音 · 雪天",
+    "purpose": "统一明亮背景，天气变化只影响天气数据。"
+  },
+  {
+    "file": "04-light.png",
+    "title": "吊灯 · 控制弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "04-ac.png",
+    "title": "立式空调 · 控制弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "05-washer.png",
+    "title": "洗衣机 · 控制弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "06-robot.png",
+    "title": "扫地机器人 · 控制弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "04-fan.png",
+    "title": "落地风扇 · 控制弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "08-camera-off.png",
+    "title": "摄像头 · 预览关闭弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "07-camera.png",
+    "title": "摄像头 · 采集预览弹窗",
+    "purpose": "覆盖在当前页面上；关闭后保留原页面、天气、筛选与滚动位置。"
+  },
+  {
+    "file": "30-mcp-config.png",
+    "title": "连接 MCP 服务",
+    "purpose": "单服务 HTTP/HTTPS 配置与可编辑凭据。"
+  },
+  {
+    "file": "31-mcp-ready.png",
+    "title": "MCP 工具已就绪",
+    "purpose": "初始化与工具目录发现成功；不表示已调用工具。"
+  },
+  {
+    "file": "32-mcp-failed.png",
+    "title": "MCP 连接未完成",
+    "purpose": "鉴权或连接失败状态稿。"
+  },
+  {
+    "file": "33-mi-config.png",
+    "title": "连接米家网关",
+    "purpose": "通过 Miloco 家庭服务器接入米家。"
+  },
+  {
+    "file": "34-mi-qr.png",
+    "title": "绑定米家账号",
+    "purpose": "演示二维码不连接真实网关或账号。"
+  },
+  {
+    "file": "35-mi-ready.png",
+    "title": "米家已连接",
+    "purpose": "网关在线、账号授权与设备同步的成功状态。"
+  },
+  {
+    "file": "36-node-off.png",
+    "title": "局域网 Node 网关",
+    "purpose": "本机监听网关；节点主动连接，不填写远程 Node 服务器。"
+  },
+  {
+    "file": "37-node-ready.png",
+    "title": "局域网 Node 网关",
+    "purpose": "本机监听网关；节点主动连接，不填写远程 Node 服务器。"
+  },
+  {
+    "file": "25-room-add.png",
+    "title": "添加房间",
+    "purpose": "新增房间；原有房间可从管理入口删除。"
+  },
+  {
+    "file": "26-room-manage.png",
+    "title": "管理房间",
+    "purpose": "删除房间前，需要先迁移其中设备；不会删除设备。"
+  },
+  {
+    "file": "27-room-delete.png",
+    "title": "删除房间",
+    "purpose": "删除房间时先将设备移动到保留房间；不删除设备。"
+  },
+  {
+    "file": "40-model-connection.png",
+    "title": "自定义模型 · 连接设置",
+    "purpose": "自定义端点配置；密钥仍在模型服务主表单独占一行。"
+  },
+  {
+    "file": "28-room-assign.png",
+    "title": "设备 · 分配房间",
+    "purpose": "在当前设备弹窗内选择房间；不切换设备页面。"
+  },
+  {
+    "file": "01-screensaver-sail-sunny.png",
+    "title": "天气屏保 · 晴天",
+    "purpose": "真实 4×4 像素网格、64 色共享色板的帆船壁纸。屏保仅显示日期、时间、温度，白天采用深色字。轻触返回首页。"
+  },
+  {
+    "file": "01-screensaver-sail-cloudy.png",
+    "title": "天气屏保 · 多云",
+    "purpose": "真实 4×4 像素网格、64 色共享色板的帆船壁纸。屏保仅显示日期、时间、温度，白天采用深色字。轻触返回首页。"
+  },
+  {
+    "file": "01-screensaver-sail-rain.png",
+    "title": "天气屏保 · 雨天",
+    "purpose": "真实 4×4 像素网格、64 色共享色板的帆船壁纸。屏保仅显示日期、时间、温度，白天采用深色字。轻触返回首页。"
+  },
+  {
+    "file": "01-screensaver-sail-night.png",
+    "title": "天气屏保 · 夜晚",
+    "purpose": "真实 4×4 像素网格、64 色共享色板的帆船壁纸。屏保仅显示日期、时间、温度，白天采用深色字。轻触返回首页。"
+  }
+]
