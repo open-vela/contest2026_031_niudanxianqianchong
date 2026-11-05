@@ -1,5 +1,8 @@
 # 智能家居 LVGL UI 开发规范
 
+> 历史设计文档：保留旧页面方案供追溯，不代表当前实现。当前产品使用 V9 首页、聊天和设置，代码入口见 [code-architecture.md](code-architecture.md)。
+
+
 > 目标平台：openvela QEMU goldfish-arm64 模拟器（466×466 圆形屏）
 > 图形框架：LVGL 8.x + UIKit 字体管理 + FreeType (MiSans CJK)
 > 配置宏：`CONFIG_SMART_HOME_DEMO_UI_LVGL`

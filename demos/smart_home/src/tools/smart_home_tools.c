@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef CONFIG_SMART_HOME_REMINDERS
+#include "../reminder/smart_home_reminder_tools.h"
+#endif
 
 #ifdef CONFIG_SMART_HOME_AHT30_TOOL
 #include <errno.h>
@@ -77,6 +80,7 @@
     "\"id\":{\"type\":\"integer\",\"description\":\"Timer id\"}},"        \
     "\"required\":[\"id\"],\"additionalProperties\":false}"
 
+#ifndef CONFIG_SMART_HOME_REMINDERS
 typedef struct {
     int active;
     int id;
@@ -86,6 +90,7 @@ typedef struct {
     char name[32];
     char message[128];
 } smart_home_timer_t;
+#endif
 
 typedef struct {
     const char *condition;
@@ -94,8 +99,10 @@ typedef struct {
     const char *wind;
 } smart_home_weather_t;
 
+#ifndef CONFIG_SMART_HOME_REMINDERS
 static smart_home_timer_t g_timers[SMART_HOME_MAX_TIMERS];
 static int g_next_timer_id = 1;
+#endif
 
 static void json_escape_string(const char *in, char *out, size_t out_size)
 {
@@ -206,6 +213,7 @@ static smart_home_weather_t weather_for_location(const char *location)
     return weather;
 }
 
+#ifndef CONFIG_SMART_HOME_REMINDERS
 static int timer_find_slot(void)
 {
     int i;
@@ -231,6 +239,8 @@ static int timer_find_by_id(int id)
 
     return -1;
 }
+
+#endif
 
 static agent_error_t status_tool(void *user_data,
                                    const agent_tool_context_t *context,
@@ -548,6 +558,7 @@ static agent_error_t run_scene_tool(void *user_data,
     return smart_home_tool_reply(sink, output, ret);
 }
 
+#ifndef CONFIG_SMART_HOME_REMINDERS
 static agent_error_t set_timer_tool(void *user_data,
                                    const agent_tool_context_t *context,
                                    const agent_text_sink_t *sink)
@@ -711,6 +722,8 @@ static agent_error_t cancel_timer_tool(void *user_data,
     return smart_home_tool_reply(sink, output, ret);
 }
 
+#endif
+
 int smart_home_tool_register_local(agent_t *agent,
                                const char *name,
                                const char *description,
@@ -822,6 +835,9 @@ int smart_home_tools_register(agent_t *agent,
         return ret;
     }
 
+#ifdef CONFIG_SMART_HOME_REMINDERS
+    return smart_home_reminder_tools_register(agent);
+#else
     ret = smart_home_tool_register_local(agent,
                               "set_timer",
                               "Create a demo timer or reminder.",
@@ -854,4 +870,5 @@ int smart_home_tools_register(agent_t *agent,
                                cancel_timer_tool,
                                device_service,
                                AGENT_TOOL_SIDE_EFFECT);
+#endif
 }

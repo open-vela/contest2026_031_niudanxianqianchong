@@ -21,82 +21,37 @@ static int tab_for_screen(const smart_home_lvgl_t *ui, const lv_obj_t *screen)
 {
     if (!ui || !screen) return SMART_HOME_TAB_HOME;
     if (screen == ui->screen_chat) return SMART_HOME_TAB_CHAT;
-    if (screen == ui->screen_settings || screen == ui->screen_settings_v9 ||
-        screen == ui->screen_more ||
-        screen == ui->screen_network
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-        || screen == ui->screen_miloco
-#endif
-    ) {
-        return SMART_HOME_TAB_SETTINGS;
-    }
-    /* Home, legacy device and legacy security screens all belong to the
-     * first product tab during the migration. */
+    if (screen == ui->screen_settings_v9) return SMART_HOME_TAB_SETTINGS;
     return SMART_HOME_TAB_HOME;
 }
 
 void smart_home_lvgl_load_tab(smart_home_lvgl_t *ui, int tab)
 {
     lv_obj_t *screen = NULL;
-    int previous_tab;
 
     if (!ui || tab < 0 || tab >= SMART_HOME_TAB_COUNT) {
         return;
     }
-    /* 兼容旧入口：设备已并入首页，不再打开旧版独立设备屏。 */
-    if (tab == SMART_HOME_TAB_DEVICES) tab = SMART_HOME_TAB_HOME;
     switch (tab) {
     case SMART_HOME_TAB_HOME:     screen = ui->screen_home; break;
     case SMART_HOME_TAB_CHAT:     screen = ui->screen_chat; break;
     case SMART_HOME_TAB_SETTINGS:
-        screen = ui->screen_settings_v9 ? ui->screen_settings_v9 :
-                                          ui->screen_settings;
+        screen = ui->screen_settings_v9;
         break;
-    case SMART_HOME_TAB_DEVICES:  screen = ui->screen_panel; break;
-    case SMART_HOME_TAB_SECURITY:
-#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-        smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_HOME);
-        smart_home_v9_device_view_t camera;
-        smart_home_state_t state;
-        if (ui->app && !smart_home_device_service_copy_state(&ui->app->device_service, &state) &&
-            !smart_home_v9_board_camera_view(&state, &camera))
-            smart_home_lvgl_camera_dialog_open(ui, &camera);
-        return;
-#else
-        screen = ui->screen_security; break;
-#endif
-    case SMART_HOME_TAB_MORE:     screen = ui->screen_more; break;
     default: break;
     }
     if (!screen) return;
 
-    /* Legacy camera page: stop acquisition before leaving it. */
-    if (ui->active_tab == SMART_HOME_TAB_SECURITY &&
-        tab != SMART_HOME_TAB_SECURITY) {
-        smart_home_lvgl_security_camera_stop(ui);
-    }
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     /* Device polling follows the pages that show device cards. */
     smart_home_lvgl_miloco_poll_set_enabled(
-        ui, tab == SMART_HOME_TAB_HOME || tab == SMART_HOME_TAB_DEVICES);
+        ui, tab == SMART_HOME_TAB_HOME);
 #endif
     if (tab != SMART_HOME_TAB_HOME) smart_home_lvgl_camera_dialog_close();
-    previous_tab = ui->active_tab;
     ui->active_tab = tab;
     if (tab == SMART_HOME_TAB_HOME) {
         smart_home_lvgl_refresh_home(ui);
     }
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
-    if (tab == SMART_HOME_TAB_DEVICES && previous_tab != tab &&
-        ui->app && ui->app->miloco) {
-        uint32_t revision = 0;
-
-        (void)smart_home_miloco_list(ui->app->miloco, NULL, 0, &revision);
-        if (revision != ui->miloco_revision) {
-            smart_home_lvgl_refresh_cards(ui);
-        }
-    }
-#endif
 
     if (lv_scr_act() == screen) {
         return;
@@ -119,9 +74,6 @@ static void nav_btn_click(lv_event_t *event)
 
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !ui) {
         return;
-    }
-    if (tab == SMART_HOME_TAB_DEVICES && ui->panel_title) {
-        lv_label_set_text(ui->panel_title, "我的设备");
     }
     smart_home_lvgl_load_tab(ui, tab);
 }

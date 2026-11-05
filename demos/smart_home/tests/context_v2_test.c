@@ -85,7 +85,7 @@ int main(int argc, char **argv)
         return 0;
     }
     assert(!smart_home_skills_register(agent, &store));
-    assert(store.count == 7);
+    assert(store.count == 8);
     assert(!smart_home_tools_register(agent, &service));
     assert(!agent_tool_enumerate(agent, visit, NULL) && tools == 9);
     assert(!agent_set_policy_callback(agent, allow, NULL));

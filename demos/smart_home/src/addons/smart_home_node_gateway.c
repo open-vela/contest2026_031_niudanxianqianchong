@@ -44,6 +44,7 @@ struct smart_home_node_gateway {
     bool worker_started;
     bool stopping;
     uint32_t presentation_revision;
+    uint16_t listen_port;
 };
 
 static int node_stack_alloc(size_t stack_size, caddons_thread_stack_t *stack,
@@ -461,13 +462,14 @@ int smart_home_node_gateway_start_with_port(
         goto fail;
     }
 
+    gateway->listen_port = listen_port;
     *gateway_out = gateway;
     printf("[smart_home_node] gateway listening on %s:%u\n",
            CONFIG_SMART_HOME_NODE_GATEWAY_BIND_HOST,
-           (unsigned int)CONFIG_SMART_HOME_NODE_GATEWAY_PORT);
+           (unsigned int)listen_port);
     syslog(LOG_INFO, "smart_home: Node gateway listening on %s:%u\n",
            CONFIG_SMART_HOME_NODE_GATEWAY_BIND_HOST,
-           (unsigned int)CONFIG_SMART_HOME_NODE_GATEWAY_PORT);
+           (unsigned int)listen_port);
     return AGENT_OK;
 
 fail:
@@ -484,6 +486,11 @@ void smart_home_node_gateway_stop(smart_home_node_gateway_t **gateway_ptr)
 
     destroy_gateway(*gateway_ptr);
     *gateway_ptr = NULL;
+}
+
+uint16_t smart_home_node_gateway_port(const smart_home_node_gateway_t *gateway)
+{
+    return gateway ? gateway->listen_port : 0;
 }
 
 size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,

@@ -13,6 +13,10 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
   CSRCS     += src/agent/smart_home_agent.c
   CSRCS     += src/agent/smart_home_agent_backend.c
   CSRCS     += src/agent/smart_home_session.c
+  ifneq ($(CONFIG_SMART_HOME_USER_MEMORY),)
+    CSRCS   += src/memory/smart_home_user_memory.c
+    CSRCS   += src/tools/smart_home_user_memory_tools.c
+  endif
   ifneq ($(CONFIG_FEATURE_SYSTEM_SMARTHOME),)
     CSRCS   += src/quickapp/smart_home_quickapp_provider.c
     CSRCS   += src/quickapp/smart_home_quickapp_ipc_server.c
@@ -67,11 +71,18 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += third_party/qrcodegen/qrcodegen.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_miloco_bind.c
   endif
-  ifneq ($(CONFIG_SMART_HOME_VOICE_TTS),)
+  ifneq ($(CONFIG_SMART_HOME_REMINDERS),)
+    CSRCS   += src/reminder/smart_home_reminder.c
+    CSRCS   += src/reminder/smart_home_reminder_tools.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_reminder.c
+  endif
+  ifneq ($(CONFIG_SMART_HOME_VOICE_TTS)$(CONFIG_SMART_HOME_REMINDER_RING),)
     CSRCS   += src/voice/smart_home_voice_player.c
+    CSRCS   += src/voice/smart_home_voice_play.c
+  endif
+  ifneq ($(CONFIG_SMART_HOME_VOICE_TTS),)
     CSRCS   += src/voice/smart_home_tts.c
     CSRCS   += src/voice/smart_home_voice_resample.c
-    CSRCS   += src/voice/smart_home_voice_play.c
   endif
   # 采集服务由 ASR / KWS / VAD 共用（未定义的开关在本条中为空）
   ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_KWS)$(CONFIG_SMART_HOME_VAD),)
@@ -114,7 +125,7 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl_agent.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_history.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_chat.c
-    CSRCS   += src/ui/lvgl/smart_home_lvgl_home.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_shell.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_home_v9.c
     ifneq ($(CONFIG_SMART_HOME_ONBOARDING),)
       CSRCS += src/ui/lvgl/smart_home_lvgl_onboarding.c
@@ -125,11 +136,10 @@ ifneq ($(CONFIG_SMART_HOME_DEMO),)
     CSRCS   += src/ui/lvgl/smart_home_lvgl_device_dialog.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_room_dialog.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_nav.c
-    CSRCS   += src/ui/lvgl/smart_home_lvgl_panel.c
-    CSRCS   += src/ui/lvgl/smart_home_lvgl_pages.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_device_refresh.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_screensaver.c
-    CSRCS   += src/ui/lvgl/smart_home_lvgl_settings.c
     CSRCS   += src/ui/lvgl/smart_home_lvgl_settings_v9.c
+    CSRCS   += src/ui/lvgl/smart_home_lvgl_wake_settings.c
     ifneq ($(CONFIG_SMART_HOME_VOICE_ASR)$(CONFIG_SMART_HOME_VOICE_TTS),)
       CSRCS += src/ui/lvgl/smart_home_lvgl_voice_settings.c
     endif

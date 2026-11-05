@@ -13,10 +13,11 @@ set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL ON CACHE BOOL "" FORCE)
 add_compile_definitions(LV_KCONFIG_IGNORE)
 add_subdirectory("${OPENVELA_ROOT}/apps/graphics/lvgl/lvgl" lvgl)
 file(GLOB ICONS "${UI}/icons/generated/*.c")
-add_executable(panel_check test_panel.c "${UI}/smart_home_lvgl_style.c"
+add_executable(panel_check test_home_v9.c "${UI}/smart_home_lvgl_style.c"
   "${REPO}/demos/smart_home/src/device/smart_home_device.c"
   "${UI}/smart_home_lvgl_nav.c"
-  "${UI}/smart_home_lvgl_home.c" "${UI}/smart_home_lvgl_home_v9.c"
+  "${UI}/smart_home_lvgl_device_refresh.c"
+  "${UI}/smart_home_lvgl_shell.c" "${UI}/smart_home_lvgl_home_v9.c"
   "${UI}/smart_home_lvgl_onboarding.c"
   "${UI}/smart_home_lvgl_device_dialog.c"
   "${UI}/smart_home_lvgl_room_dialog.c"
@@ -42,6 +43,7 @@ if(SMART_HOME_TEST_ONBOARDING)
 endif()
 target_include_directories(panel_check PRIVATE include "${UI}"
   "${REPO}/demos/smart_home/src" "${REPO}/packages/cAGENT/include"
+  "${REPO}/packages/cagent_addons/include"
   "${OPENVELA_ROOT}/apps/graphics/lvgl"
   "${OPENVELA_ROOT}/apps/netutils/cjson/cJSON")
 target_compile_options(panel_check PRIVATE -Wall -Wextra
@@ -51,21 +53,11 @@ target_link_libraries(panel_check PRIVATE lvgl m pthread)
 enable_testing()
 add_test(NAME panel_check COMMAND panel_check)
 
-option(SMART_HOME_TEST_NODE_GATEWAY "Also test optional Node cards" OFF)
+option(SMART_HOME_TEST_NODE_GATEWAY "Also test the Node service list" OFF)
 if(SMART_HOME_TEST_NODE_GATEWAY)
-  if(NOT EXISTS "${REPO}/packages/cAGENT/include/cagent/types.h")
-    message(FATAL_ERROR "Node addons still use the V1 cAGENT API. Use SMART_HOME_TEST_NODE_GATEWAY=OFF for this V2 integration; addon migration is separate.")
-  endif()
   target_compile_definitions(panel_check PRIVATE CONFIG_SMART_HOME_NODE_GATEWAY=1 CONFIG_SMART_HOME_NODE_GATEWAY_PORT=18790)
   target_include_directories(panel_check PRIVATE "${REPO}/packages/cagent_addons/include")
 endif()
-
-add_executable(settings_check test_settings.c)
-foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
-  get_target_property(value panel_check ${property})
-  set_target_properties(settings_check PROPERTIES ${property} "${value}")
-endforeach()
-add_test(NAME settings_check COMMAND settings_check)
 
 add_executable(settings_v9_check test_settings_v9.c
   "${UI}/smart_home_lvgl_style.c"
@@ -74,7 +66,8 @@ foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OP
   get_target_property(value panel_check ${property})
   set_target_properties(settings_v9_check PROPERTIES ${property} "${value}")
 endforeach()
-target_compile_definitions(settings_v9_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1)
+target_compile_definitions(settings_v9_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1
+  CONFIG_SMART_HOME_NODE_GATEWAY=1 CONFIG_SMART_HOME_NODE_GATEWAY_PORT=18790)
 add_test(NAME settings_v9_check COMMAND settings_v9_check)
 set_tests_properties(settings_v9_check PROPERTIES TIMEOUT 15)
 
@@ -186,7 +179,7 @@ add_test(NAME camera_dialog_check COMMAND camera_dialog_check)
 set_tests_properties(camera_dialog_check PROPERTIES TIMEOUT 15)
 
 get_target_property(CAMERA_HOME_SRCS panel_check SOURCES)
-list(REMOVE_ITEM CAMERA_HOME_SRCS test_panel.c)
+list(REMOVE_ITEM CAMERA_HOME_SRCS test_home_v9.c)
 add_executable(camera_home_check test_camera_home.c ${CAMERA_HOME_SRCS}
   "${UI}/smart_home_lvgl_camera_dialog.c")
 foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
@@ -197,7 +190,7 @@ target_compile_definitions(camera_home_check PRIVATE CONFIG_SMART_HOME_CAMERA_PR
 add_test(NAME camera_home_check COMMAND camera_home_check)
 set_tests_properties(camera_home_check PROPERTIES TIMEOUT 15)
 
-# Compile the actual product voice widgets; legacy suites leave these features off.
+# Compile the actual product voice widgets; home tests leave these features off.
 add_executable(voice_settings_check test_voice_settings.c
   "${UI}/smart_home_lvgl_style.c"
   "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
@@ -206,7 +199,7 @@ foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OP
   set_target_properties(voice_settings_check PROPERTIES ${property} "${value}")
 endforeach()
 target_compile_definitions(voice_settings_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1
-  CONFIG_SMART_HOME_VOICE_ASR=1 CONFIG_SMART_HOME_VOICE_TTS=1)
+  CONFIG_SMART_HOME_VOICE_ASR=1 CONFIG_SMART_HOME_VOICE_TTS=1 CONFIG_SMART_HOME_KWS=1)
 add_test(NAME voice_settings_check COMMAND voice_settings_check)
 set_tests_properties(voice_settings_check PROPERTIES TIMEOUT 20)
 
@@ -225,3 +218,39 @@ foreach(service ASR TTS)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES TIMEOUT 20)
 endforeach()
+
+add_executable(reminder_popup_check test_reminder.c
+  "${UI}/smart_home_lvgl_reminder.c" "${UI}/smart_home_lvgl_style.c")
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(reminder_popup_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(reminder_popup_check PRIVATE CONFIG_SMART_HOME_REMINDERS=1 CONFIG_SMART_HOME_REMINDER_RING=1)
+add_test(NAME reminder_popup_check COMMAND reminder_popup_check)
+set_tests_properties(reminder_popup_check PROPERTIES TIMEOUT 15)
+
+add_executable(wake_settings_check test_wake_settings.c
+  "${UI}/smart_home_lvgl_style.c"
+  "${UI}/icons/smart_home_lvgl_png_icons.c" ${ICONS})
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(wake_settings_check PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(wake_settings_check PRIVATE CONFIG_SMART_HOME_MCP_BRIDGE=1 CONFIG_SMART_HOME_KWS=1)
+add_test(NAME wake_settings_check COMMAND wake_settings_check)
+set_tests_properties(wake_settings_check PROPERTIES TIMEOUT 15)
+
+# Compile the Node-only V9 feature combination independently of MCP.
+add_library(node_only_settings_compile OBJECT "${UI}/smart_home_lvgl_settings_v9.c")
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(node_only_settings_compile PROPERTIES ${property} "${value}")
+endforeach()
+target_compile_definitions(node_only_settings_compile PRIVATE CONFIG_SMART_HOME_NODE_GATEWAY=1 CONFIG_SMART_HOME_NODE_GATEWAY_PORT=18790)
+
+add_executable(device_refresh_check test_device_refresh.c)
+foreach(property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES)
+  get_target_property(value panel_check ${property})
+  set_target_properties(device_refresh_check PROPERTIES ${property} "${value}")
+endforeach()
+add_test(NAME device_refresh_check COMMAND device_refresh_check)

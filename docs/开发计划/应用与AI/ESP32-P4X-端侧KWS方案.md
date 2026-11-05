@@ -1,9 +1,11 @@
 # ESP32-P4X Smart Home 端侧 KWS 接入方案
 
-> 状态：方案阶段。当前 smart_home 的语音模块是桩实现
-> （demos/smart_home/src/voice/smart_home_voice_stub.h），无麦克风采集、
-> 无端侧推理；P4X 板麦克风硬件通路尚未确认。本方案只描述设计与验收
-> 判据，不代表功能已实现。
+> 状态：设计已被实现取代。`smart_home_voice_stub.h` 只保留接口签名，实际
+> 实现在 `smart_home_voice_capture.c` / `smart_home_voice_play.c`；端侧推理见
+> `voice/kws/`（`kws_infer.cc` 4082 行模块），麦克风通路已通（ES8311 + I2S RX）。
+> 本文的价值是 K0~K4 的分层判据与和 cAGENT 的边界约定，落地结果见
+> [语音能力分阶段验收记录](../../开发日志/ESP32-P4X-语音能力分阶段验收记录_20261102.md)
+> 与 [wake_large 接入方案](ESP32-P4X-SmartHome-wake_large唤醒词模型接入方案.md)。
 >
 > 适用对象：ESP32-P4X Function EV Board、Smart Home。
 >

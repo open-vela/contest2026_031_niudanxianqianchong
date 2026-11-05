@@ -35,6 +35,8 @@ with tempfile.TemporaryDirectory(prefix="smart-home-standard-") as temporary:
     (data / "settings.json").write_text('{"version":1,"active_backend_id":"deepseek"}')
     (data / "secrets.json").write_text('{"version":1,"model_api_keys":{"deepseek":"mock-test-key"}}')
     profile = "#pragma once\n#define FAR\n#define CONFIG_SMART_HOME_MILOCO_BRIDGE 1\n"
+    if "CONFIG_SMART_HOME_USER_MEMORY=y" in configuration.splitlines():
+        profile += "#define CONFIG_SMART_HOME_USER_MEMORY 1\n"
     if persistent:
         profile += "#define CONFIG_SMART_HOME_SESSION_PERSIST 1\n"
     for name, value in re.findall(r'^CONFIG_((?:AGENT_|SMART_HOME_MODEL_|SMART_HOME_SESSION_)[A-Z0-9_]+)=(\d+)$', configuration, re.M):
@@ -54,6 +56,8 @@ with tempfile.TemporaryDirectory(prefix="smart-home-standard-") as temporary:
     sources += [package / "ports/posix/storage/src/file_store.c", package / "ports/openvela/storage/src/file_store.c"]
     for directory in ("agent", "config", "device", "skills", "tools"):
         sources += [p for p in (app / "src" / directory).glob("*.c") if p.name != "smart_home_agent_run_service.c"]
+    if "CONFIG_SMART_HOME_USER_MEMORY=y" in configuration.splitlines():
+        sources += [app / "src/memory/smart_home_user_memory.c"]
     sources += [app / "src/miloco/smart_home_miloco_tools.c", app / "tests/standard_v2_test.c"]
     includes = [work, app / "src", package / "include", package / "src", package / "codecs/json",
                 package / "codecs/json/vendor/jsmn", cjson, package / "providers/model/openai/include",

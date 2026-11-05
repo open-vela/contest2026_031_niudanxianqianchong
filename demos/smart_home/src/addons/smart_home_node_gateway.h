@@ -29,6 +29,8 @@ int smart_home_node_gateway_start_with_port(
 /* Stop transport first, drain queued unregister operations, then free state. */
 void smart_home_node_gateway_stop(smart_home_node_gateway_t **gateway_ptr);
 
+uint16_t smart_home_node_gateway_port(const smart_home_node_gateway_t *gateway);
+
 /* Copies the Node registry for read-only UI presentation. */
 size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
                                     caddons_node_info_t *nodes,

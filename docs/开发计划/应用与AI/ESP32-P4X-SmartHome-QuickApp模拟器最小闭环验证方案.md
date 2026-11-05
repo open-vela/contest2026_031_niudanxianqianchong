@@ -9,7 +9,7 @@
 相关文档：
 
 - [SmartHome 快应用 UI 与原生服务分层方案](./ESP32-P4X-SmartHome快应用UI与原生服务分层方案.md)
-- [SmartHome Demo 测试开发计划](../ESP32-P4X-SmartHome-Demo测试开发计划.md)
+- [SmartHome Demo 测试开发计划](ESP32-P4X-SmartHome-Demo测试开发计划.md)
 - [QuickApp 开发指南](../../../../docs/zh-cn/contest_2026/quickapp/quickapp_manual.md)
 
 ---

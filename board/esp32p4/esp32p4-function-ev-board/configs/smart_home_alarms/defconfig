@@ -1,0 +1,3 @@
+#include "../smart_home/defconfig"
+CONFIG_SMART_HOME_REMINDERS=y
+CONFIG_SMART_HOME_REMINDER_RING=y

@@ -378,9 +378,11 @@ const char *smart_home_lvgl_tool_display_name(const char *name)
         {"run_scene", "演示 · 切换场景"},
 #endif
         {"set_timer", "设置提醒"},
+        {"set_alarm", "设置闹钟"},
         {"list_timers", "查看提醒"},
         {"cancel_timer", "取消提醒"},
         {"read_skill", "查阅操作说明"},
+        {"user_memory", "管理用户记忆"},
         {"miot_device_list", "米家 · 查询设备能力"},
         {"miot_device_control", "米家 · 提交设备控制"},
     };

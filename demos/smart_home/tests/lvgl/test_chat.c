@@ -291,6 +291,7 @@ int main(void)
     assert(count_text(ui.chat_list, "历史操作：演示 · 调整灯光") == 1);
     assert(!strcmp(smart_home_lvgl_tool_display_name("board_camera"), "本机 · 摄像头操作"));
     assert(!strcmp(smart_home_lvgl_tool_display_name("miot_device_control"), "米家 · 提交设备控制"));
+    assert(!strcmp(smart_home_lvgl_tool_display_name("user_memory"), "管理用户记忆"));
     assert(!strcmp(smart_home_lvgl_tool_display_name("node_bedroom_status"), "Node · 节点操作"));
     assert(!strcmp(smart_home_lvgl_tool_display_name("mcp_bridge_status"), "MCP · 服务调用"));
     assert(!count_text(ui.chat_list, "set_light"));

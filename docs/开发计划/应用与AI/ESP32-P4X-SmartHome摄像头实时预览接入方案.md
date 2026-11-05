@@ -1,6 +1,10 @@
 # ESP32-P4X Smart Home 安防页摄像头实时预览接入方案
 
-> 状态：C1/C2 已开始实现，等待 `smart_home` 配置真机验证；本文以 2026-09-18 的 LVGL 安防页为 UI 基线。
+> 状态：已实现。`SmartHome` 侧有 `src/camera/` 三模块（service / control /
+> snapshot_store）；PPA 1024×600 → 512×300 缩放与 CPU 回退在 `661acf9` 合入，
+> DQBUF/QBUF 双缓冲发布。Host 侧 PPA 7 项通过、`smart_home` 构建通过；
+> 板上 PPA 真机画面、开关循环、DMA/Cache 与性能尚未验收。
+> 本文以 2026-09-18 的 LVGL 安防页为 UI 基线。
 >
 > 适用硬件：ESP32-P4 Function EV Board、SC2336 摄像头、EK79007
 > 1024×600 MIPI-DSI 屏幕。

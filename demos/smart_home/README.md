@@ -19,6 +19,7 @@ README 只保留项目结构、核心能力和常用构建流程。更细的设�
 | [docs/ui-design.md](docs/ui-design.md) | LVGL UI 设计规范 | 继续迭代 Panel、Chat、Settings、导航、错误态和视觉规范 |
 | [docs/chat-thinking-chain.md](docs/chat-thinking-chain.md) | Chat 可解释事件链设计 | 调整 cAGENT event、工具调用卡片和模型响应展示 |
 | [docs/environment-simulation.md](docs/environment-simulation.md) | 环境模拟设计 | 理解 Temp/Humidity/Light 如何进入 `get_home_status` 和 Agent context |
+| [docs/user-memory.md](docs/user-memory.md) | 长期偏好记忆 | 理解 `user_memory` 的自动记录边界、持久化和忘记流程 |
 | [docs/multi-llm-backend.md](docs/multi-llm-backend.md) | 多 LLM 后端与安全管控方案 | 扩展 Settings 页、后端 preset、API key 和模型配置校验 |
 | [../../docs/plans/llm-backend-toolcall-comparison.md](../../docs/plans/llm-backend-toolcall-comparison.md) | 多 LLM 工具调用对比测试方案 | 冻结用例、trace、评分口径和 Goldfish/BOX-3 验收证据 |
 | [docs/node-gateway.md](docs/node-gateway.md) | Node gateway 联调 | 将两个 sensor_node 接入 smart_home，验证动态远程工具注册 |
@@ -83,6 +84,10 @@ src/
   tools/
     smart_home_tools.c     LLM 可调用的动作
     smart_home_tools.h
+    smart_home_user_memory_tools.c  remember/list/forget 工具
+
+  memory/
+    smart_home_user_memory.c  偏好文件、去重、遗忘和 Context 快照
 
   skills/
     smart_home_skill_loader.c  从 /data/res/skills 加载 Markdown Skill
@@ -105,8 +110,10 @@ src/
       smart_home_lvgl_agent.c      Agent worker 与 lv_async_call 回写
       smart_home_lvgl_chat.c       对话气泡和工具调用卡片
       smart_home_lvgl_nav.c        底部导航
-      smart_home_lvgl_panel.c      设备面板和控制弹窗
-      smart_home_lvgl_settings.c   设置页
+      smart_home_lvgl_home_v9.c    首页设备卡片和场景
+      smart_home_lvgl_device_dialog.c 设备控制抽屉
+      smart_home_lvgl_shell.c      顶栏、天气和时钟
+      smart_home_lvgl_settings_v9.c   设置页
       smart_home_lvgl_style.c      颜色、卡片样式、可选字体资源
 
   config/
@@ -164,6 +171,7 @@ LVGL 的三屏职责固定为：
 | `list_timers` | 查询当前 demo 定时器 |
 | `cancel_timer` | 按 id 取消 demo 定时器 |
 | `read_skill` | 按 Skill 名称读取 `/data/res/skills/` 中的完整策略 |
+| `user_memory` | 记住明确长期偏好、分页查看或忘记指定偏好 |
 
 来源与目标不明确时先查询、再澄清，不通过开机或拍照探测意图。来源不改变现有权限分组。
 部署与板端验收见 [设备来源与澄清规则](docs/device-routing.md)。
@@ -198,6 +206,7 @@ demo 从 `/data/res/skills/` 加载 Markdown Skill，并注册 `read_skill` 只�
 | `smart_home_scenes` | 睡眠、电影、离家、回家等场景映射 |
 | `smart_home_timer` | demo 定时器/提醒的行为边界 |
 | `smart_home_weather` | 模拟天气与家居调节建议 |
+| `smart_home_memory` | 长期偏好、临时指令、敏感内容和遗忘规则 |
 
 模型在决定调用 `run_scene`、`set_light`、`set_ac`、`get_home_status`、timer/weather 工具或需要补充策略时，可通过 `read_skill` 参考这些 Skill。
 

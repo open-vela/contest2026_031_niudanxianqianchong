@@ -184,12 +184,15 @@ LVGL 模块位于 [`src/ui/lvgl/`](../src/ui/lvgl/)，分为：
 
 | 文件 | 责任 |
 | --- | --- |
-| `smart_home_lvgl.c` | LVGL/NuttX 初始化、三屏创建、主事件循环 |
-| `smart_home_lvgl_panel.c` | 设备卡片、手动控制、环境模拟 |
+| `smart_home_lvgl.c` | LVGL/NuttX 初始化、屏保与三个产品页面、主事件循环 |
+| `smart_home_lvgl_home_v9.c` | V9 首页、设备卡片与场景 |
+| `smart_home_lvgl_device_dialog.c` | V9 设备控制抽屉 |
+| `smart_home_lvgl_device_refresh.c` | 设备刷新与米家版本轮询 |
+| `smart_home_lvgl_shell.c` | 公共顶栏、天气与时钟 |
 | `smart_home_lvgl_chat.c` | 消息气泡、工具调用时间线、输入框 |
-| `smart_home_lvgl_settings.c` | 模型、工具开关、系统状态、Node/MCP 状态 |
+| `smart_home_lvgl_settings_v9.c` | 模型、工具开关、系统状态、Node/MCP 状态 |
 | `smart_home_lvgl_agent.c` | Agent worker、事件复制、`lv_async_call` 回写 |
-| `smart_home_lvgl_nav.c` | Panel/Chat/Settings 导航 |
+| `smart_home_lvgl_nav.c` | Home/Chat/Settings 导航 |
 | `smart_home_lvgl_style.c` | 字体、颜色、图标和公共样式 |
 | `smart_home_lvgl_internal.h` | 屏幕尺寸和模块内部声明 |
 

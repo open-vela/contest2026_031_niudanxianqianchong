@@ -1,5 +1,8 @@
-/* Exercise the actual panel helpers against LVGL, with a snapshot-only service. */
-#include "smart_home_lvgl_panel.c"
+/* Exercise actual V9 pages against LVGL with snapshot-only services. */
+#include "smart_home_lvgl_internal.h"
+#include "../../src/smart_home_memory.h"
+#include <stdio.h>
+#include <string.h>
 #include "../../src/config/smart_home_secrets.h"
 #include "smart_home_v9_device_view.h"
 #include "smart_home_lvgl_room_dialog.h"
@@ -66,11 +69,6 @@ static void capture_to(smart_home_lvgl_t *ui, const char *env)
     capture_screen(ui->screen_home, env);
 }
 
-static void capture_home(smart_home_lvgl_t *ui)
-{
-    capture_to(ui, "SMART_HOME_LVGL_CAPTURE");
-}
-
 static smart_home_miloco_device_t snapshot[SMART_HOME_MILOCO_MAX_DEVICES];
 static size_t snapshot_count;
 static uint32_t snapshot_revision = 1;
@@ -89,6 +87,12 @@ size_t smart_home_miloco_list(const smart_home_miloco_t *service,
 }
 
 #ifdef CONFIG_SMART_HOME_NODE_GATEWAY
+uint16_t smart_home_node_gateway_port(const smart_home_node_gateway_t *gateway)
+{ return gateway ? 18790 : 0; }
+int smart_home_node_gateway_start_with_port(smart_home_node_gateway_t **out,
+    agent_t *agent, pthread_mutex_t *mutex, uint16_t port)
+{ (void)agent; (void)mutex; (void)port; *out = (smart_home_node_gateway_t *)out; return AGENT_OK; }
+void smart_home_node_gateway_stop(smart_home_node_gateway_t **gateway) { *gateway = NULL; }
 static caddons_node_info_t node_snapshot[CAGENT_ADDONS_MAX_NODES];
 static size_t node_count;
 size_t smart_home_node_gateway_list(const smart_home_node_gateway_t *gateway,
@@ -220,8 +224,6 @@ int smart_home_secrets_get_miloco(char *host, size_t host_size,
 /* 二维码编码用真实实现（third_party/qrcodegen），否则画出来的图
  * 与固件不一致，也无法验证扫码。桩只覆盖 secrets 回落。
  */
-void smart_home_lvgl_security_camera_stop(smart_home_lvgl_t *ui) { (void)ui; }
-void smart_home_lvgl_refresh_miloco_screen(smart_home_lvgl_t *ui) { (void)ui; }
 int smart_home_lvgl_submit_agent_job(smart_home_lvgl_t *ui, const char *text)
 { (void)ui; (void)text; return AGENT_ERROR_STATE; }
 int smart_home_agent_app_clear_session(smart_home_agent_app_t *app)
@@ -242,85 +244,24 @@ static void touch(lv_indev_t *input, lv_obj_t *target, lv_indev_state_t state)
     lv_indev_read(input);
 }
 
-static void test_press(smart_home_lvgl_t *ui)
-{
-    lv_obj_t *probe = lv_button_create(ui->screen_home);
-    lv_obj_remove_style_all(probe);
-    smart_home_lvgl_set_bg(probe, SMART_HOME_UI_COLOR_SURFACE);
-    smart_home_lvgl_press_feedback(probe);
-    lv_obj_add_state(probe, LV_STATE_PRESSED);
-    assert(lv_obj_get_style_recolor_opa(probe, 0) == LV_OPA_20);
-    smart_home_lvgl_set_bg(probe, SMART_HOME_UI_COLOR_PRIMARY);
-    lv_obj_remove_state(probe, LV_STATE_PRESSED);
-    assert(lv_color_eq(lv_obj_get_style_bg_color(probe, 0),
-                       SMART_HOME_UI_COLOR_PRIMARY));
-    lv_obj_add_state(probe, LV_STATE_DISABLED | LV_STATE_PRESSED);
-    assert(lv_obj_get_style_recolor_opa(probe, 0) == LV_OPA_TRANSP);
-    assert(lv_obj_get_style_opa(probe, 0) == LV_OPA_50);
-    lv_obj_delete(probe);
-
-    ui->screen_chat = lv_obj_create(NULL);
-    ui->active_tab = SMART_HOME_TAB_HOME;
-    lv_screen_load(ui->screen_home);
-    lv_obj_update_layout(ui->screen_home);
-    lv_obj_t *bar = lv_obj_get_child(ui->screen_home, -1);
-    lv_obj_t *nav = lv_obj_get_child(bar, 0);
-    lv_obj_t *button = lv_obj_get_child(nav, SMART_HOME_TAB_CHAT);
-    lv_obj_t *icon_content = lv_obj_get_child(button, 0);
-    lv_indev_t *input = lv_indev_create();
-    lv_indev_set_type(input, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(input, read_pointer);
-    int before = submissions;
-    touch(input, icon_content, LV_INDEV_STATE_PRESSED);
-    assert(lv_obj_has_state(button, LV_STATE_PRESSED));
-    assert(lv_obj_get_style_bg_opa(button, 0) == LV_OPA_COVER);
-    assert(ui->active_tab == SMART_HOME_TAB_HOME && submissions == before);
-    touch(input, icon_content, LV_INDEV_STATE_RELEASED);
-    assert(!lv_obj_has_state(button, LV_STATE_PRESSED));
-    assert(ui->active_tab == SMART_HOME_TAB_CHAT);
-    assert(lv_screen_active() == ui->screen_chat && submissions == before);
-
-    lv_screen_load(ui->screen_home);
-    ui->active_tab = SMART_HOME_TAB_HOME;
-    lv_obj_t *scene = lv_obj_get_child(ui->screen_home, 2);
-    lv_refr_now(NULL);
-    lv_area_t bounds;
-    lv_obj_get_coords(scene, &bounds);
-    size_t sample = (bounds.y1 + 90) * 1024 + bounds.x1 + 30;
-    uint16_t normal = pixels[sample];
-    touch(input, scene, LV_INDEV_STATE_PRESSED);
-    lv_refr_now(NULL);
-    assert(lv_obj_has_state(scene, LV_STATE_PRESSED));
-    assert(pixels[sample] != normal && submissions == before);
-    touch(input, scene, LV_INDEV_STATE_RELEASED);
-    assert(!lv_obj_has_state(scene, LV_STATE_PRESSED));
-    assert(ui->scene_popup && !lv_obj_has_flag(ui->scene_popup, LV_OBJ_FLAG_HIDDEN));
-    lv_obj_add_flag(ui->scene_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_refr_now(NULL);
-    assert(pixels[sample] == normal && submissions == before);
-    /* Gesture cancellation restores the navigation parent as well. */
-    lv_obj_send_event(icon_content, LV_EVENT_PRESSED, NULL);
-    assert(lv_obj_has_state(button, LV_STATE_PRESSED));
-    lv_obj_send_event(icon_content, LV_EVENT_PRESS_LOST, NULL);
-    assert(!lv_obj_has_state(button, LV_STATE_PRESSED));
-    lv_indev_delete(input);
-    lv_obj_delete(ui->screen_chat);
-    ui->screen_chat = NULL;
-    puts("PASS: pointer press/release, RGB565 feedback, nav hit target/cancel, disabled and selected states");
-}
-
 static void test_home(smart_home_lvgl_t *ui)
 {
-    snapshot_count = 2;
-    snapshot[0].online = true;
-    snapshot[1].online = false;
+    snapshot_count = 0;
     ui->device_state = &ui->app->device_state;
-    smart_home_lvgl_build_home_screen(ui);
     smart_home_lvgl_build_screensaver_screen(ui);
-    assert(!strcmp(lv_label_get_text(ui->home_status_label),
-                   "在线 1 / 共 2 台\n米家设备状态"));
-    assert(!strcmp(lv_label_get_text(ui->home_env_label), "晴天"));
-    assert(!strcmp(lv_label_get_text(ui->home_weather_temp_label), "--°"));
+    /* Only one simulated light remains; real device kinds are tested below. */
+    weather.valid = true;
+    weather.temperature = 22;
+#ifdef CONFIG_SMART_HOME_ONBOARDING
+    /* 本用例验证的是首页本身，不是引导浮层：先让三项都算「已配置」，
+     * 否则浮层遮罩会挡住卡片与场景按钮的触摸。引导浮层由
+     * test_v9_onboarding 单独覆盖。 */
+    smart_home_lvgl_onboarding_reset();
+    ui->app->system_status.network_status.online = true;
+    ui->app->system_status.model_status = AGENT_OK;
+    gateway_online = true;
+#endif
+    smart_home_lvgl_build_home_screen_v9(ui);
     weather.valid = true;
     strcpy(weather.city, "Beijing");
     strcpy(weather.condition_cn, "小雨");
@@ -328,21 +269,17 @@ static void test_home(smart_home_lvgl_t *ui)
     weather.temperature = 18;
     weather.humidity = 72;
     smart_home_lvgl_refresh_home(ui);
-    assert(!strcmp(lv_label_get_text(ui->home_weather_city_label), "Beijing"));
-    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "小雨 · 18°C"));
     assert(!strcmp(lv_label_get_text(ui->screensaver_temp_label), "18°"));
+    assert(!strcmp(lv_label_get_text(ui->home_weather_temp_label), "18°"));
     assert(!strcmp(lv_label_get_text(ui->screensaver_condition_label), "小雨"));
-    weather.valid = false;
-    smart_home_lvgl_refresh_home(ui);
-    assert(!strcmp(lv_label_get_text(ui->screensaver_weather_label), "晴天"));
-    assert(!strcmp(lv_label_get_text(ui->screensaver_condition_label), "晴天"));
-    assert(!strcmp(lv_label_get_text(ui->screensaver_temp_label), "--°"));
     gateway_online = false;
     smart_home_lvgl_refresh_home(ui);
-    assert(strstr(lv_label_get_text(ui->home_status_label), "未知"));
+    assert(!strcmp(lv_label_get_text(ui->home_weather_temp_label), "18°"));
     gateway_online = true;
+    weather.valid = false;
     smart_home_lvgl_refresh_home(ui);
-
+    assert(!strcmp(lv_label_get_text(ui->screensaver_condition_label), "晴天"));
+    assert(!strcmp(lv_label_get_text(ui->screensaver_temp_label), "--°"));
     smart_home_lvgl_update_clock_at(ui, 1574985600); /* board's 2019 boot date */
     assert(!strcmp(lv_label_get_text(ui->home_time_label), "12:00"));
     assert(!strcmp(lv_label_get_text(ui->screensaver_time_label), "12:00"));
@@ -358,36 +295,9 @@ static void test_home(smart_home_lvgl_t *ui)
     assert(strstr(lv_label_get_text(ui->screensaver_date_label), "10月27日"));
     assert(!strcmp(lv_label_get_text(ui->home_date_label),
                    lv_label_get_text(ui->screensaver_date_label)));
-    lv_obj_update_layout(ui->screen_home);
-    lv_obj_t *card = lv_obj_get_parent(ui->home_status_label);
-    lv_obj_t *title = lv_obj_get_child(card, 1);
-    lv_area_t title_area, value_area;
-    lv_obj_get_coords(title, &title_area);
-    lv_obj_get_coords(ui->home_status_label, &value_area);
-    assert(title_area.y2 < value_area.y1);
-    test_press(ui);
-    capture_home(ui);
-    lv_timer_delete(ui->home_time_timer);
-    ui->home_time_timer = NULL;
-    lv_obj_delete(ui->screen_home);
-    ui->screen_home = NULL;
-
-    /* Only one simulated light remains; real device kinds are tested below. */
-    ui->topbar_clock_count = 0;
-    ui->topbar_wifi_icon_count = 0;
-    ui->topbar_camera_icon_count = 0;
     weather.valid = true;
     weather.temperature = 22;
-#ifdef CONFIG_SMART_HOME_ONBOARDING
-    /* 本用例验证的是首页本身，不是引导浮层：先让三项都算「已配置」，
-     * 否则浮层遮罩会挡住卡片与场景按钮的触摸。引导浮层由
-     * test_v9_onboarding 单独覆盖。 */
-    smart_home_lvgl_onboarding_reset();
-    ui->app->system_status.network_status.online = true;
-    ui->app->system_status.model_status = AGENT_OK;
-    gateway_online = true;
-#endif
-    smart_home_lvgl_build_home_screen_v9(ui);
+    smart_home_lvgl_refresh_home(ui);
     struct tm design_time = {.tm_year = 126, .tm_mon = 9, .tm_mday = 30,
                               .tm_hour = 11, .tm_min = 39};
     smart_home_lvgl_update_clock_at(ui, timegm(&design_time));
@@ -435,7 +345,7 @@ static void test_home(smart_home_lvgl_t *ui)
     capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_SETTINGS_CAPTURE");
     capture_v9_settings_categories(ui);
     capture_v9_mi_qr(ui);
-    /* A successful bind and all old device routes must enter the merged home. */
+    /* Successful binding returns to the merged V9 home. */
     lv_screen_load(ui->screen_settings_v9);
     smart_home_lvgl_open_miloco_bind(ui);
     for (int i = 0; i < 4 && ui->bind_timer; ++i) {
@@ -443,8 +353,6 @@ static void test_home(smart_home_lvgl_t *ui)
         lv_timer_handler();
     }
     assert(!smart_home_lvgl_miloco_bind_is_open(ui));
-    assert(lv_screen_active() == ui->screen_home && ui->active_tab == SMART_HOME_TAB_HOME);
-    smart_home_lvgl_load_tab(ui, SMART_HOME_TAB_DEVICES);
     assert(lv_screen_active() == ui->screen_home && ui->active_tab == SMART_HOME_TAB_HOME);
     capture_v9_model_menu(ui);
     smart_home_lvgl_build_chat_screen(ui);
@@ -480,250 +388,10 @@ static void test_home(smart_home_lvgl_t *ui)
     ui->home_time_timer = NULL;
     lv_obj_delete(ui->screen_home);
     ui->screen_home = NULL;
+    if (ui->miloco_timer) lv_timer_delete(ui->miloco_timer);
+    if (ui->v9_poll_timer) lv_timer_delete(ui->v9_poll_timer);
     lv_obj_delete(ui->screen_screensaver);
-    puts("PASS: cached weather/city, truthful counts, unknown status, midnight date, V9 home");
-}
-
-static void test_feedback(smart_home_lvgl_t *ui, lv_obj_t *screen)
-{
-    snapshot_count = 1;
-    memset(snapshot, 0, sizeof(snapshot));
-    strcpy(snapshot[0].did, "device-1");
-    snapshot[0].online = true;
-    snapshot[0].controllable = true;
-    snapshot[0].power_on = true;
-    snapshot[0].power_valid = true;
-    ui->screen_panel = screen;
-    ui->panel_feedback_label = lv_label_create(screen);
-    lv_obj_t *sw = lv_switch_create(screen);
-    lv_obj_set_user_data(sw, snapshot[0].did);
-    lv_obj_add_event_cb(sw, miloco_switch_cb, LV_EVENT_VALUE_CHANGED, ui);
-    submit_result = AGENT_ERROR_INVALID;
-    lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(lv_obj_has_state(sw, LV_STATE_CHECKED)); /* failed OFF restores ON */
-    assert(strstr(lv_label_get_text(ui->panel_feedback_label), "未能提交"));
-    snapshot[0].power_on = false;
-    snapshot[0].power_valid = true;
-    lv_obj_add_state(sw, LV_STATE_CHECKED);
-    lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(!lv_obj_has_state(sw, LV_STATE_CHECKED)); /* failed ON restores OFF */
-    int before = submissions;
-    snapshot[0].online = false;
-    lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(submissions == before);
-    snapshot[0].online = true;
-    submit_result = AGENT_OK;
-    lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(strstr(lv_label_get_text(ui->panel_feedback_label), "等待设备状态"));
-
-    snapshot[0].control_count = 1;
-    smart_home_miloco_control_t *ctrl = &snapshot[0].controls[0];
-    strcpy(ctrl->iid, "2.1");
-    ctrl->type = SMART_HOME_MILOCO_CTRL_BOOL;
-    ctrl->value = 1;
-    miloco_sheet_build(ui, snapshot[0].did);
-    lv_obj_t *row = lv_obj_get_child(ui->miloco_sheet, 4);
-    lv_obj_t *sheet_sw = lv_obj_get_child(row, 1);
-    assert(lv_obj_check_type(sheet_sw, &lv_switch_class));
-    submit_result = AGENT_ERROR_INVALID;
-    lv_obj_remove_state(sheet_sw, LV_STATE_CHECKED);
-    lv_obj_send_event(sheet_sw, LV_EVENT_VALUE_CHANGED, NULL);
-    assert(lv_obj_has_state(sheet_sw, LV_STATE_CHECKED));
-    assert(strstr(lv_label_get_text(ui->miloco_sheet_feedback), "未能提交"));
-    miloco_sheet_close_impl(ui);
-
-    /* Maximum enum schema used to overflow the nine-entry callback pool. */
-    snapshot[0].control_count = SMART_HOME_MILOCO_MAX_CONTROLS;
-    for (int i = 0; i < SMART_HOME_MILOCO_MAX_CONTROLS; i++) {
-        ctrl = &snapshot[0].controls[i];
-        snprintf(ctrl->iid, sizeof(ctrl->iid), "2.%d", i);
-        ctrl->type = SMART_HOME_MILOCO_CTRL_ENUM;
-        ctrl->option_count = SMART_HOME_MILOCO_MAX_OPTIONS;
-        for (int j = 0; j < SMART_HOME_MILOCO_MAX_OPTIONS; j++) {
-            ctrl->options[j].value = j;
-            snprintf(ctrl->options[j].name, sizeof(ctrl->options[j].name), "%d", j);
-        }
-    }
-    miloco_sheet_build(ui, snapshot[0].did);
-    for (int i = 0; i < SMART_HOME_MILOCO_MAX_CONTROLS; i++) {
-        row = lv_obj_get_child(ui->miloco_sheet, i + 4);
-        for (int j = 0; j < SMART_HOME_MILOCO_MAX_OPTIONS; j++) {
-            before = submissions;
-            lv_obj_send_event(lv_obj_get_child(row, j + 1), LV_EVENT_CLICKED, NULL);
-            assert(submissions == before + 1);
-            assert(strstr(lv_label_get_text(ui->miloco_sheet_feedback), "未能提交"));
-        }
-    }
-    miloco_sheet_close_impl(ui);
-    ctrl->type = SMART_HOME_MILOCO_CTRL_ACTION;
-    snapshot[0].control_count = 1;
-    miloco_sheet_build(ui, snapshot[0].did);
-    row = lv_obj_get_child(ui->miloco_sheet, 4);
-    before = submissions;
-    lv_obj_send_event(lv_obj_get_child(row, 1), LV_EVENT_CLICKED, NULL);
-    assert(submissions == before + 1);
-    assert(strstr(lv_label_get_text(ui->miloco_sheet_feedback), "未能提交"));
-    miloco_sheet_close_impl(ui);
-    puts("PASS: power and BOOL rollback; offline guard; ENUM/ACTION feedback; 8x4 controls");
-}
-
-static unsigned deleted_objects;
-static void count_deleted(lv_event_t *event)
-{ (void)event; deleted_objects++; }
-
-static void test_incremental(smart_home_lvgl_t *ui, lv_obj_t *screen)
-{
-    ui->device_state = &ui->app->device_state;
-    ui->panel_grid = lv_obj_create(screen);
-    lv_obj_set_size(ui->panel_grid, 968, 180);
-    lv_obj_set_flex_flow(ui->panel_grid, LV_FLEX_FLOW_ROW_WRAP);
-    ui->panel_filter_row = lv_obj_create(screen);
-    ui->panel_source_dd = lv_dropdown_create(screen);
-    lv_dropdown_set_options(ui->panel_source_dd, "全部来源\n米家\nNode");
-    lv_dropdown_set_selected(ui->panel_room_dd, 0);
-    memset(snapshot, 0, sizeof(snapshot));
-    snapshot_count = SMART_HOME_MILOCO_MAX_DEVICES;
-    for (size_t i = 0; i < snapshot_count; i++) {
-        snprintf(snapshot[i].did, sizeof(snapshot[i].did), "device-%u", (unsigned)i);
-        strcpy(snapshot[i].room, "living_room");
-        strcpy(snapshot[i].name, "测试设备");
-        snapshot[i].online = true;
-        snapshot[i].controllable = true;
-        snapshot[i].control_count = SMART_HOME_MILOCO_MAX_CONTROLS;
-        for (size_t j = 0; j < SMART_HOME_MILOCO_MAX_CONTROLS; j++) {
-            snprintf(snapshot[i].controls[j].iid, sizeof(snapshot[i].controls[j].iid),
-                     "2.%u", (unsigned)j);
-            snapshot[i].controls[j].type = SMART_HOME_MILOCO_CTRL_BOOL;
-        }
-    }
-    rebuild_device_cards(ui);
-    assert(lv_obj_get_child_count(ui->panel_grid) == SMART_HOME_MILOCO_MAX_DEVICES);
-    lv_obj_t *card = ui->miloco_cards[0].card;
-    lv_obj_t *power = ui->miloco_cards[0].power;
-    lv_obj_add_event_cb(card, count_deleted, LV_EVENT_DELETE, NULL);
-    lv_obj_update_layout(ui->panel_grid);
-    lv_obj_scroll_to_y(ui->panel_grid, 80, LV_ANIM_OFF);
-    int32_t grid_scroll = lv_obj_get_scroll_y(ui->panel_grid);
-    assert(grid_scroll == 80);
-    strcpy(snapshot[0].name, "更新的设备名");
-    snapshot[0].power_on = true;
-    snapshot[0].power_valid = true;
-    rebuild_device_cards(ui);
-    assert(deleted_objects == 0 && ui->miloco_cards[0].card == card);
-    assert(ui->miloco_cards[0].power == power && lv_obj_has_state(power, LV_STATE_CHECKED));
-    assert(!strcmp(lv_label_get_text(ui->miloco_cards[0].name), "更新的设备名"));
-    assert(lv_obj_get_scroll_y(ui->panel_grid) == grid_scroll);
-    smart_home_miloco_device_t swap = snapshot[0];
-    snapshot[0] = snapshot[1]; snapshot[1] = swap;
-    rebuild_device_cards(ui);
-    assert(ui->miloco_cards[0].card == card && deleted_objects == 0);
-    assert(!strcmp(lv_obj_get_user_data(power), "device-0"));
-    /* A queued command keeps the pending value until readback or timeout. */
-    submit_result = AGENT_OK;
-    lv_obj_remove_state(power, LV_STATE_CHECKED);
-    lv_obj_send_event(power, LV_EVENT_VALUE_CHANGED, NULL);
-    append_miloco_cards(ui);
-    assert(!lv_obj_has_state(power, LV_STATE_CHECKED));
-    lv_tick_inc(MILOCO_CONFIRM_WAIT_MS + 1);
-    append_miloco_cards(ui);
-    assert(lv_obj_has_state(power, LV_STATE_CHECKED));
-    assert(strstr(lv_label_get_text(ui->panel_feedback_label), "尚未确认"));
-
-    miloco_sheet_build(ui, "device-0");
-    lv_obj_t *sheet = ui->miloco_sheet;
-    miloco_sheet_context_t *context = ui->miloco_sheet_context;
-    lv_obj_t *control = context->requests[0].widget;
-    lv_obj_add_event_cb(sheet, count_deleted, LV_EVENT_DELETE, NULL);
-    lv_obj_update_layout(sheet);
-    lv_obj_scroll_to_y(sheet, 40, LV_ANIM_OFF);
-    int32_t sheet_scroll = lv_obj_get_scroll_y(sheet);
-    assert(sheet_scroll == 40);
-    int before = submissions;
-    snapshot[1].controls[0].value = 1;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    assert(ui->miloco_sheet == sheet && deleted_objects == 0);
-    assert(context->requests[0].widget == control);
-    assert(lv_obj_has_state(control, LV_STATE_CHECKED));
-    assert(lv_obj_get_scroll_y(sheet) == sheet_scroll && submissions == before);
-    snapshot[1].online = false;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    assert(lv_obj_has_state(control, LV_STATE_DISABLED));
-    snapshot[1].online = true;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    assert(!lv_obj_has_state(control, LV_STATE_DISABLED));
-    strcpy(snapshot[1].controls[0].desc, "新的控制项");
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    assert(deleted_objects == 1); /* schema change alone rebuilds the drawer */
-    assert(lv_obj_get_scroll_y(ui->miloco_sheet) == sheet_scroll);
-    snapshot[1].controls[1].type = SMART_HOME_MILOCO_CTRL_ENUM;
-    snapshot[1].controls[1].option_count = 2;
-    snapshot[1].controls[1].options[0].value = 0;
-    snapshot[1].controls[1].options[1].value = 1;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    context = ui->miloco_sheet_context;
-    sheet = ui->miloco_sheet;
-    lv_obj_t *option = context->requests[3].widget;
-    snapshot[1].controls[1].value = 1;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    assert(ui->miloco_sheet == sheet && context->requests[3].widget == option);
-    assert(lv_color_eq(lv_obj_get_style_bg_color(option, 0), SMART_HOME_UI_COLOR_PRIMARY));
-    snapshot[1].controls[1].option_count = SMART_HOME_MILOCO_MAX_OPTIONS;
-    for (unsigned i = 0; i < SMART_HOME_MILOCO_MAX_OPTIONS; i++) {
-        snapshot[1].controls[1].options[i].value = (int)i * 3;
-        snprintf(snapshot[1].controls[1].options[i].name,
-                 sizeof(snapshot[1].controls[1].options[i].name), "mode-%u", i);
-    }
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    context = ui->miloco_sheet_context;
-    lv_obj_update_layout(ui->miloco_sheet);
-    for (unsigned i = 0; i < SMART_HOME_MILOCO_MAX_OPTIONS; i++) {
-        lv_obj_t *widget = context->requests[2 + i].widget;
-        assert(widget && lv_obj_get_x(widget) >= 0);
-        assert(lv_obj_get_y(widget) + lv_obj_get_height(widget) <=
-               lv_obj_get_height(lv_obj_get_parent(widget)));
-    }
-
-    snapshot_count = 0;
-    smart_home_lvgl_miloco_sheet_refresh(ui);
-    rebuild_device_cards(ui);
-    assert(!ui->miloco_sheet && !ui->miloco_sheet_context);
-    assert(lv_obj_get_child_count(ui->panel_grid) == 0);
-    for (size_t i = 0; i < SMART_HOME_MILOCO_MAX_DEVICES; i++)
-        assert(!ui->miloco_cards[i].card);
-    /* A home refresh consumes the revision without marking hidden cards current. */
-    ui->active_tab = SMART_HOME_TAB_HOME;
-    snapshot_revision = ui->miloco_revision + 1;
-    smart_home_lvgl_miloco_poll_set_enabled(ui, 1);
-    miloco_timer_cb(ui->miloco_timer);
-    unsigned reads = snapshot_reads;
-    miloco_timer_cb(ui->miloco_timer);
-    assert(reads == snapshot_reads);
-    assert(ui->miloco_polled_revision == snapshot_revision);
-    assert(ui->miloco_revision != snapshot_revision);
-    smart_home_lvgl_miloco_poll_set_enabled(ui, 0);
-#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
-    ui->app->node_gateway = (smart_home_node_gateway_t *)&node_snapshot;
-    node_count = 1;
-    strcpy(node_snapshot[0].node_id, "node-1");
-    strcpy(node_snapshot[0].display_name, "节点一");
-    node_snapshot[0].online = true;
-    rebuild_device_cards(ui);
-    assert(lv_obj_get_child_count(ui->panel_grid) == 1);
-    lv_obj_t *node_card = ui->node_cards[0].card;
-    rebuild_device_cards(ui);
-    assert(ui->node_cards[0].card == node_card);
-    assert(lv_obj_get_child_count(ui->panel_grid) == 1);
-    lv_dropdown_set_selected(ui->panel_source_dd, 1);
-    rebuild_device_cards(ui);
-    assert(!ui->node_cards[0].card && !lv_obj_get_child_count(ui->panel_grid));
-    lv_dropdown_set_selected(ui->panel_source_dd, 0);
-    rebuild_device_cards(ui);
-    node_snapshot[0].online = false;
-    rebuild_device_cards(ui);
-    assert(!ui->node_cards[0].card);
-    node_count = 0;
-#endif
-    puts("PASS: stable card/control objects, scroll, device reorder/removal, pending timeout, revision gating");
+    puts("PASS: V9 home, cached weather, placeholders and midnight date");
 }
 
 /* 与生产一致的五个后端，否则下拉菜单只有一项，无法与设计 23-model-menu 比对。 */
@@ -765,6 +433,34 @@ int smart_home_model_config_from_preset(smart_home_model_config_t *config,
 int smart_home_agent_app_apply_model_config(smart_home_agent_app_t *app,
                                             const smart_home_model_config_t *c)
 { (void)app; (void)c; return AGENT_OK; }
+
+int smart_home_agent_app_try_enumerate_tools(const smart_home_agent_app_t *app,
+                                             smart_home_tool_visit_fn visitor, void *user)
+{
+    (void)app;
+    static const struct { const char *name, *description; uint16_t group; } fixtures[] = {
+        {"get_home_status", "查询家庭演示设备的当前状态。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"miot_device_list", "查询米家设备、来源及可用控制能力。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"board_camera", "查看本机摄像头状态，按指令采集画面。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"set_light", "调整演示灯光的开关与亮度。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"set_timer", "设置本机倒计时提醒。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"read_skill", "查询当前可用的操作说明。", SMART_HOME_TOOL_GROUP_LOCAL},
+        {"node_device", "调用局域网节点提供的设备服务。", SMART_HOME_TOOL_GROUP_NODE},
+        {"mcp_weather", "使用已接入的 MCP 服务查询天气。", SMART_HOME_TOOL_GROUP_MCP},
+        {"mcp_search", "使用已接入的 MCP 服务搜索信息。", SMART_HOME_TOOL_GROUP_MCP},
+    };
+    for (size_t i = 0; i < sizeof(fixtures) / sizeof(fixtures[0]); ++i) {
+        smart_home_tool_info_t tool = {.name = fixtures[i].name,
+            .description = fixtures[i].description, .group_id = fixtures[i].group,
+            .enabled = 1, .access_allowed = 1};
+        int ret = visitor(&tool, user);
+        if (ret != AGENT_OK) return ret;
+    }
+    return AGENT_OK;
+}
+int smart_home_agent_app_try_set_local_tool_access(smart_home_agent_app_t *app,
+                                                  const char *name, int allowed)
+{ return smart_home_agent_app_set_local_tool_access(app, name, allowed); }
 
 int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
                                                const char *tool_name,
@@ -1017,40 +713,9 @@ int main(void)
     smart_home_lvgl_t ui = {0};
     app.miloco = (smart_home_miloco_t *)&snapshot;
     ui.app = &app;
-    lv_obj_t *screen = lv_obj_create(NULL);
-    ui.panel_room_dd = lv_dropdown_create(screen);
-    lv_dropdown_set_options(ui.panel_room_dd, "全部");
-    snapshot_count = 4;
-    strcpy(snapshot[0].room, "living_room");
-    strcpy(snapshot[1].room, "书房");
-    strcpy(snapshot[2].room, "书房");
-    assert(miloco_sync_room_options(&ui));
-    assert(!strcmp(lv_dropdown_get_options(ui.panel_room_dd),
-                   "全部\n客厅\n书房\n未分配房间"));
-    lv_dropdown_set_selected(ui.panel_room_dd, 2);
-    assert(miloco_matches_room(&ui, "书房"));
-    assert(!miloco_matches_room(&ui, "living_room"));
-    assert(!miloco_matches_room(&ui, ""));
-    strcpy(snapshot[0].room, "书房");
-    strcpy(snapshot[1].room, "living_room");
-    assert(miloco_sync_room_options(&ui));
-    assert(lv_dropdown_get_selected(ui.panel_room_dd) == 1);
-    assert(miloco_matches_room(&ui, "书房"));
-    lv_dropdown_set_selected(ui.panel_room_dd, 3);
-    assert(miloco_matches_room(&ui, ""));
-    snapshot_count = 1;
-    assert(miloco_sync_room_options(&ui));
-    assert(lv_dropdown_get_selected(ui.panel_room_dd) == 0);
-    assert(miloco_matches_room(&ui, "living_room"));
-    snapshot_count = 0;
-    assert(miloco_sync_room_options(&ui));
-    assert(!strcmp(lv_dropdown_get_options(ui.panel_room_dd), "全部"));
-    assert(!miloco_sync_room_options(&ui));
-    puts("PASS: real-room catalog, deduplication, filtering, reorder and removal");
-    test_feedback(&ui, screen);
-    test_incremental(&ui, screen);
+    assert(pthread_mutex_init(&ui.pending_mutex, NULL) == 0);
     test_home(&ui);
-    lv_obj_delete(screen);
+    pthread_mutex_destroy(&ui.pending_mutex);
     return 0;
 }
 
@@ -1124,11 +789,37 @@ static void capture_v9_settings_categories(smart_home_lvgl_t *ui)
     };
     int i;
 
-    if (!getenv(keys[0])) return;
     for (i = 0; i < 7; i++) {
+        if (!getenv(keys[i])) continue;
+        lv_screen_load(ui->screen_settings_v9);
         if (smart_home_lvgl_v9_settings_select_category(i) != i) return;
+        if (i == 4) {
+            for (int step = 0; step < 6; ++step) {
+                lv_tick_inc(45);
+                lv_timer_handler();
+            }
+        }
         lv_obj_update_layout(ui->screen_settings_v9);
         capture_screen(ui->screen_settings_v9, keys[i]);
+        if (i == 4 && getenv("SMART_HOME_V9_TOOLS_DETAIL_CAPTURE")) {
+            lv_obj_t *tool = find_v9_label(ui->screen_settings_v9, "get_home_status");
+            assert(tool);
+            lv_obj_send_event(lv_obj_get_parent(tool), LV_EVENT_CLICKED, NULL);
+            capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_TOOLS_DETAIL_CAPTURE");
+            lv_obj_t *title = find_v9_label(ui->screen_settings_v9, "工具详情");
+            assert(title);
+            lv_obj_send_event(lv_obj_get_parent(lv_obj_get_parent(title)), LV_EVENT_CLICKED, NULL);
+        }
+        if (i == 4 && getenv("SMART_HOME_V9_TOOLS_PAGE_CAPTURE")) {
+            lv_obj_t *next = find_v9_label(ui->screen_settings_v9, "下一页");
+            assert(next);
+            lv_obj_send_event(lv_obj_get_parent(next), LV_EVENT_CLICKED, NULL);
+            for (int step = 0; step < 4; ++step) {
+                lv_tick_inc(45);
+                lv_timer_handler();
+            }
+            capture_screen(ui->screen_settings_v9, "SMART_HOME_V9_TOOLS_PAGE_CAPTURE");
+        }
     }
     (void)smart_home_lvgl_v9_settings_select_category(0);
 }

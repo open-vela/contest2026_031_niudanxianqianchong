@@ -5,6 +5,9 @@
 #include "../skills/smart_home_skill_loader.h"
 #include "smart_home_agent_backend.h"
 #include "smart_home_tool_metadata.h"
+#ifdef CONFIG_SMART_HOME_USER_MEMORY
+#include "../memory/smart_home_user_memory.h"
+#endif
 #ifdef CONFIG_FEATURE_SYSTEM_SMARTHOME
 #include "../quickapp/smart_home_quickapp_provider.h"
 #include "../quickapp/smart_home_quickapp_ipc_server.h"
@@ -53,6 +56,9 @@ typedef struct smart_home_agent_run_service smart_home_agent_run_service_t;
 
 typedef struct smart_home_agent_app {
     agent_t *agent;
+#ifdef CONFIG_SMART_HOME_USER_MEMORY
+    smart_home_user_memory_t *user_memory;
+#endif
     smart_home_agent_backend_t *backend;
     smart_home_state_t device_state;
     smart_home_device_service_t device_service;
@@ -114,6 +120,12 @@ int smart_home_agent_app_enumerate_tools(
     const smart_home_agent_app_t *app,
     smart_home_tool_visit_fn callback,
     void *user_data);
+/** UI 查询与权限变更：锁被聊天任务占用时立即返回 BUSY。 */
+int smart_home_agent_app_try_enumerate_tools(
+    const smart_home_agent_app_t *app, smart_home_tool_visit_fn callback,
+    void *user_data);
+int smart_home_agent_app_try_set_local_tool_access(
+    smart_home_agent_app_t *app, const char *tool_name, int allowed);
 /** 设置本地工具的用户访问策略；拒绝时工具不会执行，但仍向模型声明。 */
 int smart_home_agent_app_set_local_tool_access(smart_home_agent_app_t *app,
                                                const char *tool_name,

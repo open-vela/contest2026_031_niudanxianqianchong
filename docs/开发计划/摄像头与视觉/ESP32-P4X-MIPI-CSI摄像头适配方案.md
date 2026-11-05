@@ -1,7 +1,10 @@
 # ESP32-P4X SC2336 `/dev/video0` 实施方案
 
-> 状态：待实现。本文是代码改造与验收计划，不表示 `/dev/video0`、ISP 或 RGB565
-> 已可用。
+> 状态：已实施。`/dev/video0` 已可用（RGB565 1024×600，`video_test` 300 帧
+> 30 fps 验收）；应用侧在 `src/camera/`（service / control / snapshot_store 三模块），
+> agent 侧以单一 camera 工具暴露 status/on/off/shot。本文保留改造清单与
+> 验收判据，实施与排障见
+> [SC2336 视频通路架构与调用链](../../硬件适配/ESP32-P4X-SC2336-视频通路架构与调用链.md)。
 >
 > 适用硬件：ESP32-P4 Function EV Board、SC2336 摄像头模组。
 >

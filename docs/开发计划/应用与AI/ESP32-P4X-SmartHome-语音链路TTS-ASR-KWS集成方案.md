@@ -1,6 +1,8 @@
 # ESP32-P4X SmartHome 语音链路集成方案（TTS + ASR + KWS）
 
-> 状态：代码已合入 `dev-ai-contest-2026`，等待真机构建验证。
+> 状态：三段代码均在主线。ASR/TTS 在 `smart_home_voice` 配置开启并已板端跑通
+> 短句；KWS 常驻（`CONFIG_SMART_HOME_KWS`）尚未在任何 defconfig 开启，
+> 因此"唤醒 → 自动 PTT → 播报"的完整链路只有分段证据，没有一次跑通的板端记录。
 > 目标：开启三开关时，用户通过唤醒词唤醒 agent，用语音对话，回复自动播报。
 
 ## 1. 链路与模块
@@ -72,10 +74,10 @@ nsh> kws_smoke --repeat 20                # 模型/算子/Invoke 耗时基准
 
 ```bash
 # 全关回归（与主线行为一致）
-./build.sh contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/smart_home -j8
+contest2026_031_niudanxianqianchong/scripts/build_p4x.sh smart_home -j8
 
 # 语音演示（三开）
-./build.sh contest2026_031_niudanxianqianchong/board/esp32p4/esp32p4-function-ev-board/configs/smart_home_voice -j8
+contest2026_031_niudanxianqianchong/scripts/build_p4x.sh smart_home_voice -j8
 ```
 
 注意：Kconfig 与 Makefile 有变更，首次构建前建议 `make clean` 全量重编

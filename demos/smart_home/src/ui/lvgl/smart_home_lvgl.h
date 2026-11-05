@@ -5,8 +5,8 @@
  * LVGL is owned exclusively by the UI thread. Agent workers enqueue plain C
  * payloads; the UI loop drains them before updating LVGL widgets.
  *
- * Product screens: Home / Devices / Scenes / Security / More.  Chat and
- * Settings remain secondary native surfaces opened from Home or More.
+ * Product screens: Home / Chat / Settings. Device, camera and service
+ * controls are integrated into V9 pages and dialogs.
  *
  * Usage:
  *   smart_home_lvgl_t *ui = smart_home_lvgl_init(&app);
@@ -49,124 +49,22 @@ typedef struct {
     int state; /* -2 unconfirmed, -1 running, 0 failed, 1 result returned */
 } smart_home_lvgl_trace_tool_t;
 
-#ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
 typedef struct {
-    char did[24];
-    lv_obj_t *card;
-    lv_obj_t *name;
-    lv_obj_t *room;
-    lv_obj_t *status;
-    lv_obj_t *power;
-    int category;
-    int controllable;
-    int pending;
-    uint32_t submitted_at;
-} smart_home_lvgl_miloco_card_t;
+#ifdef CONFIG_SMART_HOME_REMINDERS
+    lv_obj_t *reminder_popup;
+    lv_obj_t *reminder_status;
+    lv_obj_t *reminder_button;
+    lv_timer_t *reminder_timer;
+    int reminder_id;
+    int reminder_ack_pending;
+    uint32_t reminder_ack_tick;
 #endif
-
-#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
-typedef struct {
-    char id[CAGENT_ADDONS_NODE_ID_SIZE + 1];
-    lv_obj_t *card;
-    lv_obj_t *name;
-    lv_obj_t *commands;
-} smart_home_lvgl_node_card_t;
-#endif
-
-typedef struct {
     /* Screens */
     lv_obj_t *screen_screensaver;
     lv_obj_t *screen_home;
-    lv_obj_t *screen_panel;    /* Devices page, legacy member name */
-    lv_obj_t *screen_security;
-    lv_obj_t *screen_more;
-    lv_obj_t *screen_network;
     lv_obj_t *screen_chat;
-    lv_obj_t *screen_settings;
     lv_obj_t *screen_settings_v9;
-
-#ifdef CONFIG_SMART_HOME_CAMERA_PREVIEW
-    /* Security-camera preview. The RGB565 image memory belongs to the UI;
-     * camera_service copies into it, never hands LVGL a DMA buffer. */
-    lv_obj_t *security_camera_preview;
-    lv_obj_t *security_camera_status;
-    lv_obj_t *security_camera_metrics;
-    lv_obj_t *security_camera_switch;
-    lv_timer_t *security_camera_timer;
-    uint8_t *security_camera_buffer;
-    lv_image_dsc_t security_camera_image;
-    uint32_t security_camera_sequence;
-#endif
-
-    /* Shared five-item nav bar (recreated per product screen). */
-    int      active_tab;
-
-    /* Panel: device cards */
-    lv_obj_t *panel_grid;
-    lv_obj_t *panel_source_dd;
-    lv_obj_t *panel_room_dd;    /* room filter dropdown */
-    lv_obj_t *panel_filter_row;
-    lv_obj_t *panel_sensor_bar;
-    lv_obj_t *panel_title;
-    lv_obj_t *panel_feedback_label;
-    lv_obj_t *panel_add_btn;
-    lv_timer_t *remote_node_timer;
-    uint32_t remote_node_revision;
-#ifdef CONFIG_SMART_HOME_NODE_GATEWAY
-    smart_home_lvgl_node_card_t node_cards[CAGENT_ADDONS_MAX_NODES];
-#endif
-
-    /* Panel: card widgets (indexed by device slot) */
-    lv_obj_t *device_cards[SMART_HOME_MAX_DEVICES];
-    lv_obj_t *env_temp_label;
-    lv_obj_t *env_hum_label;
-    lv_obj_t *env_light_label;
-    lv_obj_t *env_ac_label;
-
-    /* Home summary cards.  Values are updated in place from device state. */
-    lv_obj_t *home_env_label;
-    lv_obj_t *home_ac_label;
-    lv_obj_t *home_status_label;
-    lv_obj_t *scene_popup;      /* home-screen mode picker overlay */
-
-    /* Device control popup (overlay on panel) */
-    lv_obj_t *ctrl_popup;
-    lv_obj_t *ctrl_slider;
-    lv_obj_t *ctrl_switch;
-    lv_obj_t *ctrl_mode_dd;
-    lv_obj_t *ctrl_fan_dd;
-    lv_obj_t *ctrl_room_dd;
-    lv_obj_t *ctrl_title;
-    lv_obj_t *ctrl_value_label;
-    int       ctrl_device_id;
-    int       ctrl_pending_on;
-    int       ctrl_pending_val;
-    int       ctrl_pending_mode;
-    int       ctrl_pending_fan_speed;
-    int       ctrl_pending_room_index;
-
-    /* Device add/edit popup */
-    lv_obj_t *device_popup;
-    lv_obj_t *device_popup_title;
-    lv_obj_t *device_name_input;
-    lv_obj_t *device_room_dd;
-    lv_obj_t *device_type_dd;
-    lv_obj_t *device_keyboard;
-    int       device_edit_id; /* 0 = add */
-
-    /* Room creator popup.  The preset picker adds a persistent room catalog
-     * entry; newly created rooms immediately appear in filters and editors. */
-    lv_obj_t *room_popup;
-    lv_obj_t *room_popup_title;
-    lv_obj_t *room_preset_dd;
-
-    /* Environment simulation popup (sensor values, UI/device owned) */
-    lv_obj_t *env_popup;
-    lv_obj_t *env_slider;
-    lv_obj_t *env_title;
-    lv_obj_t *env_value_label;
-    int       env_pending_type; /* 0=temp, 1=humidity, 2=ambient light */
-    int       env_pending_value;
+    int active_tab;
 
     /* Chat: message list + status hint */
     lv_obj_t *chat_list;
@@ -197,54 +95,6 @@ typedef struct {
     void     *asr_worker_stack;
 #endif
 
-    /* Settings screen widgets */
-    lv_obj_t *settings_page;
-    lv_obj_t *settings_keyboard;
-    lv_obj_t *settings_model_api_body;
-    lv_obj_t *settings_tool_directory_body;
-    lv_obj_t *settings_system_status_body;
-    lv_obj_t *settings_system_status_toggle;
-    /* 服务管理独立屏（更多页卡片入口）：模型服务/工具与权限/MCP/Node */
-    lv_obj_t *screen_model;
-    lv_obj_t *model_keyboard;
-    lv_obj_t *screen_tools;
-    lv_obj_t *screen_mcp;
-    lv_obj_t *screen_node;
-    lv_obj_t *settings_model_api_toggle;
-    lv_obj_t *settings_tool_directory_toggle;
-    lv_obj_t *settings_backend_dd;
-    lv_obj_t *settings_host_input;
-    lv_obj_t *settings_path_input;
-    lv_obj_t *settings_port_input;
-    lv_obj_t *settings_model_input;
-    lv_obj_t *settings_api_key_input;
-    lv_obj_t *settings_timeout_input;
-    lv_obj_t *settings_max_tokens_input;
-    lv_obj_t *settings_status_label;
-    lv_obj_t *settings_mcp_discover_btn;
-
-#if defined(CONFIG_SMART_HOME_VOICE_TTS) || defined(CONFIG_SMART_HOME_VOICE_ASR) || \
-    defined(CONFIG_SMART_HOME_KWS)
-    lv_obj_t *settings_voice_body;
-    lv_obj_t *settings_voice_toggle;
-#endif
-#ifdef CONFIG_SMART_HOME_VOICE_TTS
-    lv_obj_t *settings_voice_switch;
-    lv_obj_t *settings_voice_status_label;
-#endif
-#ifdef CONFIG_SMART_HOME_VOICE_ASR
-    lv_obj_t *settings_asr_switch;
-#endif
-#ifdef CONFIG_SMART_HOME_KWS
-    lv_obj_t *settings_kws_switch;
-#endif
-
-
-    /* More / network setup: credentials are kept out of settings.json. */
-    lv_obj_t *network_ssid_input;
-    lv_obj_t *network_password_input;
-    lv_obj_t *network_status_label;
-    lv_obj_t *network_keyboard;
     lv_obj_t *topbar_wifi_icons[16];
     /* 顶栏摄像头状态图标（安防页开关联动：off 显 camera-off，
      * 开启显 camera），与 wifi 图标同款跨屏刷新模式。 */
@@ -253,12 +103,9 @@ typedef struct {
     int topbar_clock_count;
     int topbar_camera_icon_count;
     int topbar_camera_on;
-    lv_timer_t *network_status_timer;
-    lv_obj_t *home_miloco_sub_label;
+    lv_obj_t *home_weather_badge;
     lv_obj_t *home_weather_temp_label;
     lv_obj_t *home_weather_condition_label;
-    lv_obj_t *home_weather_city_label;
-    lv_obj_t *home_weather_badge;
     lv_obj_t *home_date_label;
     lv_obj_t *home_time_label;
     lv_timer_t *home_time_timer;
@@ -266,39 +113,18 @@ typedef struct {
     lv_timer_t *v9_network_timer;
     lv_obj_t *screensaver_time_label;
     lv_obj_t *screensaver_date_label;
-    lv_obj_t *screensaver_weather_label;
     lv_obj_t *screensaver_temp_label;
     lv_obj_t *screensaver_condition_label;
 #ifdef CONFIG_SMART_HOME_MILOCO_BRIDGE
     lv_timer_t *miloco_timer;
-    uint32_t miloco_revision; /* Last snapshot rendered on the device page. */
     uint32_t miloco_polled_revision;
-    smart_home_lvgl_miloco_card_t miloco_cards[SMART_HOME_MILOCO_MAX_DEVICES];
-    lv_obj_t *miloco_placeholder;
-    void *miloco_sheet_context;
-    lv_obj_t *settings_weather_city_input;
-    lv_obj_t *miloco_sheet;
-    lv_obj_t *miloco_sheet_feedback;
-    char miloco_sheet_did[24];
     lv_obj_t *screen_miloco_bind;   /* 绑定弹窗的遮罩根对象，NULL = 未打开 */
     lv_obj_t *bind_status_label;
     lv_obj_t *bind_head_label;
     lv_obj_t *bind_head_dot;
     lv_obj_t *bind_check_button;
     lv_timer_t *bind_timer;
-    lv_obj_t *screen_miloco;
-    lv_obj_t *miloco_host_input;
-    lv_obj_t *miloco_port_input;
-    lv_obj_t *miloco_token_input;
-    lv_obj_t *miloco_status_label;
-    lv_obj_t *miloco_keyboard;
 #endif
-    pthread_t network_worker;
-    void *network_worker_stack_alloc;
-    void *network_worker_stack;
-    int network_worker_active;
-    int network_result_ready;
-    int network_result;
     int topbar_wifi_icon_count;
     /* Device state (shared, NOT owned) */
     smart_home_state_t *device_state;

@@ -1439,10 +1439,10 @@ int smart_home_mcp_bridge_reconfigure(
 {
     smart_home_mcp_settings_t settings;
     caddons_mcp_bridge_config_t bridge_config;
-    bool ok;
+    caddons_mcp_bridge_t *replacement;
 
     if (!bridge || !config || !bridge->bridge || !bridge->catalog ||
-        !bridge->state_mutex_ready) {
+        !bridge->state_mutex_ready || !bridge->agent_mutex) {
         return AGENT_ERROR_INVALID;
     }
     if (config->port == 0u || config->host[0] == '\0' ||
@@ -1454,27 +1454,30 @@ int smart_home_mcp_bridge_reconfigure(
         return AGENT_ERROR_INVALID;
     }
 
-    memset(&settings, 0, sizeof(settings));
-    copy_string(settings.host, sizeof(settings.host), config->host);
-    copy_string(settings.path, sizeof(settings.path), config->path);
-    copy_string(settings.server_id, sizeof(settings.server_id),
-                config->server_id);
-    copy_string(settings.authorization, sizeof(settings.authorization),
-                config->authorization);
-    settings.port = config->port;
-    settings.use_tls = config->use_tls;
-
+    pthread_mutex_lock(bridge->agent_mutex);
     pthread_mutex_lock(&bridge->state_mutex);
     if (bridge->stopping ||
         bridge->state == SMART_HOME_MCP_STATE_CONNECTING ||
         bridge->discover_requested) {
         pthread_mutex_unlock(&bridge->state_mutex);
-        secure_clear(&settings, sizeof(settings));
+        pthread_mutex_unlock(bridge->agent_mutex);
         return AGENT_ERROR_BUSY;
     }
-
-    caddons_mcp_bridge_destroy(bridge->bridge);
-    bridge->bridge = NULL;
+    settings = bridge->settings;
+    for (size_t i = 0; i < settings.policy_count; i++)
+        settings.policies[i].name = settings.policy_names[i];
+    if (copy_string(settings.host, sizeof(settings.host), config->host) != CADDONS_OK ||
+        copy_string(settings.path, sizeof(settings.path), config->path) != CADDONS_OK ||
+        copy_string(settings.server_id, sizeof(settings.server_id), config->server_id) != CADDONS_OK ||
+        (config->authorization[0] && copy_string(settings.authorization, sizeof(settings.authorization), config->authorization) != CADDONS_OK)) {
+        pthread_mutex_unlock(&bridge->state_mutex);
+        pthread_mutex_unlock(bridge->agent_mutex);
+        secure_clear(&settings, sizeof(settings));
+        return AGENT_ERROR_LIMIT;
+    }
+    if (!config->authorization[0]) settings.authorization[0] = '\0';
+    settings.port = config->port;
+    settings.use_tls = config->use_tls;
 
     memset(&bridge_config, 0, sizeof(bridge_config));
     bridge_config.host = settings.host;
@@ -1484,6 +1487,9 @@ int smart_home_mcp_bridge_reconfigure(
     bridge_config.server_id = settings.server_id;
     bridge_config.authorization = settings.authorization[0] ?
                                   settings.authorization : NULL;
+    bridge_config.extra_headers = settings.extra_headers[0] ? settings.extra_headers : NULL;
+    bridge_config.tool_policies = settings.policies;
+    bridge_config.tool_policy_count = settings.policy_count;
     bridge_config.catalog = bridge->catalog;
     bridge_config.http_request = mcp_http_request;
     bridge_config.http_context = bridge;
@@ -1491,18 +1497,36 @@ int smart_home_mcp_bridge_reconfigure(
     bridge_config.catalog_changed_user_data = bridge;
     bridge_config.request_timeout_ms =
         CONFIG_SMART_HOME_MCP_BRIDGE_REQUEST_TIMEOUT_MS;
-    bridge->bridge = caddons_mcp_bridge_create(&bridge_config);
-    ok = bridge->bridge != NULL;
-    if (ok) {
+    replacement = caddons_mcp_bridge_create(&bridge_config);
+    if (replacement) {
+        caddons_mcp_bridge_destroy(bridge->bridge);
+        bridge->bridge = replacement;
         bridge->settings = settings;
+        for (size_t i = 0; i < settings.policy_count; i++)
+            bridge->settings.policies[i].name = bridge->settings.policy_names[i];
         bridge->state = SMART_HOME_MCP_STATE_IDLE;
         bridge->discovery_error = 0;
-    } else {
-        bridge->state = SMART_HOME_MCP_STATE_FAILED;
     }
     pthread_mutex_unlock(&bridge->state_mutex);
+    pthread_mutex_unlock(bridge->agent_mutex);
     secure_clear(&settings, sizeof(settings));
-    return ok ? AGENT_OK : AGENT_ERROR_NOMEM;
+    return replacement ? AGENT_OK : AGENT_ERROR_NOMEM;
+}
+
+int smart_home_mcp_bridge_get_config(smart_home_mcp_bridge_t *bridge,
+                                      smart_home_mcp_runtime_config_t *config)
+{
+    if (!bridge || !config || !bridge->state_mutex_ready) return AGENT_ERROR_INVALID;
+    if (pthread_mutex_trylock(&bridge->state_mutex) != 0) return AGENT_ERROR_BUSY;
+    memset(config, 0, sizeof(*config));
+    snprintf(config->host, sizeof(config->host), "%s", bridge->settings.host);
+    snprintf(config->path, sizeof(config->path), "%s", bridge->settings.path);
+    snprintf(config->server_id, sizeof(config->server_id), "%s", bridge->settings.server_id);
+    snprintf(config->authorization, sizeof(config->authorization), "%s", bridge->settings.authorization);
+    config->port = bridge->settings.port;
+    config->use_tls = bridge->settings.use_tls;
+    pthread_mutex_unlock(&bridge->state_mutex);
+    return AGENT_OK;
 }
 
 int smart_home_mcp_bridge_request_discover(smart_home_mcp_bridge_t *bridge)

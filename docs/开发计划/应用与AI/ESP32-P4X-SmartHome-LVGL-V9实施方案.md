@@ -1,6 +1,11 @@
 # ESP32-P4X SmartHome LVGL V9 实施方案
 
-> 文档日期：2026-10-31。状态：实施设计，尚未实施或完成板端验收。
+> 文档日期：2026-10-31。状态：已实施。V9 界面在主线
+> `src/ui/lvgl/smart_home_lvgl_home_v9.c`、`smart_home_lvgl_settings_v9.c`、
+> `smart_home_v9_device_view.c`，`smart_home` 与 `smart_home_voice` 两个配置均为
+> 默认界面。三页视觉对齐用 LVGL Host RGB565 framebuffer 验收
+> （[审查记录](../../审查/2026-10-31-v9-aligned/README.md)）；板端的点击、
+> 流畅度与内存未做专项验收。
 > 目标：将已确认的 V9 设计稿与交互原型迁移到原生 LVGL，同时补齐必要的设备、房间、模型和服务接口。
 > 平台：ESP32-P4X Function EV Board、1024×600 横屏、GT911、OpenVela/NuttX、工程内 LVGL 9.1.0。
 > 动画路线：保留 Lottie 源稿，优先离线转换像素帧；板端直接播放 Lottie 作为后续有条件评估项。

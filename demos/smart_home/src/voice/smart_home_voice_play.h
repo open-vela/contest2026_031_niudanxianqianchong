@@ -45,8 +45,14 @@ void voice_play_deinit(void);
  * 复用。返回 0 表示已入队；-ENOMEM 内存不足；-EAGAIN 服务未初始化。 */
 int voice_play_text(const char *text);
 
-/* 立即停止当前播报并清空队列。可在任意线程调用。 */
+/* 停止当前语音播报并清空文本队列，保留提醒响铃。 */
 void voice_play_stop(void);
+
+/* Local alarm jobs share the PCM owner with speech. Alarm jobs have priority;
+ * a cloud request already in progress must return before the tone can start. */
+int voice_play_alarm(int id);
+void voice_play_alarm_stop(int id);
+int voice_play_alarm_error(int id);
 
 /* 当前状态。 */
 voice_play_state_t voice_play_state(void);

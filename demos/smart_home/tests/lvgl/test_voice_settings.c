@@ -32,7 +32,7 @@ static int fast_create(pthread_t *thread, const pthread_attr_t *attr,
     return 0;
 }
 #define pthread_create fast_create
-#define main legacy_settings_main
+#define main settings_fixture_main
 #define SMART_HOME_TEST_HAS_MILOCO_STUBS
 #define SMART_HOME_TEST_HAS_VOICE_SECRET_STUB
 #include "test_settings_v9.c"
@@ -42,6 +42,13 @@ static int fast_create(pthread_t *thread, const pthread_attr_t *attr,
 #include "../../src/voice/smart_home_voice_play.h"
 #include "../../src/voice/smart_home_voice_player.h"
 #include "smart_home_lvgl_voice_settings.c"
+#ifdef CONFIG_SMART_HOME_KWS
+#include "smart_home_lvgl_wake_settings.c"
+void smart_home_kws_config_load(smart_home_kws_config_t *config) { config->enabled = 0; }
+int smart_home_kws_config_save(const smart_home_kws_config_t *config) { (void)config; return AGENT_OK; }
+void kws_service_set_paused(int paused) { (void)paused; }
+int kws_service_running(void) { return 1; }
+#endif
 #undef pthread_create
 
 /* Services outside the voice/model panels are not exercised here. */
@@ -82,6 +89,8 @@ int smart_home_secrets_api_key_status(smart_home_secret_service_t s, const char 
 { (void)s; (void)b; return 0; }
 int smart_home_secrets_set_api_key(smart_home_secret_service_t s,const char *b,const char *key)
 { assert(b); saved_service=s; snprintf(saved_key,sizeof(saved_key),"%s",key); key_calls++; return 0; }
+static int voice_stop_calls;
+void voice_play_stop(void) { voice_stop_calls++; }
 voice_play_state_t voice_play_state(void) { return VOICE_PLAY_IDLE; }
 int voice_capture_record(int seconds,const volatile int *abort,uint8_t **pcm,size_t *bytes)
 { (void)seconds; (void)abort; *pcm=malloc(3200); *bytes=3200; return 0; }
@@ -155,6 +164,19 @@ int main(void)
             if (lv_obj_check_type(child, &lv_button_class) &&
                 !strcmp(lv_label_get_text(lv_obj_get_child(child, 0)), "连接设置")) connection_button = child;
         }
+#ifdef CONFIG_SMART_HOME_VOICE_TTS
+        if (i == 1) {
+            lv_obj_t *stop = NULL;
+            for (uint32_t j = 0; j < lv_obj_get_child_count(v->basic); j++) {
+                lv_obj_t *child = lv_obj_get_child(v->basic, j);
+                if (lv_obj_check_type(child, &lv_button_class) &&
+                    !strcmp(lv_label_get_text(lv_obj_get_child(child, 0)), "停止播报")) stop = child;
+            }
+            assert(stop);
+            lv_obj_send_event(stop, LV_EVENT_CLICKED, NULL);
+            assert(voice_stop_calls == 1);
+        }
+#endif
         assert(connection_button);
         lv_obj_send_event(connection_button, LV_EVENT_CLICKED, NULL);
         assert(lv_obj_has_flag(v->basic, LV_OBJ_FLAG_HIDDEN));
@@ -224,6 +246,11 @@ int main(void)
 
 #endif
 
+#ifdef CONFIG_SMART_HOME_KWS
+    lv_obj_send_event(g_voice_page.tabs[2], LV_EVENT_CLICKED, NULL);
+    lv_obj_update_layout(ui->screen_settings_v9);
+    assert(g_voice_page.selected == 2 && lv_obj_is_visible(g_wake.toggle));
+#endif
     lv_textarea_set_text(g_settings.model_key,"host-test-llm-key");
     lv_obj_t *button=lv_button_create(g_settings.screen);
     lv_obj_add_event_cb(button,model_save_key_cb,LV_EVENT_CLICKED,ui);

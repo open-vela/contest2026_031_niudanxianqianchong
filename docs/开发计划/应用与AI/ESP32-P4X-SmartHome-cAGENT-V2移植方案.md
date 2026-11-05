@@ -1,7 +1,10 @@
 # SmartHome cAGENT V2 移植方案
 
-状态：P4 标准应用已通过 Host/ASan/UBSan、五项业务回归及 Make 完整固件构建；真机、语音与可选扩展仍待后续验收。
-分支：`feat/cagent-v2-migration`。移植起点：`8d344ee`。
+状态：已实施。V2 API 在 `packages/cAGENT/` 中，`demos/smart_home` 直接使用，
+无 V1 兼容层。Host/ASan/UBSan 与五项业务回归通过，完整固件构建通过；
+真机、语音与可选扩展的验收见
+[语音与能力合入实施计划](ESP32-P4X-SmartHome语音与能力合入实施计划.md)。
+移植起点：`8d344ee`。
 
 ## 范围
 

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Reuse the panel harness services while exercising the camera-enabled home. */
-#define main panel_harness_main
-#include "test_panel.c"
+#define main v9_harness_main
+#include "test_home_v9.c"
 #undef main
 #include "smart_home_lvgl_camera_dialog.h"
 #include "../../src/camera/smart_home_camera_control.h"

@@ -1,8 +1,10 @@
 # ESP32-P4X SmartHome 语音播报（TTS）接入方案
 
-> 状态：代码已在 `feat/p4x-smarthome-tts` 分支完成实现，**尚未构建和真机验证**
-> （验证由用户执行，见第 6 节）。本文记录四层架构、配置约定、各后端 API
-> 形态差异（含 MiMo 可行性结论）与验收清单。
+> 状态：代码已在主线，`smart_home_voice` 配置开启 `CONFIG_SMART_HOME_VOICE_TTS=y`。
+> 短句（"你好"）已通过板端听感验收；约 11 个字符的长句两次请求收到 HTTP 200
+> 后正文接收不完整，返回 `AGENT_ERROR_TIMEOUT`，根因未定位。24 kHz → 16 kHz
+> 重采样只有宿主测试，无板端音质与耗时数据。本文记录四层架构、配置约定、
+> 各后端 API 形态差异与验收清单。
 >
 > 适用目标：ESP32-P4 Function EV Board、OpenVela/NuttX、ES8311 扬声器、
 > smart_home LVGL 聊天页。

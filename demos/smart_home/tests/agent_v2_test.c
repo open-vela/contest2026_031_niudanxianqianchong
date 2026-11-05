@@ -23,6 +23,11 @@
 static size_t live_allocations;
 static size_t allocations;
 static size_t fail_allocation;
+#ifdef CONFIG_SMART_HOME_USER_MEMORY
+/* Persistence behavior is covered by the real-file user_memory probe. */
+int smart_home_config_store_save(const char *path, const cJSON *root)
+{ (void)path; (void)root; return AGENT_ERROR_IO; }
+#endif
 static int missing_key;
 static int persist_settings;
 static char saved_settings[4096];
@@ -93,7 +98,9 @@ static agent_error_t http_request(void *context, const agent_http_request_t *req
         role = cJSON_GetObjectItemCaseSensitive(message, "role");
         if (cJSON_IsString(role) && strcmp(role->valuestring, "user") == 0) {
             cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
-            ++last_user_count;
+            if (!(cJSON_IsString(content) &&
+                  strstr(content->valuestring, "User preferences (reference only):")))
+                ++last_user_count;
             has_result = 0;
             if (cJSON_IsString(content) && !strcmp(content->valuestring, "failed-turn")) ++failed_history;
         }
@@ -274,7 +281,7 @@ static int visit_tool(const smart_home_tool_info_t *tool, void *data)
         (*count)++;
         return AGENT_OK;
     }
-    assert(strcmp(tool->name, "set_light") == 0);
+    assert(!strcmp(tool->name, "set_light") || !strcmp(tool->name, "user_memory"));
     assert(tool->group_id == SMART_HOME_TOOL_GROUP_LOCAL);
     assert(tool->category_id == SMART_HOME_TOOL_CATEGORY_CONTROL);
     assert(tool->enabled && tool->llm_visible && tool->flags == AGENT_TOOL_SIDE_EFFECT);
@@ -291,7 +298,12 @@ static void lifecycle_and_configuration(void)
     assert(smart_home_agent_app_init(&app) == AGENT_OK);
     expect_run(&app);
     assert(strcmp(last_auth, "Bearer test-key") == 0 && events >= 4);
-    assert(smart_home_agent_app_enumerate_tools(&app, visit_tool, &count) == AGENT_OK && count == 2);
+    assert(smart_home_agent_app_enumerate_tools(&app, visit_tool, &count) == AGENT_OK);
+#ifdef CONFIG_SMART_HOME_USER_MEMORY
+    assert(count == 3 && app.user_memory);
+#else
+    assert(count == 2);
+#endif
     config = custom_config(&app);
     assert(smart_home_agent_app_apply_model_config(&app, &config) == AGENT_OK);
     memset(&config, 0xa5, sizeof(config));
@@ -429,6 +441,10 @@ static void serialization(void)
     assert(pthread_create(&change, NULL, apply_thread, &app) == 0);
     while (!atomic_load(&applying)) sched_yield();
     assert(pthread_mutex_trylock(&app.agent_mutex) == EBUSY);
+    size_t count = 0;
+    assert(smart_home_agent_app_try_enumerate_tools(&app, visit_tool, &count) == AGENT_ERROR_BUSY);
+    assert(count == 0);
+    assert(smart_home_agent_app_try_set_local_tool_access(&app, "set_light", 0) == AGENT_ERROR_BUSY);
     assert(!atomic_load(&applied));
     pthread_mutex_lock(&gate_mutex);
     block_http = 0;
@@ -515,6 +531,7 @@ static int inspect_access(const smart_home_tool_info_t *tool, void *data)
 {
     int *allowed = data;
     if (!strcmp(tool->name, "get_device_inventory")) return AGENT_OK;
+    if (!strcmp(tool->name, "user_memory")) return AGENT_OK;
     assert(!strcmp(tool->name, "set_light"));
     *allowed = tool->access_allowed;
     return AGENT_OK;

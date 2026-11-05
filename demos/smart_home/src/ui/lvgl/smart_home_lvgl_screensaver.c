@@ -54,11 +54,6 @@ void smart_home_lvgl_build_screensaver_screen(smart_home_lvgl_t *ui)
     ui->screensaver_condition_label = smart_home_lvgl_label_create(screen,
         SMART_HOME_UI_DEFAULT_WEATHER, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 18);
     lv_obj_align(ui->screensaver_condition_label, LV_ALIGN_CENTER, 0, 130);
-    /* Legacy combined label stays for compatibility but is not rendered. */
-    ui->screensaver_weather_label = smart_home_lvgl_label_create(screen,
-        SMART_HOME_UI_DEFAULT_WEATHER, SMART_HOME_UI_COLOR_TEXT_SECONDARY, 14);
-    lv_obj_add_flag(ui->screensaver_weather_label, LV_OBJ_FLAG_HIDDEN);
-
     label = smart_home_lvgl_label_create(screen, "轻触进入首页",
                                          SMART_HOME_UI_COLOR_PRIMARY_DARK, 14);
     lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -38);
